@@ -1,5 +1,6 @@
 import { setIcon } from "obsidian";
 
+import { t } from "../i18n.ts";
 import type { LayoutNode } from "../layout/tidyTree.ts";
 import { nextInlineToken } from "../model/inlineText.ts";
 import type { InlineKind } from "../model/inlineText.ts";
@@ -236,7 +237,7 @@ export function buildNodeElement(
 	if (opts.expandable) {
 		expand = card.createDiv({ cls: "mm-expand" });
 		expand.setAttribute("role", "button");
-		expand.setAttribute("aria-label", "Show the whole block");
+		expand.setAttribute("aria-label", t("view.menu.showBlock"));
 		setIcon(expand, "maximize-2");
 		// `setIcon` is silent when the id is not in the bundled set, which would
 		// leave an invisible but clickable box in the corner of every card.
@@ -257,17 +258,17 @@ export function buildNodeElement(
 			toggle.setAttribute("role", "button");
 			if (opts.collapsed) {
 				toggle.setText(String(opts.hiddenCount));
-				toggle.setAttribute("aria-label", "Expand");
+				toggle.setAttribute("aria-label", t("view.node.expand"));
 			} else {
 				toggle.addClass("is-open");
-				toggle.setAttribute("aria-label", "Collapse");
+				toggle.setAttribute("aria-label", t("view.node.collapse"));
 			}
 		}
 
 		if (opts.addable) {
 			add = tools.createDiv({ cls: "mm-add" });
 			add.setAttribute("role", "button");
-			add.setAttribute("aria-label", "Add child");
+			add.setAttribute("aria-label", t("view.menu.addChild"));
 			setIcon(add, "plus");
 			if (!add.firstElementChild) add.setText("+");
 		}
@@ -280,7 +281,7 @@ export function buildNodeElement(
 	if (opts.annotation !== null) {
 		el.addClass("has-annotation");
 		const annotation = el.createDiv({ cls: "mm-text mm-annotation" });
-		annotation.setAttribute("aria-label", "Annotation (double-click to edit)");
+		annotation.setAttribute("aria-label", t("view.node.annotationAria"));
 		if (opts.annotation.trim() !== "") {
 			hasMath = renderInline(annotation, opts.annotation) || hasMath;
 		} else {

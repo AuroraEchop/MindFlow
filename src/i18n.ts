@@ -175,6 +175,118 @@ const EN = {
 	"settings.restoreAll.name": "Restore all defaults",
 	"settings.restoreAll.desc": "Put every shortcut back to the key the map shipped with.",
 	"settings.restoreAll.button": "Restore",
+
+	// --- the actions that reach the map -------------------------------------
+	"view.action.toggleView": "Toggle mind map view",
+	"view.action.openMap": "Open as mind map",
+	"view.action.editMarkdown": "Edit as markdown",
+	"view.action.fitWindow": "Fit map to window",
+
+	// --- the corner toolbar -------------------------------------------------
+	"view.tool.expandAll": "Expand all",
+	"view.tool.collapseAll": "Collapse all",
+	"view.tool.shortcuts": "Keyboard shortcuts",
+
+	// --- the furniture on a card, read out by a screen reader ---------------
+	"view.node.expand": "Expand",
+	"view.node.collapse": "Collapse",
+	"view.node.annotationAria": "Annotation (double-click to edit)",
+
+	// --- the shortcut panel -------------------------------------------------
+	"view.shortcuts.title": "Mind map shortcuts",
+	"view.shortcuts.footer": "Every key above can be changed in the plugin's settings.",
+	"view.shortcuts.mouse.edit.keys": "Double-click a card",
+	"view.shortcuts.mouse.edit.what": "Edit the node",
+	"view.shortcuts.mouse.expand.keys": "⤢ on a content card",
+	"view.shortcuts.mouse.expand.what": "Show the whole block, rendered",
+	"view.shortcuts.mouse.link.keys": "Click a link in a content card",
+	"view.shortcuts.mouse.link.what": "Open it",
+	"view.shortcuts.mouse.add.keys": "+ beside a card",
+	"view.shortcuts.mouse.add.what": "New child",
+	"view.shortcuts.mouse.menu.keys": "Right-click a card",
+	"view.shortcuts.mouse.menu.what": "The node's menu",
+	"view.shortcuts.mouse.reparent.keys": "Drag onto a card",
+	"view.shortcuts.mouse.reparent.what": "Reparent it",
+	"view.shortcuts.mouse.reorder.keys": "Drag onto a card's top / bottom edge",
+	"view.shortcuts.mouse.reorder.what": "Reorder it beside that card",
+	"view.shortcuts.mouse.zoom.keys": "Wheel / pinch",
+	"view.shortcuts.mouse.zoom.what": "Zoom; drag blank space to pan",
+
+	// --- a node's context menu ----------------------------------------------
+	"view.menu.showBlock": "Show the whole block",
+	"view.menu.editBlock": "Edit the block source",
+	"view.menu.addChild": "Add child",
+	"view.menu.editAnnotation": "Edit annotation",
+	"view.menu.addAnnotation": "Add annotation",
+	"view.menu.addCheckbox": "Add checkbox",
+	"view.menu.removeCheckbox": "Remove checkbox",
+	"view.menu.addSiblingBelow": "Add sibling below",
+	"view.menu.addSiblingAbove": "Add sibling above",
+	"view.menu.fold": "Fold",
+	"view.menu.unfold": "Unfold",
+	"view.menu.rename": "Rename",
+	"view.menu.delete": "Delete",
+
+	// --- what the map says when it will not do something --------------------
+	"view.notice.rootRename": "This node is the file name. Rename the note to change it.",
+	"view.notice.rootDelete": "The root node cannot be deleted from the map.",
+	"view.notice.nothingToUndo": "Nothing to undo on the map.",
+	"view.notice.annotationChanged":
+		"This annotation changed while the editor was open. Copy your draft and reopen it before saving.",
+
+	// --- the dialogs --------------------------------------------------------
+	"dialog.cancel": "Cancel",
+	"dialog.save": "Save",
+	"dialog.close": "Close",
+	"dialog.annotation.title": "Annotation — {title}",
+	"dialog.annotation.aria": "Annotation",
+	"dialog.annotation.intro":
+		"Enter inserts a line break. Blank lines are preserved. No colon prefixes needed. Clear the text and save to remove the annotation.",
+	"dialog.annotation.hint.1": "Saved into the note as ",
+	"dialog.annotation.hint.2": " lines beneath the node. Ctrl/Cmd+Enter saves.",
+	"dialog.block.intro":
+		"This content stays in the note exactly where it is. Editing here rewrites only these lines.",
+	"dialog.block.title": "Note content",
+	"dialog.block.preview": "Preview",
+	"dialog.block.source": "Source",
+	"dialog.block.lines": "Lines {from}–{to}",
+
+	// --- the find bar -------------------------------------------------------
+	"search.regex": "Regular expression",
+	"search.previous": "Previous match",
+	"search.next": "Next match",
+	"search.close": "Close search",
+
+	// --- the commands the plugin registers ----------------------------------
+	"command.forgetFold": "Forget the saved fold state for this note",
+	"command.search": "Find in the mind map",
+	"command.moveUp": "Move the selected node up among its siblings",
+	"command.moveDown": "Move the selected node down among its siblings",
+	"command.openAsMindmap": "Open current note as a mind map",
+
+	// --- what the plugin says at load ---------------------------------------
+	"main.notice.onlyMarkdown": "Only markdown notes can be shown as a mind map.",
+	"main.notice.update":
+		"Mindmap Mode was updated. A line written as \": text\" under a heading or list item now hangs under that node's card as an annotation instead of becoming a card of its own. Settings → Mindmap Mode → Appearance → Inline annotations turns it off.",
+
+	// --- the export, one pair of keys per format ----------------------------
+	"export.canvas.name": "Export mind map as Canvas",
+	"export.canvas.menu": "Export as Canvas",
+	"export.svg.name": "Export mind map as SVG",
+	"export.svg.menu": "Export as SVG",
+	"export.png.name": "Export mind map as PNG",
+	"export.png.menu": "Export as PNG",
+	"export.html.name": "Export mind map as HTML",
+	"export.html.menu": "Export as HTML",
+	"export.notice.nothing": "Nothing to export",
+	"export.notice.done": "Mind map exported to {path}",
+	"export.notice.doneScaled":
+		"Mind map exported to {path}, scaled down to stay within 16384 px",
+	"export.notice.failed": "Mind map export failed: {reason}",
+	"export.untitled": "Untitled",
+	"export.error.rasterize": "The map could not be rendered as an image.",
+	"export.error.noCanvas": "This platform has no 2D canvas to draw on.",
+	"export.error.encode": "The image could not be encoded as a PNG.",
 } as const;
 
 /** Every key the plugin knows. Derived from the English table, so it cannot drift. */
@@ -321,6 +433,116 @@ const ZH: Record<I18nKey, string> = {
 	"settings.restoreAll.name": "全部恢复默认",
 	"settings.restoreAll.desc": "把所有快捷键恢复到导图出厂时的按键。",
 	"settings.restoreAll.button": "恢复",
+
+	// --- 作用到导图上的动作 ---------------------------------------------------
+	"view.action.toggleView": "切换思维导图视图",
+	"view.action.openMap": "以思维导图打开",
+	"view.action.editMarkdown": "以 Markdown 编辑",
+	"view.action.fitWindow": "适应窗口",
+
+	// --- 右下角工具栏 --------------------------------------------------------
+	"view.tool.expandAll": "全部展开",
+	"view.tool.collapseAll": "全部折叠",
+	"view.tool.shortcuts": "快捷键",
+
+	// --- 卡片上的部件，供读屏软件朗读 -----------------------------------------
+	"view.node.expand": "展开",
+	"view.node.collapse": "折叠",
+	"view.node.annotationAria": "注解（双击编辑）",
+
+	// --- 快捷键面板 ----------------------------------------------------------
+	"view.shortcuts.title": "导图快捷键",
+	"view.shortcuts.footer": "以上所有按键都可以在插件设置中修改。",
+	"view.shortcuts.mouse.edit.keys": "双击卡片",
+	"view.shortcuts.mouse.edit.what": "编辑该节点",
+	"view.shortcuts.mouse.expand.keys": "正文卡片上的 ⤢",
+	"view.shortcuts.mouse.expand.what": "完整渲染该块内容",
+	"view.shortcuts.mouse.link.keys": "点击正文卡片中的链接",
+	"view.shortcuts.mouse.link.what": "打开它",
+	"view.shortcuts.mouse.add.keys": "卡片旁的 +",
+	"view.shortcuts.mouse.add.what": "新建子节点",
+	"view.shortcuts.mouse.menu.keys": "右键点击卡片",
+	"view.shortcuts.mouse.menu.what": "打开节点菜单",
+	"view.shortcuts.mouse.reparent.keys": "拖拽到某张卡片上",
+	"view.shortcuts.mouse.reparent.what": "改变它的父节点",
+	"view.shortcuts.mouse.reorder.keys": "拖拽到卡片的上下边缘",
+	"view.shortcuts.mouse.reorder.what": "在该卡片旁重新排序",
+	"view.shortcuts.mouse.zoom.keys": "滚轮 / 双指捏合",
+	"view.shortcuts.mouse.zoom.what": "缩放；拖拽空白处平移",
+
+	// --- 节点右键菜单 --------------------------------------------------------
+	"view.menu.showBlock": "查看整块内容",
+	"view.menu.editBlock": "编辑块源码",
+	"view.menu.addChild": "添加子节点",
+	"view.menu.editAnnotation": "编辑注解",
+	"view.menu.addAnnotation": "添加注解",
+	"view.menu.addCheckbox": "添加复选框",
+	"view.menu.removeCheckbox": "移除复选框",
+	"view.menu.addSiblingBelow": "在下方添加同级节点",
+	"view.menu.addSiblingAbove": "在上方添加同级节点",
+	"view.menu.fold": "折叠",
+	"view.menu.unfold": "展开",
+	"view.menu.rename": "重命名",
+	"view.menu.delete": "删除",
+
+	// --- 导图拒绝执行某件事时的提示 ------------------------------------------
+	"view.notice.rootRename": "该节点就是文件名。要改名请重命名这篇笔记。",
+	"view.notice.rootDelete": "根节点无法从导图中删除。",
+	"view.notice.nothingToUndo": "导图上没有可撤销的操作。",
+	"view.notice.annotationChanged":
+		"编辑器打开期间该注解已被修改。请先复制你的草稿，重新打开后再保存。",
+
+	// --- 对话框 --------------------------------------------------------------
+	"dialog.cancel": "取消",
+	"dialog.save": "保存",
+	"dialog.close": "关闭",
+	"dialog.annotation.title": "注解 —— {title}",
+	"dialog.annotation.aria": "注解",
+	"dialog.annotation.intro":
+		"Enter 插入换行。空行会被保留。无需手动输入冒号前缀。清空文本并保存即可删除该注解。",
+	"dialog.annotation.hint.1": "会以 ",
+	"dialog.annotation.hint.2": " 行的形式保存到节点下方。Ctrl/Cmd+Enter 保存。",
+	"dialog.block.intro": "这些内容会原样留在笔记中。在这里编辑只会改写这几行。",
+	"dialog.block.title": "笔记正文",
+	"dialog.block.preview": "预览",
+	"dialog.block.source": "源码",
+	"dialog.block.lines": "第 {from}–{to} 行",
+
+	// --- 查找栏 --------------------------------------------------------------
+	"search.regex": "正则表达式",
+	"search.previous": "上一个匹配",
+	"search.next": "下一个匹配",
+	"search.close": "关闭查找",
+
+	// --- 插件注册的命令 ------------------------------------------------------
+	"command.forgetFold": "清除该笔记已保存的折叠状态",
+	"command.search": "在思维导图中查找",
+	"command.moveUp": "把选中节点在同级中上移",
+	"command.moveDown": "把选中节点在同级中下移",
+	"command.openAsMindmap": "以思维导图打开当前笔记",
+
+	// --- 加载时的提示 --------------------------------------------------------
+	"main.notice.onlyMarkdown": "只有 Markdown 笔记可以显示为思维导图。",
+	"main.notice.update":
+		"Mindmap Mode 已更新。在标题或列表项下写成 “: text” 的行，现在会作为注解挂在那个节点的卡片下方，而不是成为独立卡片。可在「设置 → Mindmap Mode → 外观 → 行内注解」中关闭。",
+
+	// --- 导出，每种格式一对键 ------------------------------------------------
+	"export.canvas.name": "导出思维导图为 Canvas",
+	"export.canvas.menu": "导出为 Canvas",
+	"export.svg.name": "导出思维导图为 SVG",
+	"export.svg.menu": "导出为 SVG",
+	"export.png.name": "导出思维导图为 PNG",
+	"export.png.menu": "导出为 PNG",
+	"export.html.name": "导出思维导图为 HTML",
+	"export.html.menu": "导出为 HTML",
+	"export.notice.nothing": "没有可导出的内容",
+	"export.notice.done": "思维导图已导出到 {path}",
+	"export.notice.doneScaled": "思维导图已导出到 {path}，为保持在 16384 像素以内已缩放",
+	"export.notice.failed": "思维导图导出失败：{reason}",
+	"export.untitled": "未命名",
+	"export.error.rasterize": "无法把导图渲染成图片。",
+	"export.error.noCanvas": "当前平台没有可用的 2D 画布。",
+	"export.error.encode": "无法把图片编码为 PNG。",
 };
 
 /** Both tables, keyed by language. Exported so a test can walk them. */

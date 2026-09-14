@@ -12,6 +12,8 @@
  * system already has. Everything else is inline and comes through as drawn.
  */
 
+import { t } from "../i18n.ts";
+
 /** Rendered at twice the layout size, so the text survives being zoomed into. */
 export const PNG_SCALE = 2;
 
@@ -28,7 +30,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 	return new Promise((resolve, reject) => {
 		const image = new Image();
 		image.onload = () => resolve(image);
-		image.onerror = () => reject(new Error("The map could not be rendered as an image."));
+		image.onerror = () => reject(new Error(t("export.error.rasterize")));
 		image.src = src;
 	});
 }
@@ -44,7 +46,7 @@ export async function rasterize(
 	canvas.height = Math.max(1, Math.floor(height * scale));
 
 	const ctx = canvas.getContext("2d");
-	if (!ctx) throw new Error("This platform has no 2D canvas to draw on.");
+	if (!ctx) throw new Error(t("export.error.noCanvas"));
 
 	// The fragment names the fonts it was drawn with; the ones that are actually
 	// available have to be ready before anything is measured against them.
@@ -58,7 +60,7 @@ export async function rasterize(
 	const blob = await new Promise<Blob | null>((resolve) =>
 		canvas.toBlob(resolve, "image/png"),
 	);
-	if (!blob) throw new Error("The image could not be encoded as a PNG.");
+	if (!blob) throw new Error(t("export.error.encode"));
 
 	return { data: await blob.arrayBuffer(), clamped: scale < PNG_SCALE };
 }

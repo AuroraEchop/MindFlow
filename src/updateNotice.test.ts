@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { UPDATE_NOTICE, shouldAnnounce, versionToRecord } from "./updateNotice.ts";
+import { updateNotice, shouldAnnounce, versionToRecord } from "./updateNotice.ts";
+import { getLanguage, setLanguage } from "./i18n.ts";
 
 test("a first install is told nothing", () => {
 	assert.equal(shouldAnnounce(undefined, "1.1.1", true), false);
@@ -33,6 +34,18 @@ test("the record is only rewritten when it would change", () => {
 });
 
 test("the notice names the syntax and where to turn it off", () => {
-	assert.ok(UPDATE_NOTICE.includes(": text"));
-	assert.ok(UPDATE_NOTICE.includes("Inline annotations"));
+	const before = getLanguage();
+	try {
+		setLanguage("en");
+		assert.ok(updateNotice().includes(": text"));
+		assert.ok(updateNotice().includes("Inline annotations"));
+
+		// The Chinese wording names the setting in Chinese, so the thing that
+		// has to hold in both is the syntax and the pointer to a setting.
+		setLanguage("zh");
+		assert.ok(updateNotice().includes(": text"));
+		assert.ok(updateNotice().includes("行内注解"));
+	} finally {
+		setLanguage(before);
+	}
 });

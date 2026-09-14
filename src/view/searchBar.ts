@@ -1,6 +1,7 @@
 import { debounce, setIcon } from "obsidian";
 import type { Debouncer } from "obsidian";
 
+import { t } from "../i18n.ts";
 import type { SearchQuery } from "../model/search.ts";
 
 /**
@@ -43,27 +44,30 @@ export class SearchBar {
 		this.regex = opts.query.regex;
 
 		this.el = parent.createDiv({ cls: "mm-search" });
+		// The bar's own name, borrowed from the action that opens it, so the
+		// tooltip on the camera button and this placeholder agree.
+		const findLabel = t("shortcut.search.name");
 		this.input = this.el.createEl("input", {
 			cls: "mm-search-input",
 			type: "text",
 			value: opts.query.text,
 			attr: {
-				placeholder: "Find in the map",
-				"aria-label": "Find in the map",
+				placeholder: findLabel,
+				"aria-label": findLabel,
 				spellcheck: "false",
 			},
 		});
 
-		this.regexToggle = this.button(null, ".*", "Regular expression", () =>
+		this.regexToggle = this.button(null, ".*", t("search.regex"), () =>
 			this.toggleRegex(),
 		);
 		this.regexToggle.toggleClass("is-active", this.regex);
 		this.regexToggle.setAttribute("aria-pressed", String(this.regex));
 
 		this.count = this.el.createDiv({ cls: "mm-search-count", text: "0/0" });
-		this.button("chevron-up", "↑", "Previous match", () => opts.onStep(-1));
-		this.button("chevron-down", "↓", "Next match", () => opts.onStep(1));
-		this.button("x", "✕", "Close search", () => opts.onClose());
+		this.button("chevron-up", "↑", t("search.previous"), () => opts.onStep(-1));
+		this.button("chevron-down", "↓", t("search.next"), () => opts.onStep(1));
+		this.button("x", "✕", t("search.close"), () => opts.onClose());
 
 		this.submit = debounce(() => this.emit(), TYPE_DELAY, true);
 

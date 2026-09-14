@@ -1,6 +1,8 @@
 import { Notice } from "obsidian";
 import type { App, TFile } from "obsidian";
 
+import { t } from "../i18n.ts";
+import type { I18nKey } from "../i18n.ts";
 import { htmlDocument, svgDocument } from "./documents.ts";
 import { nextFreePath, takenBy } from "./paths.ts";
 import { rasterize } from "./raster.ts";
@@ -19,45 +21,45 @@ export type ExportFormat = "canvas" | "svg" | "png" | "html";
 export interface ExportCommand {
 	/** Command id, as registered. */
 	id: string;
-	/** Command name, as shown in the palette. */
-	name: string;
-	/** The same thing, said shorter, for the tab's menu. */
-	menu: string;
+	/** Where the command name, as shown in the palette, lives. */
+	nameKey: I18nKey;
+	/** Where the same thing, said shorter, for the tab's menu, lives. */
+	menuKey: I18nKey;
 	icon: string;
 	format: ExportFormat;
 }
 
+/**
+ * The dictionary key a format's palette name lives under.
+ *
+ * Derived from the format rather than written out, so a format added to the
+ * union without its two strings produces a key the English table does not
+ * hold -- and this stops compiling.
+ */
+export function exportNameKey(format: ExportFormat): I18nKey {
+	return `export.${format}.name`;
+}
+
+/** The dictionary key a format's shorter menu label lives under. */
+export function exportMenuKey(format: ExportFormat): I18nKey {
+	return `export.${format}.menu`;
+}
+
 /** Declared once: the palette reads it, and so does the pane menu. */
-export const EXPORT_COMMANDS: readonly ExportCommand[] = [
-	{
-		id: "export-canvas",
-		name: "Export mind map as Canvas",
-		menu: "Export as Canvas",
-		icon: "layout-dashboard",
-		format: "canvas",
-	},
-	{
-		id: "export-svg",
-		name: "Export mind map as SVG",
-		menu: "Export as SVG",
-		icon: "file-code",
-		format: "svg",
-	},
-	{
-		id: "export-png",
-		name: "Export mind map as PNG",
-		menu: "Export as PNG",
-		icon: "image",
-		format: "png",
-	},
-	{
-		id: "export-html",
-		name: "Export mind map as HTML",
-		menu: "Export as HTML",
-		icon: "code",
-		format: "html",
-	},
-];
+export const EXPORT_COMMANDS: readonly ExportCommand[] = (
+	[
+		{ id: "export-canvas", icon: "layout-dashboard", format: "canvas" },
+		{ id: "export-svg", icon: "file-code", format: "svg" },
+		{ id: "export-png", icon: "image", format: "png" },
+		{ id: "export-html", icon: "code", format: "html" },
+	] as const
+).map((entry) => ({
+	id: entry.id,
+	icon: entry.icon,
+	format: entry.format,
+	nameKey: exportNameKey(entry.format),
+	menuKey: exportMenuKey(entry.format),
+}));
 
 export interface ExportSource {
 	/** The `.canvas` file's text, or null when there is nothing on the map. */
@@ -87,7 +89,7 @@ export async function runExport(
 	source: ExportSource,
 ): Promise<void> {
 	if (!file) {
-		new Notice("Nothing to export");
+		new Notice(t("export.notice.nothing"));
 		return;
 	}
 
@@ -95,7 +97,7 @@ export async function runExport(
 		if (format === "canvas") {
 			const text = source.canvasFile();
 			if (text === null) {
-				new Notice("Nothing to export");
+				new Notice(t("export.notice.nothing"));
 				return;
 			}
 			const created = await app.vault.create(freePath(app, file, "canvas"), text);
@@ -107,7 +109,7 @@ export async function runExport(
 
 		const snapshot = source.snapshot();
 		if (snapshot === null) {
-			new Notice("Nothing to export");
+			new Notice(t("export.notice.nothing"));
 			return;
 		}
 		const title = file.basename;
@@ -121,7 +123,7 @@ export async function runExport(
 				freePath(app, file, "html"),
 				htmlDocument({ body: snapshot.html, width, height, background, title }),
 			);
-			new Notice(`Mind map exported to ${created.path}`);
+			new Notice(t("export.notice.done", { path: created.path }));
 			return;
 		}
 
@@ -129,7 +131,7 @@ export async function runExport(
 
 		if (format === "svg") {
 			const created = await app.vault.create(freePath(app, file, "svg"), svg);
-			new Notice(`Mind map exported to ${created.path}`);
+			new Notice(t("export.notice.done", { path: created.path }));
 			return;
 		}
 
@@ -137,12 +139,12 @@ export async function runExport(
 		const created = await app.vault.createBinary(freePath(app, file, "png"), raster.data);
 		new Notice(
 			raster.clamped
-				? `Mind map exported to ${created.path}, scaled down to stay within 16384 px`
-				: `Mind map exported to ${created.path}`,
+				? t("export.notice.doneScaled", { path: created.path })
+				: t("export.notice.done", { path: created.path }),
 		);
 	} catch (error) {
 		console.error("Mindmap Mode: the export failed.", error);
 		const reason = error instanceof Error ? error.message : String(error);
-		new Notice(`Mind map export failed: ${reason}`);
+		new Notice(t("export.notice.failed", { reason }));
 	}
 }

@@ -9,6 +9,7 @@ import type {
 } from "obsidian";
 
 import { t } from "../i18n.ts";
+import type { I18nKey } from "../i18n.ts";
 
 import { parseMarkdown } from "../model/parse.ts";
 import { annotationText, bodyCardCount } from "../model/annotations.ts";
@@ -550,7 +551,7 @@ export class MindmapView extends TextFileView implements MapController {
 		// should not pay for it at Obsidian startup.
 		void ensureMath();
 		this.detachInteractions = attachInteractions(this);
-		this.addAction("file-text", "Edit as markdown", () => {
+		this.addAction("file-text", t("view.action.editMarkdown"), () => {
 			void this.plugin.toggleLeaf(this.leaf);
 		});
 	}
@@ -619,13 +620,13 @@ export class MindmapView extends TextFileView implements MapController {
 		super.onPaneMenu(menu, source);
 		menu.addItem((item) =>
 			item
-				.setTitle("Edit as markdown")
+				.setTitle(t("view.action.editMarkdown"))
 				.setIcon("file-text")
 				.onClick(() => void this.plugin.toggleLeaf(this.leaf)),
 		);
 		menu.addItem((item) =>
 			item
-				.setTitle("Fit map to window")
+				.setTitle(t("view.action.fitWindow"))
 				.setIcon("maximize")
 				.onClick(() => this.fit()),
 		);
@@ -637,7 +638,7 @@ export class MindmapView extends TextFileView implements MapController {
 			menu.addItem((item) =>
 				item
 					.setSection("mindmap-export")
-					.setTitle(entry.menu)
+					.setTitle(t(entry.menuKey))
 					.setIcon(entry.icon)
 					.onClick(() => this.exportAs(entry.format)),
 			);
@@ -701,17 +702,21 @@ export class MindmapView extends TextFileView implements MapController {
 		// the same order and under the same names: three places offering the
 		// export, one list saying what the export is.
 		for (const entry of EXPORT_COMMANDS) {
-			button(exports, entry.icon, entry.menu, () => this.exportAs(entry.format));
+			button(exports, entry.icon, t(entry.menuKey), () => this.exportAs(entry.format));
 		}
 
-		button(camera, "zoom-in", "Zoom in", () => this.canvas.zoomBy(1.2));
-		button(camera, "zoom-out", "Zoom out", () => this.canvas.zoomBy(1 / 1.2));
-		button(camera, "maximize", "Fit to window", () => this.fit());
-		button(camera, "crosshair", "Centre on selection", () => this.centreOnSelection());
-		button(camera, "chevrons-up-down", "Expand all", () => this.expandAll());
-		button(camera, "chevrons-down-up", "Collapse all", () => this.collapseAll());
-		button(camera, "search", "Find in the map", () => this.openSearch());
-		button(camera, "help-circle", "Keyboard shortcuts", () => this.showShortcuts());
+		// The camera buttons borrow the shortcut table's own wording, so a
+		// tooltip and the settings row that rebinds the same action agree.
+		button(camera, "zoom-in", t("shortcut.zoom-in.name"), () => this.canvas.zoomBy(1.2));
+		button(camera, "zoom-out", t("shortcut.zoom-out.name"), () => this.canvas.zoomBy(1 / 1.2));
+		button(camera, "maximize", t("shortcut.fit.name"), () => this.fit());
+		button(camera, "crosshair", t("shortcut.centre-selection.name"), () =>
+			this.centreOnSelection(),
+		);
+		button(camera, "chevrons-up-down", t("view.tool.expandAll"), () => this.expandAll());
+		button(camera, "chevrons-down-up", t("view.tool.collapseAll"), () => this.collapseAll());
+		button(camera, "search", t("shortcut.search.name"), () => this.openSearch());
+		button(camera, "help-circle", t("view.tool.shortcuts"), () => this.showShortcuts());
 	}
 
 	/**
@@ -722,20 +727,22 @@ export class MindmapView extends TextFileView implements MapController {
 	 * the way they bound it -- and an unbound one is not shown at all.
 	 */
 	private showShortcuts(): void {
-		const mouse: Array<[string, string]> = [
-			["Double-click a card", "Edit the node"],
-			["⤢ on a content card", "Show the whole block, rendered"],
-			["Click a link in a content card", "Open it"],
-			["+ beside a card", "New child"],
-			["Right-click a card", "The node's menu"],
-			["Drag onto a card", "Reparent it"],
-			["Drag onto a card's top / bottom edge", "Reorder it beside that card"],
-			["Wheel / pinch", "Zoom; drag blank space to pan"],
+		// Keys, not words: the panel is built once per opening, and a row holding
+		// its own wording would keep speaking the language the plugin started in.
+		const mouse: Array<[I18nKey, I18nKey]> = [
+			["view.shortcuts.mouse.edit.keys", "view.shortcuts.mouse.edit.what"],
+			["view.shortcuts.mouse.expand.keys", "view.shortcuts.mouse.expand.what"],
+			["view.shortcuts.mouse.link.keys", "view.shortcuts.mouse.link.what"],
+			["view.shortcuts.mouse.add.keys", "view.shortcuts.mouse.add.what"],
+			["view.shortcuts.mouse.menu.keys", "view.shortcuts.mouse.menu.what"],
+			["view.shortcuts.mouse.reparent.keys", "view.shortcuts.mouse.reparent.what"],
+			["view.shortcuts.mouse.reorder.keys", "view.shortcuts.mouse.reorder.what"],
+			["view.shortcuts.mouse.zoom.keys", "view.shortcuts.mouse.zoom.what"],
 		];
 
 		const panel = this.openPopover();
 		panel.addClass("mm-shortcuts");
-		panel.createEl("h4", { text: "Mind map shortcuts" });
+		panel.createEl("h4", { text: t("view.shortcuts.title") });
 		const table = panel.createEl("table");
 		const row = (keys: string, what: string): void => {
 			const tr = table.createEl("tr");
@@ -750,11 +757,11 @@ export class MindmapView extends TextFileView implements MapController {
 			if (combos.length === 0) continue;
 			row(combos.map((combo) => comboToString(combo, isMac)).join("  /  "), t(entry.nameKey));
 		}
-		for (const [keys, what] of mouse) row(keys, what);
+		for (const [keys, what] of mouse) row(t(keys), t(what));
 
 		panel.createDiv({
 			cls: "mm-popover-hint mm-shortcuts-footer",
-			text: "Every key above can be changed in the plugin's settings.",
+			text: t("view.shortcuts.footer"),
 		});
 	}
 
@@ -763,7 +770,7 @@ export class MindmapView extends TextFileView implements MapController {
 	private parseOptions() {
 		const s = this.plugin.settings;
 		return {
-			title: this.file?.basename ?? "Untitled",
+			title: this.file?.basename ?? t("export.untitled"),
 			annotations: s.inlineAnnotations,
 			source: s.source,
 			rootPolicy: s.rootPolicy,
@@ -1765,7 +1772,7 @@ export class MindmapView extends TextFileView implements MapController {
 		const node = this.parsed?.byId.get(id);
 		if (!element || !node) return;
 		if (!canRename(node)) {
-			new Notice("This node is the file name. Rename the note to change it.");
+			new Notice(t("view.notice.rootRename"));
 			return;
 		}
 
@@ -1868,7 +1875,7 @@ export class MindmapView extends TextFileView implements MapController {
 	removeNode(id: string): void {
 		this.withNode(id, (parsed, node) => {
 			if (!node.parent) {
-				new Notice("The root node cannot be deleted from the map.");
+				new Notice(t("view.notice.rootDelete"));
 				return;
 			}
 			this.apply(deleteNode(parsed, node));
@@ -1998,13 +2005,13 @@ export class MindmapView extends TextFileView implements MapController {
 		if (this.bodyNodes.has(id)) {
 			menu.addItem((item) =>
 				item
-					.setTitle("Show the whole block")
+					.setTitle(t("view.menu.showBlock"))
 					.setIcon("maximize-2")
 					.onClick(() => this.expandBody(id)),
 			);
 			menu.addItem((item) =>
 				item
-					.setTitle("Edit the block source")
+					.setTitle(t("view.menu.editBlock"))
 					.setIcon("pencil")
 					.onClick(() => this.openBody(id, "edit")),
 			);
@@ -2018,13 +2025,13 @@ export class MindmapView extends TextFileView implements MapController {
 
 		menu.addItem((item) =>
 			item
-				.setTitle("Add child")
+				.setTitle(t("view.menu.addChild"))
 				.setIcon("corner-down-right")
 				.onClick(() => this.addChildTo(id)),
 		);
 		if (!node.virtual && this.plugin.settings.inlineAnnotations) {
 			menu.addItem((item) => item
-				.setTitle(node.annotationIndices.length ? "Edit annotation" : "Add annotation")
+				.setTitle(t(node.annotationIndices.length ? "view.menu.editAnnotation" : "view.menu.addAnnotation"))
 				.setIcon("sticky-note")
 				.onClick(() => this.editAnnotation(id)));
 		}
@@ -2033,7 +2040,7 @@ export class MindmapView extends TextFileView implements MapController {
 		if (node.kind === "listitem") {
 			menu.addItem((item) =>
 				item
-					.setTitle(node.checkbox === null ? "Add checkbox" : "Remove checkbox")
+					.setTitle(t(node.checkbox === null ? "view.menu.addCheckbox" : "view.menu.removeCheckbox"))
 					.setIcon(node.checkbox === null ? "square-check" : "square")
 					.onClick(() => {
 						if (node.checkbox === null) this.toggleCheck(id);
@@ -2044,13 +2051,13 @@ export class MindmapView extends TextFileView implements MapController {
 		if (node.parent) {
 			menu.addItem((item) =>
 				item
-					.setTitle("Add sibling below")
+					.setTitle(t("view.menu.addSiblingBelow"))
 					.setIcon("plus")
 					.onClick(() => this.addSiblingTo(id)),
 			);
 			menu.addItem((item) =>
 				item
-					.setTitle("Add sibling above")
+					.setTitle(t("view.menu.addSiblingAbove"))
 					.setIcon("plus")
 					.onClick(() => this.addSiblingBeforeTo(id)),
 			);
@@ -2060,7 +2067,7 @@ export class MindmapView extends TextFileView implements MapController {
 			menu.addSeparator();
 			menu.addItem((item) =>
 				item
-					.setTitle(this.collapsedKeys.has(node.key) ? "Unfold" : "Fold")
+					.setTitle(t(this.collapsedKeys.has(node.key) ? "view.menu.unfold" : "view.menu.fold"))
 					.setIcon("chevrons-down-up")
 					.onClick(() => this.toggleFold(id)),
 			);
@@ -2071,7 +2078,7 @@ export class MindmapView extends TextFileView implements MapController {
 			if (canRename(node)) {
 				menu.addItem((item) =>
 					item
-						.setTitle("Rename")
+						.setTitle(t("view.menu.rename"))
 						.setIcon("text-cursor-input")
 						.onClick(() => this.beginEdit(id)),
 				);
@@ -2079,7 +2086,7 @@ export class MindmapView extends TextFileView implements MapController {
 			if (node.parent) {
 				menu.addItem((item) =>
 					item
-						.setTitle("Delete")
+						.setTitle(t("view.menu.delete"))
 						.setIcon("trash-2")
 						.onClick(() => this.removeNode(id)),
 				);
@@ -2152,7 +2159,7 @@ export class MindmapView extends TextFileView implements MapController {
 	undo(): void {
 		const previous = this.undoStack.pop();
 		if (previous === undefined) {
-			new Notice("Nothing to undo on the map.");
+			new Notice(t("view.notice.nothingToUndo"));
 			return;
 		}
 		this.redoStack.push(this.data);
@@ -2465,7 +2472,7 @@ export class MindmapView extends TextFileView implements MapController {
 			const snapshot = parseMarkdown(this.data, this.parseOptions());
 			const current = snapshot.byKey.get(key);
 			if (!this.plugin.settings.inlineAnnotations || !current || annotationText(snapshot, current) !== original) {
-				new Notice("This annotation changed while the editor was open. Copy your draft and reopen it before saving.");
+				new Notice(t("view.notice.annotationChanged"));
 				return false;
 			}
 			this.apply(setAnnotation(snapshot, current, text));
@@ -2508,7 +2515,7 @@ export class MindmapView extends TextFileView implements MapController {
 
 		const key = node.key;
 		this.dialog = new BlockDialog(this.app, {
-			title: node.text || "Note content",
+			title: node.text || t("dialog.block.title"),
 			sourcePath: this.file?.path ?? "",
 			blocks,
 			mode,
@@ -2599,7 +2606,7 @@ export class MindmapView extends TextFileView implements MapController {
 			buildCanvas(
 				{ nodes: this.layoutNodes },
 				{
-					title: this.file?.basename ?? "Untitled",
+					title: this.file?.basename ?? t("export.untitled"),
 					branchColor: (branch) =>
 						palette === null || branch < 0 ? null : palette[branch % palette.length],
 					nextId: randomId,

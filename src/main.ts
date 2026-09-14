@@ -3,7 +3,7 @@ import type { ViewState, WorkspaceLeaf } from "obsidian";
 
 import { MINDMAP_VIEW_TYPE, MindmapView } from "./view/MindmapView.ts";
 import { EXPORT_COMMANDS } from "./export/run.ts";
-import { resolveLanguage, setLanguage } from "./i18n.ts";
+import { resolveLanguage, setLanguage, t } from "./i18n.ts";
 import { DEFAULT_SETTINGS, MindmapSettingTab } from "./settings.ts";
 import type { MindmapSettings } from "./settings.ts";
 import {
@@ -16,9 +16,9 @@ import {
 } from "./foldStore.ts";
 import type { FoldStore, NoteViewEntry, NoteViewState } from "./foldStore.ts";
 import {
-	UPDATE_NOTICE,
 	UPDATE_NOTICE_MS,
 	shouldAnnounce,
+	updateNotice,
 	versionToRecord,
 } from "./updateNotice.ts";
 
@@ -73,14 +73,14 @@ export default class MindmapPlugin extends Plugin {
 
 		this.addSettingTab(new MindmapSettingTab(this.app, this));
 
-		this.addRibbonIcon("git-fork", "Toggle mind map view", () => {
+		this.addRibbonIcon("git-fork", t("view.action.toggleView"), () => {
 			const leaf = this.app.workspace.getMostRecentLeaf();
 			if (leaf) void this.toggleLeaf(leaf);
 		});
 
 		this.addCommand({
 			id: "toggle-mindmap-view",
-			name: "Toggle mind map view",
+			name: t("view.action.toggleView"),
 			checkCallback: (checking) => {
 				const leaf = this.app.workspace.getMostRecentLeaf();
 				if (!leaf || !this.isToggleable(leaf)) return false;
@@ -91,7 +91,7 @@ export default class MindmapPlugin extends Plugin {
 
 		this.addCommand({
 			id: "forget-fold-state",
-			name: "Forget the saved fold state for this note",
+			name: t("command.forgetFold"),
 			checkCallback: (checking) => {
 				const view = this.app.workspace.getActiveViewOfType(MindmapView);
 				const path = view?.file?.path;
@@ -109,7 +109,7 @@ export default class MindmapPlugin extends Plugin {
 		// against Obsidian's own search in every other view.
 		this.addCommand({
 			id: "search-mindmap",
-			name: "Find in the mind map",
+			name: t("command.search"),
 			checkCallback: (checking) => {
 				const view = this.app.workspace.getActiveViewOfType(MindmapView);
 				if (!view) return false;
@@ -122,10 +122,11 @@ export default class MindmapPlugin extends Plugin {
 		// while it holds the keyboard, and a command bound to the same pair would
 		// run on the same keypress -- moving the node two places instead of one.
 		// These are here to be rebound, and for the palette.
+		const moveCommandKeys = { up: "command.moveUp", down: "command.moveDown" } as const;
 		for (const direction of ["up", "down"] as const) {
 			this.addCommand({
 				id: `move-node-${direction}`,
-				name: `Move the selected node ${direction} among its siblings`,
+				name: t(moveCommandKeys[direction]),
 				checkCallback: (checking) => {
 					const view = this.app.workspace.getActiveViewOfType(MindmapView);
 					if (!view?.canMoveSelection(direction)) return false;
@@ -142,7 +143,7 @@ export default class MindmapPlugin extends Plugin {
 		for (const entry of EXPORT_COMMANDS) {
 			this.addCommand({
 				id: entry.id,
-				name: entry.name,
+				name: t(entry.nameKey),
 				checkCallback: (checking) => {
 					const view = this.app.workspace.getActiveViewOfType(MindmapView);
 					if (!view) return false;
@@ -154,7 +155,7 @@ export default class MindmapPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-as-mindmap",
-			name: "Open current note as a mind map",
+			name: t("command.openAsMindmap"),
 			checkCallback: (checking) => {
 				const leaf = this.app.workspace.getMostRecentLeaf();
 				if (!leaf || leaf.view.getViewType() !== "markdown") return false;
@@ -169,7 +170,7 @@ export default class MindmapPlugin extends Plugin {
 				const isMap = leaf?.view.getViewType() === MINDMAP_VIEW_TYPE;
 				menu.addItem((item) =>
 					item
-						.setTitle(isMap ? "Edit as markdown" : "Open as mind map")
+						.setTitle(isMap ? t("view.action.editMarkdown") : t("view.action.openMap"))
 						.setIcon(isMap ? "file-text" : "git-fork")
 						.onClick(() => {
 							if (leaf) void this.toggleLeaf(leaf);
@@ -224,7 +225,7 @@ export default class MindmapPlugin extends Plugin {
 	private async reviewVersion(): Promise<void> {
 		const current = this.manifest.version;
 		if (shouldAnnounce(this.lastSeenVersion, current, this.freshInstall)) {
-			new Notice(UPDATE_NOTICE, UPDATE_NOTICE_MS);
+			new Notice(updateNotice(), UPDATE_NOTICE_MS);
 		}
 		const record = versionToRecord(this.lastSeenVersion, current);
 		// Every ordinary load lands here with nothing to write.
@@ -355,7 +356,7 @@ export default class MindmapPlugin extends Plugin {
 		const state = leaf.getViewState();
 		const file = (leaf.view as { file?: TFile }).file;
 		if (!file || file.extension !== "md") {
-			new Notice("Only markdown notes can be shown as a mind map.");
+			new Notice(t("main.notice.onlyMarkdown"));
 			return;
 		}
 
@@ -419,7 +420,7 @@ export default class MindmapPlugin extends Plugin {
 
 		const button = createDiv({
 			cls: `clickable-icon view-action ${HEADER_BUTTON_CLASS}`,
-			attr: { "aria-label": "Open as mind map" },
+			attr: { "aria-label": t("view.action.openMap") },
 		});
 		setIcon(button, "git-fork");
 		button.addEventListener("click", (ev) => {

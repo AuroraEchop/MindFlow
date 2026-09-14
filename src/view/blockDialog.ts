@@ -1,6 +1,7 @@
 import { Component, Keymap, MarkdownRenderer, Modal } from "obsidian";
 import type { App, PaneType } from "obsidian";
 
+import { t } from "../i18n.ts";
 import { ensureMath, finishRenderMath } from "./math.ts";
 
 /**
@@ -76,12 +77,12 @@ export class BlockDialog extends Modal {
 		const { contentEl } = this;
 		contentEl.createEl("p", {
 			cls: "mm-dialog-hint",
-			text: "This content stays in the note exactly where it is. Editing here rewrites only these lines.",
+			text: t("dialog.block.intro"),
 		});
 
 		const modes = contentEl.createDiv({ cls: "mm-dialog-modes" });
-		this.addTab(modes, "read", "Preview");
-		this.addTab(modes, "edit", "Source");
+		this.addTab(modes, "read", t("dialog.block.preview"));
+		this.addTab(modes, "edit", t("dialog.block.source"));
 
 		this.body = contentEl.createDiv({ cls: "mm-dialog-body" });
 		// Bound once, not per repaint: `renderBody` empties this element, it never
@@ -90,9 +91,9 @@ export class BlockDialog extends Modal {
 		this.body.addEventListener("auxclick", (ev) => this.followLink(ev));
 
 		const actions = contentEl.createDiv({ cls: "mm-dialog-actions" });
-		actions.createEl("button", { text: "Close" }).addEventListener("click", () => this.close());
+		actions.createEl("button", { text: t("dialog.close") }).addEventListener("click", () => this.close());
 		actions
-			.createEl("button", { cls: "mod-cta", text: "Save" })
+			.createEl("button", { cls: "mod-cta", text: t("dialog.save") })
 			.addEventListener("click", () => this.save());
 
 		this.renderBody();
@@ -132,7 +133,10 @@ export class BlockDialog extends Modal {
 			const wrapper = body.createDiv({ cls: "mm-body-block" });
 			wrapper.createDiv({
 				cls: "mm-body-lines",
-				text: `Lines ${block.range[0] + 1}–${block.range[1] + 1}`,
+				text: t("dialog.block.lines", {
+					from: block.range[0] + 1,
+					to: block.range[1] + 1,
+				}),
 			});
 
 			const text = this.drafts.get(block.index) ?? block.text;
