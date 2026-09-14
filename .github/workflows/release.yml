@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags: ["*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  # Build provenance: `id-token` signs the attestation, `attestations` stores it.
+  # Obsidian's plugin review flags release assets that carry neither.
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    name: Build and publish a draft release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Runs before anything expensive. Obsidian resolves a plugin by fetching
+      # assets from the release tagged exactly as manifest.json's version, so a
+      # mismatched or "v"-prefixed tag must fail loudly here rather than produce
+      # a release that quietly refuses to install.
+      - name: Check the tag matches the manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/check-version.mjs
+
+      # Also up front, and for the same reason: the section is the release notes,
+      # so a missing one means a release that says nothing about what changed.
+      # `npm run check` runs this script too, so it should never fail here.
+      - name: Check the changelog covers this version
+        run: node scripts/check-changelog.mjs
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify the release assets exist
+        run: |
+          for file in main.js manifest.json styles.css; do
+            if [ ! -s "$file" ]; then
+              echo "::error::$file is missing or empty after the build"
+              exit 1
+            fi
+          done
+
+      # Lets anyone verify these two came out of this repository's build rather
+      # than off somebody's laptop. Runs on the built files, before they are
+      # uploaded, because the attestation is bound to their digests.
+      # Obsidian only ever fetches the three loose files, so the zip is purely a
+      # convenience for installing by hand -- one download instead of three.
+      # The review flags it as an extra file; that is a recommendation, and
+      # keeping it is a deliberate answer to it.
+      - name: Package a convenience zip
+        run: |
+          mkdir -p dist/mindmap-mode
+          cp main.js manifest.json styles.css LICENSE dist/mindmap-mode/
+          (cd dist && zip -r mindmap-mode.zip mindmap-mode)
+
+      - name: Attest the build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            styles.css
+            dist/mindmap-mode.zip
+
+      - name: Write release notes
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          prev=$(node scripts/check-changelog.mjs --previous)
+          {
+            echo "## 更新内容 / What's changed"
+            echo ""
+            node scripts/check-changelog.mjs --print
+            echo ""
+            if [ -n "$prev" ]; then
+              echo "**Full changelog:** [\`$prev...$TAG\`](https://github.com/$REPO/compare/$prev...$TAG)"
+              echo ""
+            fi
+          } > release-notes.md
+
+          # Each language is its own paragraph, never two lines of one paragraph:
+          # a blank line is a paragraph break in every renderer, while a bare
+          # newline is one only where the host turns newlines into breaks.
+          cat >> release-notes.md <<EOF
+          ## 安装 / Install
+
+          **手动安装：** 把下方的 \`main.js\`、\`manifest.json\`、\`styles.css\` 下载到
+
+          \`\`\`
+          <your vault>/.obsidian/plugins/mindmap-mode/
+          \`\`\`
+
+          然后在 *设置 → 第三方插件* 中启用 **Mindmap Mode**。
+          （或者下载 \`mindmap-mode.zip\`，解压到 \`.obsidian/plugins/\` 下，一个文件搞定。）
+
+          **BRAT：** 把 \`$REPO\` 添加为 beta 插件。
+
+          **Manual:** download \`main.js\`, \`manifest.json\` and \`styles.css\` below into the folder above,
+          then enable **Mindmap Mode** in *Settings → Community plugins*.
+          (Or download \`mindmap-mode.zip\` and unzip it into \`.obsidian/plugins/\` -- one download instead of three.)
+
+          **BRAT:** add \`$REPO\` as a beta plugin.
+
+          ## 用法 / Use it
+
+          打开一篇笔记，在命令面板里运行 **Toggle mind map view** —— 给它绑一个快捷键，
+          用起来就像切换阅读模式。导图在同一个标签页、同一个文件上打开，不会创建任何文件。
+
+          Open a note and run **Toggle mind map view** from the command palette —
+          assign it a hotkey to make it feel like switching reading mode. The map
+          opens in the same tab, on the same file. No files are ever created.
+
+          Built from \`$TAG\` with tests and typecheck passing.
+          EOF
+
+      # A draft release does not occupy its tag, so `gh release create` never sees
+      # a collision and a re-pushed tag stacks a second draft of the same name
+      # beside the first. The draft is whatever the tag points at now, so an
+      # existing draft for this tag is replaced rather than added to. A published
+      # release is never deleted: it is what users are installing from, so a tag
+      # that stands under one is not moved, and the run fails instead.
+      # (`gh release view` on a draft needs the contents:write granted above.)
+      - name: Create the draft release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || true)
+          if [ "$draft" = "true" ]; then
+            echo "::notice::A draft release already exists for $TAG -- replacing it"
+            gh release delete "$TAG" --yes
+          elif [ "$draft" = "false" ]; then
+            echo "::error::A published release already stands under $TAG. Publish the fix as a new version rather than moving a published tag."
+            exit 1
+          fi
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            --draft \
+            main.js manifest.json styles.css LICENSE dist/mindmap-mode.zip
+
+      - name: Summary
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "### Draft release \`$TAG\` is ready"
+            echo ""
+            echo "Review and publish it at https://github.com/$REPO/releases"
+          } >> "$GITHUB_STEP_SUMMARY"

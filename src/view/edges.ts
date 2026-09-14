@@ -1,0 +1,97 @@
+import type { LayoutNode } from "../layout/tidyTree.ts";
+import { edgeInView } from "./culling.ts";
+import type { ViewBox } from "./culling.ts";
+
+/**
+ * A little more than the widest stroke, so culling never drops a curve that its
+ * own line width, round cap included, would still have put on screen.
+ */
+const STROKE_PAD = 4;
+
+/**
+ * Where a connector meets a node: the middle of the card's face.
+ *
+ * The card, never the node box. An annotation hangs below the card without
+ * being part of it, so a `height/2` here would slide the connector down the
+ * side of an annotated card and leave it pointing at nothing.
+ */
+export function anchorFor(n: LayoutNode, outgoing: boolean, side: number): [number, number] {
+	const y = n.y + n.cardHeight / 2;
+	// Outgoing edges leave the face pointing at the children; incoming edges
+	// arrive on the opposite face.
+	const rightFace = outgoing ? side === 1 : side !== 1;
+	return [rightFace ? n.x + n.cardWidth : n.x, y];
+}
+
+function strokeWidth(depth: number): number {
+	if (depth <= 1) return 3;
+	if (depth === 2) return 2;
+	return 1.4;
+}
+
+/**
+ * Draw the connector layer.
+ *
+ * The organic S-curve is what reads as "mind map" rather than "org chart":
+ * a cubic bezier whose control points sit halfway between the two anchors.
+ *
+ * `view` is the part of the map worth drawing; pass null for all of it. Both
+ * control points share their x range with the two anchors and their y with one
+ * or the other, so the anchors' bounding box contains the whole curve and a
+ * cheap rectangle test is exact rather than approximate.
+ *
+ * Returns how many paths it drew, which is what a redraw costs.
+ */
+export function renderEdges(
+	svg: SVGSVGElement,
+	nodes: LayoutNode[],
+	width: number,
+	height: number,
+	branchColors: boolean,
+	view: ViewBox | null = null,
+): number {
+	svg.replaceChildren();
+	svg.setAttribute("width", String(width));
+	svg.setAttribute("height", String(height));
+	svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+	// Built off-tree and attached once: appending a few hundred paths straight
+	// into a live SVG invalidates the layer that many times over.
+	const frag = createFragment();
+	let drawn = 0;
+
+	for (const child of nodes) {
+		const parent = child.parent;
+		if (!parent) continue;
+
+		const [px, py] = anchorFor(parent, true, child.side);
+		const [cx, cy] = anchorFor(child, false, child.side);
+		if (view && !edgeInView(px, py, cx, cy, STROKE_PAD, view)) continue;
+		const dx = (cx - px) * 0.5;
+
+		const path = createSvg("path");
+		path.setAttribute(
+			"d",
+			`M ${px} ${py} C ${px + dx} ${py}, ${cx - dx} ${cy}, ${cx} ${cy}`,
+		);
+		path.setAttribute("fill", "none");
+		path.setAttribute("stroke-width", String(strokeWidth(child.depth)));
+		path.setAttribute("stroke-linecap", "round");
+		path.addClass("mm-edge");
+		if (branchColors && child.branch >= 0) {
+			path.dataset.branch = String(child.branch % 10);
+		}
+		frag.appendChild(path);
+		drawn++;
+	}
+
+	svg.appendChild(frag);
+	return drawn;
+}
+
+/** Detached: the caller attaches the finished layer along with the cards. */
+export function createEdgeLayer(): SVGSVGElement {
+	const svg = createSvg("svg");
+	svg.addClass("mm-edges");
+	return svg;
+}

@@ -1,0 +1,1020 @@
+/* ==========================================================================
+   Mindmap Mode
+   Everything is driven by Obsidian's own CSS variables so the map follows the
+   active theme, light or dark, without a second palette to maintain.
+   ========================================================================== */
+
+.mindmap-mode {
+	--mm-b0: #4f9df7;
+	--mm-b1: #f2994a;
+	--mm-b2: #56c271;
+	--mm-b3: #b57bee;
+	--mm-b4: #ef6b8a;
+	--mm-b5: #38b6c4;
+	--mm-b6: #d9a91f;
+	--mm-b7: #7c8cf8;
+	--mm-b8: #d2698f;
+	--mm-b9: #5aa98a;
+
+	--mm-branch: var(--interactive-accent);
+	--mm-card-radius: 8px;
+
+	position: relative;
+	padding: 0;
+	overflow: hidden;
+	height: 100%;
+	/*
+	 * The map may not be able to change the size of the box it sits in, and this
+	 * is what says so rather than hoping.
+	 *
+	 * Obsidian's workspace watches this element with a `ResizeObserver` and calls
+	 * `onResize` from it. Anything inside that could push this box around -- a
+	 * layer wider than the pane, a scrollbar appearing because a theme gave
+	 * `.view-content` an `overflow` of its own -- turns that observer into a
+	 * feedback loop: the map resizes the pane, the pane resizes the map, and
+	 * Chromium logs "ResizeObserver loop completed with undelivered
+	 * notifications" on every pass. Layout containment makes the inside and the
+	 * outside independent, so that is not a shape this file can take.
+	 */
+	contain: layout paint;
+}
+
+/* --- viewport ------------------------------------------------------------ */
+
+.mm-viewport {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	outline: none;
+	cursor: default;
+	touch-action: none;
+	background: var(--background-primary);
+	background-image: radial-gradient(
+		circle at 1px 1px,
+		var(--background-modifier-border) 1px,
+		transparent 0
+	);
+	background-size: 28px 28px;
+	/* The same guarantee as on the view root, one level in: the map is tens of
+	   thousands of pixels wide and every card in it is written on a frame, and
+	   none of that may reach the layout of anything outside this box. */
+	contain: layout paint;
+}
+
+.mm-viewport.is-panning {
+	cursor: grabbing;
+}
+
+/*
+ * A pan slides every card past a pointer that is standing still, and each one
+ * that crosses it flips :hover -- a style recalc, two 120ms transitions and a
+ * repaint, per card, per frame, for a highlight nobody asked for. Nothing in
+ * the map is a drop target while the *canvas* is what is being dragged, so it
+ * leaves hit-testing altogether until the pan ends.
+ *
+ * Panning only: a node drag hit-tests with elementFromPoint, and a map that
+ * takes no pointer events has nothing to find under the cursor.
+ *
+ * `pointer-events` is inherited, so each edge of this does cost a style
+ * recalculation of the subtree -- unavoidable for a property that works by
+ * inheritance, and the reason `Canvas` writes `is-panning` once when the
+ * gesture starts and once when it ends rather than per frame.
+ */
+.mm-viewport.is-panning .mm-content {
+	pointer-events: none;
+}
+
+.mm-viewport.is-dragging-node {
+	cursor: grabbing;
+}
+
+/*
+ * Two states where the card transitions are given up, both for the same
+ * reason: something is sweeping the pointer across cards that have no business
+ * animating for it.
+ *
+ * A node drag cannot give up hit-testing the way a pan does, so the cards it
+ * passes over each run a transition to nowhere. And a map dense enough to be
+ * slow is one where the transitions are the least of what a hover costs --
+ * `mm-dense` is set at paint time, past the node count in `MindmapView`, and
+ * set on the content layer rather than the view root so that no paint writes a
+ * class to the box the workspace observes for resizes.
+ *
+ * A camera move is not on the list and may not join it -- see the note under
+ * `.mm-content.mm-moving` for what a selector keyed on that class costs. It
+ * does not need to be: a pan has already taken the map out of hit-testing, so
+ * no card it slides past can start a transition at all, and a wheel zoom
+ * leaves hit-testing on but can only ever change the state of the one card
+ * under the standing pointer.
+ *
+ * Only the animation goes. The hover colours stay exactly as they are; they
+ * simply arrive at once.
+ */
+.mm-viewport.is-dragging-node .mm-card,
+.mm-viewport.is-dragging-node .mm-add,
+.mm-content.mm-dense .mm-card,
+.mm-content.mm-dense .mm-add {
+	transition: none;
+}
+
+.mm-content {
+	position: absolute;
+	top: 0;
+	left: 0;
+	transform-origin: 0 0;
+}
+
+/*
+ * The one compositor-promotion hint in this file, and it is only on while the
+ * camera is actually moving.
+ *
+ * Both halves are load-bearing, and each was once a bug. Without the hint, a
+ * drag on a large map has the browser re-rasterising the whole content on every
+ * frame, which is what made dragging crawl. With it left on permanently, the
+ * layer is rasterised once and then merely stretched to the new transform -- so
+ * after a zoom the text on every card is a scaled bitmap of the text at the old
+ * scale, which is the blur reported in issue #4. Dropping the hint once the
+ * camera rests hands the layer back and gets it painted at the scale it ended
+ * up at.
+ *
+ * `Canvas.apply` in `src/view/canvas.ts` toggles the class: every pan frame,
+ * wheel notch and framing jump goes through it, and `MotionFlag` in
+ * `src/view/motion.ts` takes it off again once those calls stop arriving.
+ *
+ * Never on `.mm-node` -- see the note on that rule. One layer for the map is the
+ * whole point; a layer per card is the thing this replaced.
+ *
+ * And nothing else may be keyed on this class. `mm-moving` is written twice a
+ * gesture -- on the first frame that moves, and again once the camera has been
+ * still for `SETTLE_MS` -- and a class write invalidates the style of every
+ * element some selector says could depend on it. A rule shaped like
+ * `.mm-content.mm-moving .mm-card` therefore marks every card on the map dirty
+ * on both edges of every pan and every zoom, and `cullToView` is what pays:
+ * its first act is to read `clientWidth`, which flushes the recalculation the
+ * class write had just queued. On a 515-node map that turned a 0.2ms cull into
+ * a 19ms one at the start of every gesture and again 180ms after the end of
+ * it -- a hitch exactly where the map is supposed to feel smoothest. A rule
+ * that matches `.mm-content` itself, like this one, dirties one element, and
+ * that is the whole cost of the flag. So: no descendant selector may hang off
+ * `mm-moving`. Anything the cards need while the camera moves has to come from
+ * a class that is not written per gesture -- `mm-dense`, which a paint writes
+ * at most once and `toggleClass` does not write again for the value it already
+ * has.
+ */
+.mm-content.mm-moving {
+	will-change: transform;
+}
+
+.mm-edges {
+	position: absolute;
+	top: 0;
+	left: 0;
+	overflow: visible;
+	pointer-events: none;
+}
+
+.mm-nodes {
+	position: absolute;
+	top: 0;
+	left: 0;
+}
+
+/* --- connectors ---------------------------------------------------------- */
+
+.mm-edge {
+	stroke: var(--background-modifier-border-hover);
+	opacity: 0.85;
+}
+
+.mm-edge[data-branch="0"] { stroke: var(--mm-b0); }
+.mm-edge[data-branch="1"] { stroke: var(--mm-b1); }
+.mm-edge[data-branch="2"] { stroke: var(--mm-b2); }
+.mm-edge[data-branch="3"] { stroke: var(--mm-b3); }
+.mm-edge[data-branch="4"] { stroke: var(--mm-b4); }
+.mm-edge[data-branch="5"] { stroke: var(--mm-b5); }
+.mm-edge[data-branch="6"] { stroke: var(--mm-b6); }
+.mm-edge[data-branch="7"] { stroke: var(--mm-b7); }
+.mm-edge[data-branch="8"] { stroke: var(--mm-b8); }
+.mm-edge[data-branch="9"] { stroke: var(--mm-b9); }
+
+/* --- nodes --------------------------------------------------------------- */
+
+/*
+ * `width: max-content` is load-bearing, not decorative. Cards are absolutely
+ * positioned inside `.mm-nodes`, which is itself absolute and holds nothing but
+ * out-of-flow children, so its width resolves to 0. Shrink-to-fit against a
+ * zero-width containing block collapses to min-content -- and min-content for
+ * CJK text is a single glyph, which is what turned every card into a vertical
+ * string of characters. The inline max-width set in buildNodeElement only caps;
+ * it cannot grow the box.
+ *
+ * No compositor-promotion hint here, however much it looks like it belongs;
+ * `.mm-content.mm-moving` is the only rule that asks for a layer, and it asks
+ * for exactly one. A card's transform is written once per paint and never
+ * animated -- the pan and the zoom both live on `.mm-content`, which is the one
+ * element that actually moves -- so the hint buys nothing here and costs a
+ * composited layer per card. A
+ * map with a few hundred nodes unfolded then asks the compositor for a few
+ * hundred textures, and dragging the canvas turns from moving one layer into
+ * managing all of them.
+ */
+.mm-node {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: max-content;
+}
+
+/*
+ * Off screen, and out of the document for it. `display: none` rather than
+ * `visibility: hidden`: the point is that the browser stop laying the card out,
+ * rasterising it and hit-testing it at all, and a hidden box still does all
+ * three. Cards are absolutely positioned, so nothing moves when one goes.
+ */
+.mm-node.is-offscreen {
+	display: none;
+}
+
+.mm-node[data-branch="0"] { --mm-branch: var(--mm-b0); }
+.mm-node[data-branch="1"] { --mm-branch: var(--mm-b1); }
+.mm-node[data-branch="2"] { --mm-branch: var(--mm-b2); }
+.mm-node[data-branch="3"] { --mm-branch: var(--mm-b3); }
+.mm-node[data-branch="4"] { --mm-branch: var(--mm-b4); }
+.mm-node[data-branch="5"] { --mm-branch: var(--mm-b5); }
+.mm-node[data-branch="6"] { --mm-branch: var(--mm-b6); }
+.mm-node[data-branch="7"] { --mm-branch: var(--mm-b7); }
+.mm-node[data-branch="8"] { --mm-branch: var(--mm-b8); }
+.mm-node[data-branch="9"] { --mm-branch: var(--mm-b9); }
+
+/*
+ * The card's own row, and the containing block for everything positioned
+ * against the card rather than against the node: `.mm-tools` hangs off this.
+ *
+ * A node is two boxes -- this row, and the annotation strip under it -- and
+ * only the row is the card. Nothing may be put in this element's flow: its
+ * height is the card's height, which is what the layout centres children and
+ * anchors connectors on.
+ */
+.mm-row {
+	position: relative;
+}
+
+.mm-card {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	padding: 6px 12px;
+	border-radius: var(--mm-card-radius);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	line-height: 1.45;
+	cursor: grab;
+	user-select: none;
+	transition:
+		box-shadow 120ms ease,
+		border-color 120ms ease;
+}
+
+.mm-card:hover {
+	border-color: var(--mm-branch);
+}
+
+/* The root reads as the anchor of the whole map. */
+.mm-node[data-depth="0"] .mm-card {
+	padding: 10px 20px;
+	border-radius: 999px;
+	border: none;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-size: var(--font-ui-medium);
+	font-weight: 600;
+	box-shadow: 0 2px 10px rgb(0 0 0 / 18%);
+}
+
+/* First-level branches carry their branch colour. */
+.mm-node[data-depth="1"] .mm-card {
+	border: 1.5px solid var(--mm-branch);
+	background: color-mix(in srgb, var(--mm-branch) 12%, var(--background-primary));
+	font-weight: 550;
+}
+
+/* Deeper topics sit on the line rather than in a heavy box.
+   Body cards are excluded by name rather than by specificity: this selector
+   scores higher than the one that styles them, so a :not() is what keeps note
+   content from being drawn as a topic. */
+.mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-card {
+	background: transparent;
+	border: none;
+	border-bottom: 2px solid color-mix(in srgb, var(--mm-branch) 55%, transparent);
+	border-radius: 4px 4px 0 0;
+	padding: 3px 8px;
+}
+
+.mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-card:hover {
+	background: var(--background-modifier-hover);
+	border-bottom-color: var(--mm-branch);
+}
+
+.mm-node.is-selected .mm-card {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+/* Search hits, after the selection on purpose so the current one outranks it.
+   Border colour and box-shadow only: the view measures cards with offsetWidth,
+   and anything that changed their box would move the layout under the jump that
+   just brought one on screen. */
+.mm-node.is-search-match .mm-card {
+	border-color: var(--text-accent);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-accent) 40%, transparent);
+}
+
+.mm-node.is-search-current .mm-card {
+	border-color: var(--text-accent);
+	box-shadow:
+		0 0 0 3px var(--text-accent),
+		0 2px 10px rgb(0 0 0 / 18%);
+}
+
+.mm-node.is-dragging {
+	opacity: 0.45;
+	pointer-events: none;
+}
+
+.mm-node.is-drop-target .mm-card {
+	box-shadow: 0 0 0 2px var(--interactive-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));
+}
+
+/* Dropped beside a card rather than into it: a line marks where it lands. The
+   whole-box highlight above means "inside this one", these mean "next to it". */
+.mm-node.is-drop-before .mm-card {
+	box-shadow: 0 -3px 0 var(--interactive-accent);
+}
+
+.mm-node.is-drop-after .mm-card {
+	box-shadow: 0 3px 0 var(--interactive-accent);
+}
+
+.mm-node.is-drop-invalid .mm-card {
+	box-shadow: 0 0 0 2px var(--text-error);
+	cursor: not-allowed;
+}
+
+.mm-text {
+	white-space: pre-wrap;
+	/* `anywhere` also shrinks the intrinsic min-content size; `break-word` only
+	   steps in when a single unbreakable run really would overflow. */
+	overflow-wrap: break-word;
+	text-wrap: pretty;
+	min-width: 1ch;
+}
+
+.mm-text.is-editing {
+	outline: none;
+	cursor: text;
+	user-select: text;
+	min-width: 4ch;
+	box-shadow: 0 1px 0 0 var(--interactive-accent);
+}
+
+/*
+ * The strip under the card: part of the node box, never a branch of its own and
+ * never part of the card.
+ *
+ * An ordinary block in `.mm-node`'s flow, so its max-content width counts
+ * towards the node's: the node is as wide as the wider of the card's title and
+ * this strip, up to the inline max-width `nodeMaxWidth` gives it -- the
+ * note-content cap wherever there is a strip at all. The card fills the node
+ * box, so card and strip are always exactly as wide as each other. The inset is
+ * padding rather than margin, which keeps the rule on the card's own left edge:
+ * 3px of rule plus 10px puts the text at 13px, under the card's own text.
+ */
+.mm-annotation {
+	box-sizing: border-box;
+	margin: 7px 0 3px;
+	border-left: 3px solid var(--text-faint);
+	padding: 0 0 0 10px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-weight: 400;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	user-select: text;
+	cursor: text;
+	min-height: 1.5em;
+}
+
+.mm-annotation .mm-link[data-href] { cursor: pointer; }
+
+.mm-annotation-input {
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 140px;
+	resize: vertical;
+	white-space: pre-wrap;
+}
+
+.mm-annotation-hint {
+	margin: 6px 0 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.mm-placeholder {
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+.mm-text .mm-code {
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+	padding: 0 4px;
+	border-radius: 3px;
+	background: var(--background-modifier-border);
+}
+
+/* The dotted underline is a bottom border rather than a decoration: the plugin
+   validator reports every `text-decoration-*` longhand as only partially
+   supported, and a border on an inline box adds no height, so a link never
+   changes the size a card measures. */
+.mm-text .mm-link {
+	color: var(--link-color);
+	border-bottom: 1px dotted currentColor;
+}
+
+/* Only in note content. A title is something you select and drag, so its links
+   stay text; the view wires the click for these alone. */
+.mm-node[data-kind="body"] .mm-link[data-href],
+.mm-node[data-kind="body"] .mm-embed[data-href] {
+	cursor: pointer;
+}
+
+.mm-node[data-kind="body"] .mm-link[data-href]:hover {
+	color: var(--link-color-hover, var(--link-color));
+	border-bottom-style: solid;
+}
+
+.mm-text .mm-embed {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+/* --- math ---------------------------------------------------------------- */
+
+.mm-math {
+	display: inline-block;
+	vertical-align: middle;
+}
+
+/* MathJax's CHTML output carries the class `MathJax`, plus `display="true"` on a
+   block formula. Its own stylesheet lands in <head>, possibly after this file,
+   and styles those containers at up to (0,3,1). Matching them by class through
+   the map's ancestor chain scores (0,4,0) and (0,5,0), so a formula stays inline
+   in its card without reaching for !important. */
+.mindmap-mode .mm-text .mm-math .MathJax,
+.mindmap-mode .mm-text .mm-math .MathJax[display="true"] {
+	display: inline-block;
+	margin: 0;
+	padding: 0;
+	text-align: left;
+}
+
+/* MathJax missing or still loading: show the source, legibly. */
+.mm-math-raw {
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+	color: var(--text-muted);
+}
+
+/* Marked the way a link is, and for the same reason: a bottom border, since the
+   plugin validator reports every `text-decoration-*` longhand as only partially
+   supported. */
+.mm-math-error {
+	color: var(--text-error);
+	border-bottom: 1px dotted currentColor;
+}
+
+/* Rendered for real, then parked off-screen. Neither `display: none` nor
+   `visibility: hidden` will do: a browser is free to skip font loading for
+   either, and getting the fonts loaded is the whole point of the probe. */
+.mm-math-probe {
+	position: absolute;
+	top: -9999px;
+	left: -9999px;
+	pointer-events: none;
+}
+
+/* --- checkbox ------------------------------------------------------------ */
+
+.mm-checkbox {
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
+	margin-top: 2px;
+	border: 1.5px solid var(--text-muted);
+	border-radius: 3px;
+	cursor: pointer;
+	align-self: center;
+	position: relative;
+}
+
+.mm-checkbox[data-checked="true"] {
+	background: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+}
+
+.mm-checkbox[data-checked="true"]::after {
+	content: "";
+	position: absolute;
+	left: 4px;
+	top: 1px;
+	width: 3px;
+	height: 7px;
+	border: solid var(--text-on-accent);
+	border-width: 0 2px 2px 0;
+	transform: rotate(45deg);
+}
+
+.mm-card.is-checked .mm-text {
+	color: var(--text-muted);
+	text-decoration: line-through;
+}
+
+/* --- note content -------------------------------------------------------- */
+
+/* Paragraphs, code blocks and tables, drawn as their own leaf cards so they
+   fold with the branch they belong to. Quieter than a topic card, and shaped
+   like a quote rather than a node, so the difference is legible at a glance. */
+.mm-node[data-kind="body"] .mm-card {
+	align-items: flex-start;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-left: 3px solid color-mix(in srgb, var(--mm-branch) 60%, transparent);
+	border-radius: 4px;
+	/* The right side reserves the corner the expand button sits in, so the
+	   button never lands on top of the first line of content. */
+	padding: 6px 26px 6px 10px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.5;
+	cursor: text;
+	/* Note content is there to be read and copied, unlike a topic card. */
+	user-select: text;
+	/* Containing block for `.mm-expand`. */
+	position: relative;
+}
+
+.mm-node[data-kind="body"] .mm-card:hover {
+	background: var(--background-modifier-hover);
+	border-left-color: var(--mm-branch);
+}
+
+/* Opens the block whole, in the dialog. Absolutely positioned so it stays out
+   of flow: the view measures these cards with offsetWidth/offsetHeight, and a
+   button in the flow would push the layout around. */
+.mm-expand {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	border-radius: 4px;
+	color: var(--text-faint);
+	cursor: pointer;
+	opacity: 0.5;
+	user-select: none;
+}
+
+.mm-expand .svg-icon {
+	width: 12px;
+	height: 12px;
+}
+
+.mm-card:hover .mm-expand {
+	opacity: 1;
+}
+
+.mm-expand:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	opacity: 1;
+}
+
+/* Code and tables only: prose keeps the reading face. */
+.mm-node[data-block="pre"] .mm-text {
+	font-family: var(--font-monospace);
+	font-size: 0.95em;
+	tab-size: 4;
+}
+
+/* --- the card's branch-side furniture ------------------------------------ */
+
+/* The fold toggle and the add button, in one row on the side the branch grows
+   from. A row rather than two placements: whatever width a three-digit count
+   gives the toggle, the button is simply next to it.
+
+   Flush against the card on purpose. The add button only appears while the node
+   is hovered, and a gap here would be a strip where nothing is hovered -- the
+   button would switch itself off under the pointer sent to press it.
+
+   Absolutely positioned, like everything else outside the card: the view sizes
+   cards with offsetWidth, and a row in the flow would widen every one of them.
+
+   Positioned against `.mm-row`, which is the card's own box, and not against
+   `.mm-node`, which also holds the annotation strip: `top: 50%` of the node
+   would drift down the side of an annotated card, and `left: 100%` is only
+   flush because the row is exactly as wide as the card. */
+.mm-tools {
+	position: absolute;
+	top: 50%;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	height: 20px;
+	transform: translateY(-50%);
+	/* Solid only while the row has something to press, so a leaf's empty slot
+	   is not a strip of canvas that cannot be panned. Turning solid the moment
+	   the card is hovered is what makes the row a continuous bridge out to the
+	   add button. */
+	pointer-events: none;
+}
+
+.mm-node:hover .mm-tools,
+.mm-node.is-selected .mm-tools {
+	pointer-events: auto;
+}
+
+.mm-node[data-side="right"] .mm-tools {
+	left: 100%;
+	padding-left: 9px;
+}
+
+/* Mirrored: the toggle stays nearest the card, the button beyond it. */
+.mm-node[data-side="left"] .mm-tools {
+	right: 100%;
+	padding-right: 9px;
+	flex-direction: row-reverse;
+}
+
+.mm-toggle {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	/* The row is only solid on hover; folding has to work without one. */
+	pointer-events: auto;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 3px;
+	border-radius: 999px;
+	border: 1.5px solid var(--mm-branch);
+	background: var(--background-primary);
+	color: var(--text-muted);
+	font-size: 9px;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.mm-toggle:hover {
+	background: var(--mm-branch);
+	color: var(--text-on-accent);
+}
+
+/* An expanded node shows a small dash instead of a count. */
+.mm-toggle.is-open::after {
+	content: "";
+	width: 6px;
+	height: 1.5px;
+	background: currentColor;
+	border-radius: 1px;
+}
+
+/* Grows a child from the card itself. Kept out of reach until the node is
+   hovered or selected: an invisible button that still took clicks would swallow
+   them from the canvas beside every card. It holds its place in the row either
+   way, so nothing shifts when it appears. */
+.mm-add {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	border-radius: 999px;
+	border: 1px dashed color-mix(in srgb, var(--mm-branch, var(--interactive-accent)) 65%, transparent);
+	background: var(--background-primary);
+	color: var(--text-muted);
+	font-size: 12px;
+	line-height: 1;
+	cursor: pointer;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 120ms ease;
+}
+
+.mm-add .svg-icon {
+	width: 12px;
+	height: 12px;
+}
+
+.mm-node:hover .mm-add,
+.mm-node.is-selected .mm-add {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.mm-add:hover {
+	border-style: solid;
+	background: var(--mm-branch, var(--interactive-accent));
+	color: var(--text-on-accent);
+}
+
+/* --- toolbar ------------------------------------------------------------- */
+
+/* Two panels in the corner, not one: the exports are a block of their own
+   above the camera and the map. The column is what carries the corner
+   position, so the camera panel keeps the bottom edge the pointer already
+   knows and the export panel stacks over it, both flush to the right edge. */
+.mm-toolbars {
+	position: absolute;
+	right: 12px;
+	bottom: 12px;
+	z-index: 10;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 8px;
+}
+
+/* The panel itself -- one rule, worn by both. */
+.mm-toolbar {
+	display: flex;
+	gap: 2px;
+	padding: 3px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+}
+
+.mm-tool {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.mm-tool:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.mm-tool.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+/* --- search --------------------------------------------------------------- */
+
+/* Above the toolbar (10) and below the popovers and the block dialog (20): the
+   bar floats over the canvas, never over a panel. */
+.mm-search {
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	z-index: 15;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 3px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+}
+
+.mm-search-input {
+	width: min(220px, 40vw);
+	height: 28px;
+	font-size: var(--font-ui-small);
+}
+
+/* A pattern is incomplete for most of the time it is being typed, so this says
+   "not yet", not "wrong". */
+.mm-search-input.is-error {
+	border-color: var(--text-error);
+	color: var(--text-error);
+}
+
+.mm-search-count {
+	min-width: 48px;
+	padding: 0 4px;
+	text-align: center;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+}
+
+.mm-search .mm-tool {
+	width: 24px;
+	height: 24px;
+	font-size: var(--font-ui-smaller);
+}
+
+/* --- popovers ------------------------------------------------------------ */
+
+.mm-popover {
+	position: absolute;
+	z-index: 20;
+	max-width: min(420px, 90%);
+	max-height: 70%;
+	overflow: auto;
+	padding: 14px 16px;
+	border-radius: 10px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: 0 8px 30px rgb(0 0 0 / 24%);
+}
+
+/* The shortcut sheet is the one popover with no anchor to point at, so it sits
+   in the middle of the view rather than at a computed position. That makes it
+   static styling, which belongs here and not on `panel.style`. */
+.mm-popover.mm-shortcuts {
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+}
+
+.mm-popover h4 {
+	margin: 0 0 6px;
+}
+
+.mm-popover-hint {
+	margin: 0 0 10px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.mm-popover-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 4px;
+}
+
+/* --- the block dialog ----------------------------------------------------- */
+
+/* A modal, not a popover: `.mindmap-mode` is `overflow: hidden`, so a panel big
+   enough to read a long block would be clipped by the viewport it hangs in.
+   It also mounts outside `.mindmap-mode`, which is why none of the map's own
+   scoped rules -- the `.mm-text .mm-math` display override in particular --
+   reach the rendered markdown in here. */
+.mm-block-dialog {
+	width: min(760px, 90vw);
+	max-height: 85vh;
+}
+
+.mm-dialog-hint {
+	margin: 0 0 10px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.mm-dialog-modes {
+	display: flex;
+	gap: 4px;
+	margin-bottom: 10px;
+}
+
+.mm-dialog-mode {
+	padding: 4px 12px;
+	font-size: var(--font-ui-smaller);
+	box-shadow: none;
+}
+
+.mm-dialog-mode.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.mm-dialog-body {
+	max-height: 60vh;
+	overflow: auto;
+}
+
+.mm-dialog-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+.mm-body-block {
+	margin-bottom: 10px;
+}
+
+.mm-body-lines {
+	margin-bottom: 3px;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+}
+
+.mm-body-input {
+	width: 100%;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	resize: vertical;
+	white-space: pre;
+}
+
+/* Obsidian's own reading-view CSS does the work; this only keeps the block from
+   inheriting the dialog's own margins at its edges. */
+.mm-body-render > :first-child {
+	margin-top: 0;
+}
+
+.mm-body-render > :last-child {
+	margin-bottom: 0;
+}
+
+.mm-shortcuts table {
+	border-collapse: collapse;
+	font-size: var(--font-ui-smaller);
+}
+
+.mm-shortcuts td {
+	padding: 3px 10px 3px 0;
+	vertical-align: top;
+}
+
+.mm-shortcuts .mm-keys {
+	white-space: nowrap;
+	color: var(--text-accent);
+	font-family: var(--font-monospace);
+}
+
+.mm-shortcuts .mm-shortcuts-footer {
+	margin: 10px 0 0;
+}
+
+/* --- the Shortcuts group in the settings tab ------------------------------ */
+
+/* Mounted in Obsidian's own settings window, so these are the only rules in
+   this file that live outside `.mindmap-mode`. */
+
+.mm-shortcut-keys {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 4px;
+}
+
+kbd.mm-shortcut-key {
+	padding: 2px 7px;
+	border: 1px solid var(--background-modifier-border);
+	border-bottom-width: 2px;
+	border-radius: 4px;
+	background: var(--background-modifier-form-field);
+	color: var(--text-normal);
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.4;
+	white-space: nowrap;
+}
+
+.mm-shortcut-unbound {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+/* The row is waiting for a key, so say so where the keys would be. */
+.mm-shortcut-capture {
+	color: var(--text-accent);
+	font-size: var(--font-ui-smaller);
+}
+
+.mm-shortcut.is-recording {
+	box-shadow: inset 2px 0 0 var(--interactive-accent);
+}
+
+button.is-recording {
+	color: var(--text-on-accent);
+	background-color: var(--interactive-accent);
+}
+
+.mm-shortcut-note {
+	margin-top: 4px;
+	color: var(--text-warning);
+	font-size: var(--font-ui-smaller);
+}

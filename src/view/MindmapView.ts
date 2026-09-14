@@ -1,0 +1,2667 @@
+import { Keymap, Menu, Notice, Platform, Scope, TextFileView, setIcon } from "obsidian";
+import type {
+	KeymapContext,
+	KeymapEventHandler,
+	KeymapEventListener,
+	Modifier,
+	TFile,
+	WorkspaceLeaf,
+} from "obsidian";
+
+import { parseMarkdown } from "../model/parse.ts";
+import { annotationText, bodyCardCount } from "../model/annotations.ts";
+import type { MindNode, ParsedDoc } from "../model/types.ts";
+import {
+	addChild,
+	addSibling,
+	addSiblingBefore,
+	bodyRangeText,
+	canMove,
+	canRename,
+	canReorder,
+	canReorderDown,
+	canReorderUp,
+	deleteNode,
+	indentNode,
+	moveAfter,
+	moveBefore,
+	moveNode,
+	outdentNode,
+	renameNode,
+	setAnnotation,
+	reorderDown,
+	reorderUp,
+	replaceBodyRange,
+	removeCheckbox,
+	toggleCheckbox,
+} from "../model/mutate.ts";
+import type { Mutation } from "../model/mutate.ts";
+
+import { hiddenAncestorKeys, refoldKeys, searchTree } from "../model/search.ts";
+import type { SearchQuery } from "../model/search.ts";
+
+import { createLayoutNode, layoutTree } from "../layout/tidyTree.ts";
+import type { LayoutNode, LayoutResult } from "../layout/tidyTree.ts";
+import { buildCanvas, randomId, serializeCanvas } from "../export/canvasFile.ts";
+import { snapshotMap } from "../export/snapshot.ts";
+import type { Snapshot } from "../export/snapshot.ts";
+import { EXPORT_COMMANDS, runExport } from "../export/run.ts";
+import type { ExportFormat } from "../export/run.ts";
+import { Canvas } from "./canvas.ts";
+import { Frame } from "./frame.ts";
+import { clampedMargin, covers, emptyPlan, overlaps, planCull, viewBoxFrom } from "./culling.ts";
+import type { CullPlan, ViewBox } from "./culling.ts";
+import { Perf } from "./perf.ts";
+import { createEdgeLayer, renderEdges } from "./edges.ts";
+import { buildNodeElement } from "./nodes.ts";
+import type { NodeElement } from "./nodes.ts";
+import { nodeMaxWidth } from "./nodeWidth.ts";
+import { attachInteractions } from "./interactions.ts";
+import { SHORTCUTS, comboToString, resolveBindings } from "./shortcuts.ts";
+import type { KeyCombo, ShortcutBindings } from "./shortcuts.ts";
+import { SearchBar } from "./searchBar.ts";
+import { BlockDialog } from "./blockDialog.ts";
+import { AnnotationDialog } from "./annotationDialog.ts";
+import type { BlockDialogMode, DialogBlock } from "./blockDialog.ts";
+import {
+	clearMathCache,
+	ensureMath,
+	finishRenderMath,
+	mathAvailable,
+	mathSettled,
+	resetPendingMath,
+	upgradePendingMath,
+} from "./math.ts";
+import type { Direction, DropMode, MapController } from "./interactions.ts";
+import { resolveIndentUnit } from "../settings.ts";
+import type MindmapPlugin from "../main.ts";
+
+export const MINDMAP_VIEW_TYPE = "mindmap-mode-view";
+
+const UNDO_LIMIT = 100;
+
+/**
+ * Depth kept open when a map is first painted. 0 would leave only the root, 1
+ * shows the root plus its top-level branches with a descendant count on each
+ * toggle -- compact enough to scan, complete enough to navigate.
+ */
+const INITIAL_EXPAND_LEVEL = 1;
+
+/** Separates a body card's id from its owner's. Never appears in a parsed id. */
+const BODY_ID_MARK = "$body";
+
+/** Body cards show their block in full up to this much, then trail off. */
+const BODY_PREVIEW_CHARS = 2000;
+const BODY_PREVIEW_LINES = 40;
+
+/**
+ * How far past the edge of the viewport a card is still kept in the document,
+ * in screen pixels.
+ *
+ * The whole map lives in one composited layer, so everything in it is content
+ * the browser rasterises and hit-tests whether or not it is on screen -- and a
+ * map of a few hundred cards is tens of thousands of pixels tall. Only what is
+ * nearly in view earns its place; the margin is what stops a card appearing at
+ * the edge of the screen mid-pan, and what leaves room for the tools row that
+ * hangs outside a card's own box.
+ */
+const CULL_MARGIN = 400;
+
+/**
+ * The same, for the connector layer, and deliberately much wider.
+ *
+ * Connectors are inert -- one SVG, no pointer events, no style of their own to
+ * recalculate -- so the only thing culling them saves is the size of the paint
+ * list, and rebuilding the layer costs an invalidation of the whole thing. At
+ * this margin a pan crosses out of the drawn region every screenful or so
+ * rather than every frame, which is what keeps the layer still while the
+ * camera moves over it.
+ */
+const EDGE_MARGIN = 1600;
+
+/**
+ * How much further than `CULL_MARGIN` a card has to travel before it is taken
+ * out again, in screen pixels.
+ *
+ * Show and hide on the same boundary makes a card sitting on it flip on every
+ * other frame of a slow pan -- a style recalc and a paint apiece, for a card
+ * nobody can see either way. The band is the whole fix: it comes back early and
+ * leaves late.
+ */
+const CULL_HYSTERESIS = 200;
+
+/**
+ * The furthest the connector layer is ever drawn past the viewport, in *content*
+ * pixels.
+ *
+ * `EDGE_MARGIN` is a screen distance, so zooming out multiplies it: at the
+ * smallest zoom it asks for sixteen thousand content pixels on every side, and
+ * the whole layer is rebuilt each time the camera leaves that region. The cap
+ * has to stay above `CULL_MARGIN` divided by the smallest zoom, or the drawn
+ * region stops containing the cards' own box and `covers` fails every frame.
+ */
+const EDGE_MAX_CONTENT = 6000;
+
+/**
+ * How many cards may have their `is-offscreen` class flipped in one frame.
+ *
+ * The scan is arithmetic and runs over the whole map; this caps only the part
+ * that touches the DOM, because a few hundred class flips in one frame is a
+ * style recalc long enough to drop it. Whatever is left over is carried to the
+ * next frame, which is why the continuation exists.
+ */
+const CULL_BUDGET = 150;
+
+/**
+ * How many times a cull may measure cards it just showed and lay the map out
+ * again before it leaves the rest to the next one.
+ *
+ * Each round is a whole layout, and what it corrects are sizes that were real
+ * measurements to begin with, so stopping early costs a little drift and never
+ * a wrong map.
+ */
+const REMEASURE_ROUNDS = 3;
+
+/**
+ * Cards on screen at once past which the map stops animating its hovers.
+ *
+ * Past this, a pointer crossing the map costs more style recalculation than the
+ * transitions are worth; `mm-dense` in `styles.css` is what turns them off.
+ */
+const DENSE_NODE_COUNT = 300;
+
+/**
+ * What asked for the work, carried into the timing log so a slow map can be
+ * read as "typing is slow" rather than as a list of milliseconds.
+ */
+export type PaintReason =
+	| "edit"
+	| "fold"
+	| "search"
+	| "settings"
+	| "resize"
+	| "setViewData"
+	| "math-remeasure"
+	| "cull"
+	| "export";
+
+/**
+ * What a body card shows. The full text stays one click away on the card's own
+ * expand button, so this only has to stop a 300-line code block from becoming a
+ * 300-line card.
+ */
+function previewOf(text: string): string {
+	const lines = text.replace(/\s+$/, "").split("\n");
+	let clipped = lines.length > BODY_PREVIEW_LINES;
+	let out = lines.slice(0, BODY_PREVIEW_LINES).join("\n");
+	if (out.length > BODY_PREVIEW_CHARS) {
+		out = out.slice(0, BODY_PREVIEW_CHARS);
+		clipped = true;
+	}
+	return clipped ? `${out.replace(/\s+$/, "")}…` : out;
+}
+
+/** Somewhere a keystroke means a character rather than a command. */
+function inTextField(target: EventTarget | null): boolean {
+	if (!(target instanceof HTMLElement)) return false;
+	return (
+		target.isContentEditable ||
+		target.tagName === "INPUT" ||
+		target.tagName === "TEXTAREA"
+	);
+}
+
+/**
+ * Blocks that must keep their own shape: fenced code, indented code and tables.
+ * These skip the inline markdown pass, so a `**` inside a code sample stays a
+ * `**`, and they are drawn in a monospace face where alignment carries meaning.
+ */
+function looksPreformatted(text: string): boolean {
+	return /^(?:```|~~~|\t| {4}|\|)/.test(text);
+}
+
+interface PendingFocus {
+	line: number;
+	edit: boolean;
+}
+
+/** Where a body card came from, so its editor can find the range again. */
+interface BodyRef {
+	ownerKey: string;
+	index: number;
+}
+
+/**
+ * A node to hold still across a repaint, and the viewport point to hold it at.
+ *
+ * Folding re-runs the whole layout, and `normalize` re-origins every card on the
+ * new bounding box, so without this the entire map slides under the cursor even
+ * though the branch you clicked is where you left it.
+ */
+interface Anchor {
+	key: string;
+	screenX: number;
+	screenY: number;
+}
+
+/**
+ * What a paint owed the camera, held for the MathJax wait that follows it.
+ *
+ * The framing is spent by the paint that promised it, and the map the user ends
+ * up looking at is the one the formulas were rendered into -- so a paint that
+ * was going to fit, focus or reveal has to be able to promise it again.
+ */
+interface Framing {
+	fit: boolean;
+	focus: string | null;
+	reveal: string | null;
+}
+
+export class MindmapView extends TextFileView implements MapController {
+	readonly canvas: Canvas;
+
+	private readonly plugin: MindmapPlugin;
+	private edgeLayer: SVGSVGElement | null = null;
+	private nodeLayer: HTMLElement | null = null;
+	private parsed: ParsedDoc | null = null;
+	private layoutNodes: LayoutNode[] = [];
+	private elements = new Map<string, NodeElement>();
+	/**
+	 * The card for each entry of `layoutNodes`, at the same index.
+	 *
+	 * Filled once per paint so the scan behind every pan frame is an array read
+	 * rather than a string-keyed lookup per node.
+	 */
+	private layoutElements: Array<NodeElement | null> = [];
+	/** Reused between frames: a pan plans its culling without allocating. */
+	private readonly cullPlan: CullPlan = emptyPlan();
+	/**
+	 * The one frame everything the view defers reaches it through: the cull's
+	 * continuation when a budget ran out, and the pane resize, which may not do
+	 * any of its work where Obsidian calls it from.
+	 */
+	private readonly frame = new Frame(window);
+	/** A pane resize the frame has not acted on yet. */
+	private resized = false;
+	/**
+	 * The tree the last paint built, kept so a cull that puts an unmeasured card
+	 * back can measure it and lay the map out again around it.
+	 */
+	private paintRoot: LayoutNode | null = null;
+	/** True while that re-measure is running, so it cannot re-enter itself. */
+	private remeasuring = false;
+	/** The laid-out size of the whole map, for redrawing the connector layer. */
+	private mapWidth = 0;
+	private mapHeight = 0;
+	/** The region the connectors were last drawn for. Null means "all of it". */
+	private edgeView: ViewBox | null = null;
+
+	private collapsedKeys = new Set<string>();
+	private foldSeedPending = false;
+	/**
+	 * A restored focus waiting for the first framing to honour it.
+	 *
+	 * Not `pendingFocus`, which is where an edit wants the caret. This one only
+	 * decides where the camera lands when a note opens: on the node the user was
+	 * last working on, or -- when that node is gone, renamed out from under its
+	 * key, or hidden inside a branch they left folded -- on the whole map.
+	 */
+	private restoreFocusKey: string | null = null;
+	/** Body cards drawn by the last paint, keyed by their synthetic id. */
+	private bodyNodes = new Map<string, BodyRef>();
+	/** Consumed by the next paint. */
+	private anchor: Anchor | null = null;
+	private selectionKey: string | null = null;
+	private editingId: string | null = null;
+	private pendingFocus: PendingFocus | null = null;
+
+	private undoStack: string[] = [];
+	private redoStack: string[] = [];
+
+	private search: SearchBar | null = null;
+	/** Kept when the bar closes, dropped when the file changes. */
+	private searchQuery: SearchQuery = { text: "", regex: false };
+	/** The current match list, in document order. */
+	private matchKeys: string[] = [];
+	private matchIndex = 0;
+	/**
+	 * Branches this search session opened to show a match.
+	 *
+	 * Handed back as the session moves rather than all at once at the end:
+	 * stepping to a match elsewhere folds every recorded branch that is not on the
+	 * new match's own path, so the map never accumulates the trail of a search.
+	 * Closing the bar folds the rest -- except that same path, because the card
+	 * the query was asked for has to still be there once the bar is gone. A branch
+	 * the user folds or unfolds themselves meanwhile is theirs and drops out of
+	 * the set.
+	 */
+	private searchRevealed = new Set<string>();
+	/** A match to bring into view once the next paint has measured it. */
+	private pendingReveal: string | null = null;
+
+	/**
+	 * The resolved key table, rebuilt on demand.
+	 *
+	 * Dropped by `refresh`, which is what the plugin calls after a setting is
+	 * written -- so a shortcut rebound in the settings tab is live in every open
+	 * map before the tab is even closed.
+	 */
+	private shortcutBindings: ShortcutBindings | null = null;
+	/** What `bindScope` registered, so a rebinding can take them off again. */
+	private scopeHandlers: KeymapEventHandler[] = [];
+
+	private detachInteractions: (() => void) | null = null;
+	private popover: HTMLElement | null = null;
+	private dialog: BlockDialog | AnnotationDialog | null = null;
+	private needsFit = true;
+	private paintedEmpty = false;
+	private paintToken = 0;
+	/** Off unless the user asked for it, and one branch per call site when off. */
+	private readonly perf = new Perf();
+
+	constructor(leaf: WorkspaceLeaf, plugin: MindmapPlugin) {
+		super(leaf);
+		this.plugin = plugin;
+		this.perf.enabled = plugin.settings.debugTiming;
+
+		this.contentEl.addClass("mindmap-mode");
+		this.canvas = new Canvas(this.contentEl, {
+			wheel: plugin.settings.wheel,
+			// Only blank space starts a pan; everything a node owns belongs to the
+			// drag and click handlers. The whole node, not just the card: the
+			// toggle, the add button and the annotation strip all sit outside the
+			// card, and letting a pan start on one means the canvas takes pointer
+			// capture, after which Chromium retargets the click to the viewport
+			// and the button never fires. A leaf's empty tools slot is still
+			// pannable because that row is `pointer-events: none` until hovered,
+			// so the pointer never lands on the node at all.
+			canPan: (target) => !target.closest(".mm-node"),
+			// Every camera move ends up here, coalesced to one call a frame:
+			// panning, zooming, fitting, and the jumps that framing does.
+			onView: () => this.cullToView(),
+		});
+		this.canvas.viewport.tabIndex = 0;
+		this.buildToolbar();
+		this.scope = this.buildScope();
+	}
+
+	/**
+	 * The hotkeys a map owns while its tab is the active one.
+	 *
+	 * Obsidian pushes a view's scope whenever its leaf is active, whatever inside
+	 * the view happens to hold the DOM focus -- which is the whole point: the
+	 * viewport handler in `interactions.ts` only fires once a card has been
+	 * clicked, so a map that was just opened saw no find key at all. `View.scope`
+	 * is what raised `minAppVersion` to 1.5.7; the viewport handler stays as the
+	 * path that also holds when the keymap is busy with a scope of its own.
+	 */
+	private buildScope(): Scope {
+		const scope = new Scope(this.app.scope);
+		this.bindScope(scope);
+		return scope;
+	}
+
+	/**
+	 * Puts the two scoped actions on the keys they are bound to now, replacing
+	 * whatever they were on before, so rebinding "Find in the map" moves this
+	 * path along with the viewport handler rather than leaving the old key half
+	 * working.
+	 */
+	private bindScope(scope: Scope): void {
+		for (const handler of this.scopeHandlers) scope.unregister(handler);
+		this.scopeHandlers = [];
+
+		const bindings = this.bindings();
+		for (const combo of bindings.search) {
+			this.registerScoped(scope, combo, (evt) => {
+				evt.preventDefault();
+				this.openSearch();
+				return false;
+			});
+		}
+		// Only ours while a bar is up. Returning anything but `false` hands the
+		// key straight on, so every other meaning it has in Obsidian is left
+		// alone.
+		for (const combo of bindings["close-search"]) {
+			this.registerScoped(scope, combo, () => !this.closeSearch());
+		}
+	}
+
+	private registerScoped(scope: Scope, combo: KeyCombo, run: KeymapEventListener): void {
+		const modifiers: Modifier[] = [];
+		if (combo.mod) modifiers.push("Mod");
+		if (combo.alt) modifiers.push("Alt");
+		if (combo.shift) modifiers.push("Shift");
+
+		// A press with no modifier is a character somebody may be typing, and
+		// this scope answers wherever the focus is -- including the find bar's
+		// own input. Escape and the named keys are not characters, so they are
+		// left to fire.
+		//
+		// `KeymapEventListener` answers `false | any`, and only the `false` is
+		// load-bearing -- every other value hands the key on -- so what `run`
+		// said comes back as that one distinction rather than as an untyped
+		// value passed straight through.
+		const guarded =
+			modifiers.length === 0 && combo.key.length === 1
+				? (evt: KeyboardEvent, ctx: KeymapContext): boolean =>
+						inTextField(evt.target) ? true : run(evt, ctx) !== false
+				: run;
+
+		// Obsidian matches a registered key against an interpreted "virtual key",
+		// and which case it normalises a letter to is not part of the public API:
+		// `hotkeys.json` spells them uppercase, a KeyboardEvent reports "f". Both
+		// spellings are registered rather than betting on one -- both handlers do
+		// the same idempotent thing, so a keymap that ran both costs nothing.
+		const keys =
+			combo.key.length === 1 && combo.key.toLowerCase() !== combo.key.toUpperCase()
+				? [combo.key.toUpperCase(), combo.key.toLowerCase()]
+				: [combo.key === "Space" ? " " : combo.key];
+		for (const key of keys) this.scopeHandlers.push(scope.register(modifiers, key, guarded));
+	}
+
+	// --- Obsidian plumbing ---------------------------------------------------
+
+	override getViewType(): string {
+		return MINDMAP_VIEW_TYPE;
+	}
+
+	override getDisplayText(): string {
+		return this.file?.basename ?? "Mind map";
+	}
+
+	override getIcon(): string {
+		return "git-fork";
+	}
+
+	override getViewData(): string {
+		return this.data;
+	}
+
+	override setViewData(data: string, clear: boolean): void {
+		// The save round-trip hands back the exact string that was just written,
+		// and a map already drawn from it has nothing to do about it. `clear`
+		// means a different file and is never skipped; neither is the first call
+		// for a file, which has no parse behind it yet.
+		if (!clear && data === this.data && this.parsed !== null) {
+			this.perf.event("setViewData", { clear, skipped: true });
+			return;
+		}
+		this.perf.event("setViewData", { clear, skipped: false });
+
+		this.data = data;
+		if (clear) {
+			// Torn down without restoring folds: `this.file` already points at the
+			// new note, so a restore would write this map's shape onto that path.
+			this.resetSearch();
+			this.searchQuery = { text: "", regex: false };
+			this.collapsedKeys.clear();
+			this.selectionKey = null;
+			this.restoreFocusKey = null;
+			this.undoStack = [];
+			this.redoStack = [];
+			this.needsFit = true;
+			// Nothing this map measured is about the note now arriving, and the
+			// camera is about to be reframed for it, so the next paint measures
+			// every card rather than reusing a size from the last note.
+			this.layoutNodes = [];
+			this.layoutElements = [];
+			this.paintRoot = null;
+			// Nothing this note's formulas render to is worth keeping for the
+			// next one, and the cache is bounded by dropping it here.
+			clearMathCache();
+			// `clear` means a different file, which is the only moment the map
+			// may re-fold. Saves and external edits arrive with clear === false,
+			// so typing can never collapse the tree out from under the user.
+			this.foldSeedPending = true;
+		}
+		this.render("setViewData");
+	}
+
+	override clear(): void {
+		this.data = "";
+		this.parsed = null;
+		this.cancelFrame();
+		this.resized = false;
+		this.layoutNodes = [];
+		this.layoutElements = [];
+		this.paintRoot = null;
+		this.elements.clear();
+		resetPendingMath();
+		this.resetSearch();
+		this.searchQuery = { text: "", regex: false };
+		this.collapsedKeys.clear();
+		this.selectionKey = null;
+		this.restoreFocusKey = null;
+		this.paintToken++;
+		this.closePopover();
+		// The dialog holds line ranges from the file being cleared; leaving it up
+		// would let a save splice ranges that no longer mean anything.
+		this.closeDialog();
+	}
+
+	override async onOpen(): Promise<void> {
+		// Warm MathJax now rather than on the first formula: opening a map is
+		// already a deliberate action, so the cost is invisible here, and it
+		// spares the first painted map its one placeholder-to-formula rebuild.
+		// Deliberately not in the plugin's onload -- users who never open a map
+		// should not pay for it at Obsidian startup.
+		void ensureMath();
+		this.detachInteractions = attachInteractions(this);
+		this.addAction("file-text", "Edit as markdown", () => {
+			void this.plugin.toggleLeaf(this.leaf);
+		});
+	}
+
+	override async onClose(): Promise<void> {
+		this.paintToken++;
+		this.cancelFrame();
+		// Closing the tab is the last chance to keep a search out of the record:
+		// what reaches disk has to be the fold shape the user chose.
+		if (this.restoreSearchFolds()) this.rememberState();
+		this.resetSearch();
+		this.detachInteractions?.();
+		this.detachInteractions = null;
+		this.closePopover();
+		this.closeDialog();
+		this.canvas.destroy();
+	}
+
+	/**
+	 * The pane changed shape.
+	 *
+	 * Nothing here may read or write the DOM, and the frame below is why. Obsidian
+	 * reports a resize from a `ResizeObserver`, so this runs inside that
+	 * observer's own callback -- and anything that touches layout there changes
+	 * the boxes the observer is in the middle of reporting on. Chromium's answer
+	 * is to log "ResizeObserver loop completed with undelivered notifications"
+	 * and schedule another frame to deliver what it had to drop, which calls this
+	 * again: a console full of warnings and a map that never stops re-culling.
+	 * Even the read is enough -- `cullToView` asks the viewport for its size, and
+	 * on a map with a few hundred cards that forced layout is the expensive half.
+	 *
+	 * So the resize is only recorded here. Invalidating the cached rect is pure
+	 * bookkeeping -- it drops a number, it does not measure anything -- and the
+	 * frame does the rest, after the observer has finished and a size change is
+	 * once again just a size change. A split dragged across the window reports
+	 * dozens of resizes a frame; they coalesce into one cull.
+	 */
+	override onResize(): void {
+		// The one thing that moves the viewport itself without going through
+		// `Canvas.apply`, which is what the cached rect is for.
+		this.canvas.invalidateRect();
+		this.resized = true;
+		this.requestFrame();
+	}
+
+	/** Whatever the view has deferred, on the next frame, once. */
+	private requestFrame(): void {
+		this.frame.request(() => this.runFrame());
+	}
+
+	private runFrame(): void {
+		const resized = this.resized;
+		this.resized = false;
+		// A view painted while hidden measured every card as zero-sized, so there
+		// is no map to cull -- only one to paint, now that the pane has a size.
+		if (resized && this.paintedEmpty) {
+			this.render("resize");
+			return;
+		}
+		// Nothing moved the camera, but the window it looks through changed
+		// shape, so what is on screen changed with it.
+		this.cullToView();
+	}
+
+	override onPaneMenu(menu: Menu, source: string): void {
+		super.onPaneMenu(menu, source);
+		menu.addItem((item) =>
+			item
+				.setTitle("Edit as markdown")
+				.setIcon("file-text")
+				.onClick(() => void this.plugin.toggleLeaf(this.leaf)),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("Fit map to window")
+				.setIcon("maximize")
+				.onClick(() => this.fit()),
+		);
+
+		// One named section rather than four loose items: Obsidian sorts a pane
+		// menu by section, so a separator added by hand can end up somewhere
+		// other than in front of the group it was meant to open.
+		for (const entry of EXPORT_COMMANDS) {
+			menu.addItem((item) =>
+				item
+					.setSection("mindmap-export")
+					.setTitle(entry.menu)
+					.setIcon(entry.icon)
+					.onClick(() => this.exportAs(entry.format)),
+			);
+		}
+	}
+
+	/** Called by the plugin when settings change. */
+	refresh(): void {
+		this.shortcutBindings = null;
+		this.perf.enabled = this.plugin.settings.debugTiming;
+		// A setting can change what every card measures, so the next paint has to
+		// measure them rather than reuse the sizes this one left behind.
+		this.layoutNodes = [];
+		this.layoutElements = [];
+		// A formula is rendered against the settings in force, so the typeset
+		// copies go with them.
+		clearMathCache();
+		if (this.scope) this.bindScope(this.scope);
+		this.canvas.setOptions({ wheel: this.plugin.settings.wheel });
+		this.render("settings");
+	}
+
+	bindings(): ShortcutBindings {
+		this.shortcutBindings ??= resolveBindings(this.plugin.settings.shortcuts);
+		return this.shortcutBindings;
+	}
+
+	// --- toolbar --------------------------------------------------------------
+
+	/**
+	 * The corner of the map: the exports in a panel of their own, above the
+	 * panel holding the camera and the map.
+	 *
+	 * Two blocks rather than one crowded one, and the exports are the block that
+	 * sits on top: underneath is where the pointer has always found the zoom, so
+	 * the camera panel keeps the bottom edge. The column sits on `contentEl`,
+	 * outside `.mm-viewport` and so outside `.mm-content` -- which is what the
+	 * export clones, and the reason none of these buttons can end up in a file.
+	 */
+	private buildToolbar(): void {
+		const bars = this.contentEl.createDiv({ cls: "mm-toolbars" });
+		const exports = bars.createDiv({ cls: ["mm-toolbar", "mm-toolbar-export"] });
+		const camera = bars.createDiv({ cls: ["mm-toolbar", "mm-toolbar-camera"] });
+
+		const button = (
+			bar: HTMLElement,
+			icon: string,
+			label: string,
+			onClick: () => void,
+		): HTMLElement => {
+			const el = bar.createDiv({ cls: "mm-tool", attr: { "aria-label": label } });
+			setIcon(el, icon);
+			el.addEventListener("click", (ev) => {
+				ev.preventDefault();
+				onClick();
+			});
+			return el;
+		};
+
+		// The same four entries the palette and the tab menu are built from, in
+		// the same order and under the same names: three places offering the
+		// export, one list saying what the export is.
+		for (const entry of EXPORT_COMMANDS) {
+			button(exports, entry.icon, entry.menu, () => this.exportAs(entry.format));
+		}
+
+		button(camera, "zoom-in", "Zoom in", () => this.canvas.zoomBy(1.2));
+		button(camera, "zoom-out", "Zoom out", () => this.canvas.zoomBy(1 / 1.2));
+		button(camera, "maximize", "Fit to window", () => this.fit());
+		button(camera, "crosshair", "Centre on selection", () => this.centreOnSelection());
+		button(camera, "chevrons-up-down", "Expand all", () => this.expandAll());
+		button(camera, "chevrons-down-up", "Collapse all", () => this.collapseAll());
+		button(camera, "search", "Find in the map", () => this.openSearch());
+		button(camera, "help-circle", "Keyboard shortcuts", () => this.showShortcuts());
+	}
+
+	/**
+	 * What the map answers to, as it stands.
+	 *
+	 * The keys are read out of the live bindings rather than a list of their
+	 * own, so a shortcut the user has rebound in the settings tab is shown here
+	 * the way they bound it -- and an unbound one is not shown at all.
+	 */
+	private showShortcuts(): void {
+		const mouse: Array<[string, string]> = [
+			["Double-click a card", "Edit the node"],
+			["⤢ on a content card", "Show the whole block, rendered"],
+			["Click a link in a content card", "Open it"],
+			["+ beside a card", "New child"],
+			["Right-click a card", "The node's menu"],
+			["Drag onto a card", "Reparent it"],
+			["Drag onto a card's top / bottom edge", "Reorder it beside that card"],
+			["Wheel / pinch", "Zoom; drag blank space to pan"],
+		];
+
+		const panel = this.openPopover();
+		panel.addClass("mm-shortcuts");
+		panel.createEl("h4", { text: "Mind map shortcuts" });
+		const table = panel.createEl("table");
+		const row = (keys: string, what: string): void => {
+			const tr = table.createEl("tr");
+			tr.createEl("td", { cls: "mm-keys", text: keys });
+			tr.createEl("td", { text: what });
+		};
+
+		const bindings = this.bindings();
+		const isMac = Platform.isMacOS;
+		for (const entry of SHORTCUTS) {
+			const combos = bindings[entry.action];
+			if (combos.length === 0) continue;
+			row(combos.map((combo) => comboToString(combo, isMac)).join("  /  "), entry.name);
+		}
+		for (const [keys, what] of mouse) row(keys, what);
+
+		panel.createDiv({
+			cls: "mm-popover-hint mm-shortcuts-footer",
+			text: "Every key above can be changed in the plugin's settings.",
+		});
+	}
+
+	// --- rendering ------------------------------------------------------------
+
+	private parseOptions() {
+		const s = this.plugin.settings;
+		return {
+			title: this.file?.basename ?? "Untitled",
+			annotations: s.inlineAnnotations,
+			source: s.source,
+			rootPolicy: s.rootPolicy,
+			maxHeadingDepth: s.maxHeadingDepth,
+			indentUnit: resolveIndentUnit(s),
+		};
+	}
+
+	private render(reason: PaintReason): void {
+		this.parsed = parseMarkdown(this.data, this.parseOptions());
+
+		// Before anything reveals a node: seeding replaces the whole set.
+		if (this.foldSeedPending) {
+			this.foldSeedPending = false;
+			this.seedFolds();
+		}
+
+		// An edit or an external change can add, remove or rename a match, and
+		// the highlight has to follow the note rather than the stale class list.
+		this.refreshSearch();
+
+		if (this.pendingFocus) {
+			const focus = this.pendingFocus;
+			this.pendingFocus = null;
+			const target = this.findByLine(focus.line);
+			if (target) {
+				this.selectionKey = target.key;
+				this.revealAncestors(target);
+				this.paint(reason);
+				if (focus.edit) this.beginEdit(target.id);
+				this.revealSelection();
+				return;
+			}
+		}
+		this.paint(reason);
+	}
+
+	/**
+	 * Every node at or below `depth`, counting the root as 0, that has anything
+	 * to hide. `Infinity` yields nothing, which is how "expand all" is spelled.
+	 *
+	 * The walk continues past nodes that are themselves collapsed. `paint()` just
+	 * stops descending when it meets a collapsed key, so the deeper entries cost
+	 * nothing to carry -- and they are what makes expanding a branch reveal one
+	 * level at a time rather than dumping the whole subtree on screen.
+	 */
+	private collapsedAtDepth(depth: number): Set<string> {
+		const keys = new Set<string>();
+		if (!this.parsed || !Number.isFinite(depth)) return keys;
+		// childCount, not children.length: a section whose only content is
+		// paragraphs or callouts still has body cards to fold away.
+		const showBody = this.plugin.settings.showBodyNodes;
+		const visit = (node: MindNode, d: number): void => {
+			if (d >= depth && this.childCount(node, showBody) > 0) keys.add(node.key);
+			for (const child of node.children) visit(child, d + 1);
+		};
+		visit(this.parsed.root, 0);
+		return keys;
+	}
+
+	private foldFrom(depth: number): void {
+		this.collapsedKeys = this.collapsedAtDepth(depth);
+		// The whole fold shape is being replaced, so there is nothing left for a
+		// search to put back.
+		this.searchRevealed.clear();
+	}
+
+	/**
+	 * The shape a freshly opened note starts in: what the user left behind if
+	 * anything was remembered, and the default otherwise.
+	 */
+	private seedFolds(): void {
+		const parsed = this.parsed;
+		const path = this.file?.path;
+		const saved = parsed && path ? this.plugin.readNoteState(path) : null;
+		if (!parsed || !saved) {
+			this.foldFrom(INITIAL_EXPAND_LEVEL);
+			return;
+		}
+
+		// Keys the note no longer has are dropped rather than carried. They would
+		// cost a lookup on every paint, and the next save would write them
+		// straight back -- a note edited outside Obsidian would accumulate the
+		// ghost of every heading it ever had.
+		const showBody = this.plugin.settings.showBodyNodes;
+		const restored = new Set<string>();
+		for (const key of saved.collapsed) {
+			const node = parsed.byKey.get(key);
+			if (node && this.childCount(node, showBody) > 0) restored.add(key);
+		}
+		this.collapsedKeys = restored;
+
+		const focus = this.findSaved(parsed, saved.focusKey, saved.focusId);
+		// A focus inside a branch the user left folded loses to the fold: opening
+		// the branch to show it would undo a decision they made on purpose, and
+		// selecting a card that is not on screen leaves the keyboard aimed at
+		// nothing. The map simply frames itself instead.
+		if (!focus || !this.isVisible(focus)) return;
+		this.selectionKey = focus.key;
+		this.restoreFocusKey = focus.key;
+	}
+
+	/**
+	 * The node a saved focus points at: by text path first, by tree position
+	 * when the text has changed since.
+	 *
+	 * Renaming a node moves its key and leaves its position; inserting a sibling
+	 * above it does the reverse. Only an edit that does both at once loses the
+	 * focus, and losing it costs a default framing, nothing more.
+	 */
+	private findSaved(parsed: ParsedDoc, key?: string, id?: string): MindNode | null {
+		const byKey = key === undefined ? undefined : parsed.byKey.get(key);
+		if (byKey) return byKey;
+		return (id === undefined ? undefined : parsed.byId.get(id)) ?? null;
+	}
+
+	/** False when a collapsed ancestor is keeping the node off the map. */
+	private isVisible(node: MindNode): boolean {
+		for (let p: MindNode | null = node.parent; p; p = p.parent) {
+			if (this.collapsedKeys.has(p.key)) return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Hand the current shape to the plugin, which batches the writes.
+	 *
+	 * A map sitting at exactly the default fold with nothing selected is stored
+	 * as nothing at all. That is what a note looks like the moment it is opened
+	 * and never touched, and an entry apiece for those would be the bulk of the
+	 * file in exchange for restoring precisely the state you get without it.
+	 */
+	private rememberState(): void {
+		const path = this.file?.path;
+		if (!this.parsed || !path || !this.plugin.settings.rememberFolds) return;
+
+		const focus = this.selectedNode();
+		if (!focus && this.isDefaultFold()) {
+			this.plugin.forgetNoteState(path);
+			return;
+		}
+		this.plugin.writeNoteState(path, {
+			collapsed: [...this.collapsedKeys],
+			focusKey: focus?.key,
+			focusId: focus?.id,
+		});
+	}
+
+	private isDefaultFold(): boolean {
+		const fallback = this.collapsedAtDepth(INITIAL_EXPAND_LEVEL);
+		if (fallback.size !== this.collapsedKeys.size) return false;
+		for (const key of this.collapsedKeys) if (!fallback.has(key)) return false;
+		return true;
+	}
+
+	/**
+	 * Open whatever is hiding a node the user is about to work on.
+	 *
+	 * Indent, outdent, drag and undo can all land a node under a collapsed
+	 * parent. Without this the node simply vanishes, and every follow-up -- the
+	 * selection, `beginEdit` -- silently no-ops against a missing element.
+	 */
+	private revealAncestors(node: MindNode): void {
+		for (let p: MindNode | null = node.parent; p; p = p.parent) {
+			this.collapsedKeys.delete(p.key);
+		}
+	}
+
+	/**
+	 * Note where a node currently sits on screen, so the next paint can put it
+	 * back there. Reads the layout the *previous* paint left behind.
+	 */
+	private markAnchor(key: string | undefined): void {
+		const layout = key ? this.layoutNodes.find((l) => l.node.key === key) : undefined;
+		if (!layout || !key) {
+			this.anchor = null;
+			return;
+		}
+		const canvas = this.canvas;
+		this.anchor = {
+			key,
+			screenX: canvas.tx + layout.x * canvas.scale,
+			screenY: canvas.ty + layout.y * canvas.scale,
+		};
+	}
+
+	/** Nothing was clicked, so hold the selection still, or the root. */
+	private markGlobalAnchor(): void {
+		this.markAnchor(this.selectedNode()?.key ?? this.parsed?.root.key);
+	}
+
+	expandAll(): void {
+		this.markGlobalAnchor();
+		this.foldFrom(Infinity);
+		this.paint("fold");
+	}
+
+	/** Back to the view the map opens with. */
+	collapseAll(): void {
+		this.markGlobalAnchor();
+		this.foldFrom(INITIAL_EXPAND_LEVEL);
+		this.paint("fold");
+	}
+
+	/**
+	 * Back to the shape a note with nothing remembered opens in.
+	 *
+	 * The paint that follows finds the map at exactly the default with nothing
+	 * selected, which is the one state `rememberState` stores as no entry at
+	 * all -- so the command's own `forgetNoteState` is confirmed, not undone.
+	 */
+	resetFolds(): void {
+		this.selectionKey = null;
+		this.restoreFocusKey = null;
+		this.collapseAll();
+	}
+
+	// --- body content as nodes -------------------------------------------------
+
+	/**
+	 * A node's children as the map draws them: its real children plus one card
+	 * per block of note content, interleaved in the order they appear in the file.
+	 *
+	 * The body cards are synthesised here and never enter `parsed.byId`, so every
+	 * mutation -- rename, move, delete, indent -- looks them up, misses, and does
+	 * nothing. That is the whole safety story: the note owns those lines, and the
+	 * only way to change them is the editor `openBody` puts up.
+	 */
+	private childrenOf(parsed: ParsedDoc, node: MindNode, showBody: boolean): MindNode[] {
+		if (!showBody || node.bodyRanges.length === 0) return node.children;
+
+		const merged: Array<{ line: number; node: MindNode }> = node.children.map((c) => ({
+			line: c.lineStart,
+			node: c,
+		}));
+
+		node.bodyRanges.forEach((range, index) => {
+			if (node.annotationIndices.includes(index)) return;
+			const body = this.makeBodyNode(parsed, node, range, index);
+			merged.push({ line: range[0], node: body });
+		});
+
+		merged.sort((a, b) => a.line - b.line);
+		return merged.map((entry) => entry.node);
+	}
+
+	private makeBodyNode(
+		parsed: ParsedDoc,
+		owner: MindNode,
+		range: [number, number],
+		index: number,
+	): MindNode {
+		const id = `${owner.id}${BODY_ID_MARK}${index}`;
+		const body: MindNode = {
+			id,
+			key: `${owner.key}${BODY_ID_MARK}${index}`,
+			kind: "body",
+			virtual: true,
+			text: previewOf(bodyRangeText(parsed, range)),
+			level: owner.level,
+			indentWidth: 0,
+			indent: "",
+			marker: "",
+			spacing: "",
+			checkbox: null,
+			checkboxSpacing: "",
+			suffix: "",
+			lineStart: range[0],
+			blockEnd: range[1],
+			bodyRanges: [],
+			annotationIndices: [],
+			children: [],
+			// Kept for `revealAncestors`; `owner.children` is never touched, so the
+			// parsed tree stays exactly as the parser left it.
+			parent: owner,
+		};
+		this.bodyNodes.set(id, { ownerKey: owner.key, index });
+		return body;
+	}
+
+	private childCount(node: MindNode, showBody: boolean): number {
+		return node.children.length + (showBody ? bodyCardCount(node) : 0);
+	}
+
+	/**
+	 * Leaves in a branch counted over the whole note, folded parts included.
+	 *
+	 * This is what the balanced layout splits on. Counting only what is on screen
+	 * would let a fold deep inside one branch shunt a different branch across to
+	 * the other side of the root.
+	 */
+	private branchWeight(node: MindNode, showBody: boolean): number {
+		const bodies = showBody ? bodyCardCount(node) : 0;
+		if (node.children.length === 0) return Math.max(1, bodies);
+		let total = bodies;
+		for (const child of node.children) total += this.branchWeight(child, showBody);
+		return total;
+	}
+
+	/** Everything a collapsed node is hiding, body cards included. */
+	private hiddenCount(node: MindNode, showBody: boolean): number {
+		let total = showBody ? bodyCardCount(node) : 0;
+		for (const child of node.children) total += 1 + this.hiddenCount(child, showBody);
+		return total;
+	}
+
+	private findByLine(line: number): MindNode | null {
+		if (!this.parsed || line < 0) return null;
+		for (const node of this.parsed.byId.values()) {
+			if (node.lineStart === line) return node;
+		}
+		return null;
+	}
+
+	private paint(reason: PaintReason): void {
+		const parsed = this.parsed;
+		if (!parsed) return;
+		const started = this.perf.now();
+
+		// Invalidates any measurement callback still in flight from an earlier
+		// paint, so a slow MathJax flush cannot lay out a map that is now gone.
+		const token = ++this.paintToken;
+		const anchor = this.anchor;
+		this.anchor = null;
+
+		const s = this.plugin.settings;
+		this.elements.clear();
+		// The placeholders the last build left are about to be thrown away with
+		// the cards holding them, so only this build's may be upgraded.
+		resetPendingMath();
+		// Both layers are built off-tree and swapped in at the end of the build,
+		// below. A large map is a few hundred cards and as many connectors, and
+		// growing them inside the live document means the browser carries an
+		// invalidation for each one; a detached tree costs nothing until it is
+		// attached, and `replaceChildren` drops the old paint in the same step.
+		this.edgeLayer = createEdgeLayer();
+		this.nodeLayer = createDiv({ cls: "mm-nodes" });
+		// The layer that had connectors on it is being thrown away, so whatever
+		// region it was drawn for is no longer drawn anywhere.
+		this.edgeView = null;
+
+		const showBody = s.showBodyNodes;
+		this.bodyNodes.clear();
+
+		// Build the tree of visible nodes; a collapsed node contributes no children.
+		const rootLayout = createLayoutNode(parsed.root, null, 0);
+		const visible: LayoutNode[] = [];
+		const build = (node: MindNode, layout: LayoutNode): void => {
+			visible.push(layout);
+			if (this.collapsedKeys.has(node.key)) return;
+			for (const child of this.childrenOf(parsed, node, showBody)) {
+				const childLayout = createLayoutNode(child, layout, layout.depth + 1);
+				layout.children.push(childLayout);
+				build(child, childLayout);
+			}
+		};
+		build(parsed.root, rootLayout);
+
+		// Fixed by the note, not by what happens to be unfolded, so the balanced
+		// layout keeps every branch on the side it started on.
+		for (const branch of rootLayout.children) {
+			branch.weight = this.branchWeight(branch.node, showBody);
+		}
+
+		// What the last paint measured, and where it put it. A card whose text has
+		// not changed measures the same, so the only ones this paint has to lay
+		// out are the ones it is about to show.
+		const previous = new Map<string, LayoutNode>();
+		for (const layout of this.layoutNodes) previous.set(layout.node.id, layout);
+		const nearView = viewBoxFrom(this.canvas.metrics(), CULL_MARGIN);
+
+		let sawMath = false;
+		let reused = 0;
+		for (const layout of visible) {
+			const node = layout.node;
+			const collapsed = this.collapsedKeys.has(node.key);
+			const isBody = node.kind === "body";
+			const hasAnnotation = node.annotationIndices.length > 0;
+			const element = buildNodeElement(this.nodeLayer, layout, {
+				annotation: hasAnnotation ? annotationText(parsed, node) : null,
+				maxWidth: nodeMaxWidth(node.kind, hasAnnotation, s.maxNodeWidth),
+				branchColors: s.branchColors,
+				preformatted: isBody && looksPreformatted(node.text),
+				expandable: isBody,
+				addable: !isBody,
+				collapsed,
+				hasChildren: this.childCount(node, showBody) > 0,
+				hiddenCount: collapsed ? this.hiddenCount(node, showBody) : 0,
+			});
+			this.elements.set(node.id, element);
+			if (element.hasMath) sawMath = true;
+
+			// Built straight into the state the cull would have put it in anyway,
+			// which is the point: a card that the camera is nowhere near costs this
+			// paint no layout at all. Its size is the one it was measured at, and
+			// the cull that shows it again is what finally measures it.
+			const before = previous.get(node.id);
+			if (before === undefined || before.width === 0 || nearView === null) continue;
+			// Everything the card's own box is drawn from has to be what it was:
+			// the text, the checkbox in front of it, and the two attributes the
+			// stylesheet sizes a card by -- `data-depth` and `data-kind`.
+			if (
+				before.node.text !== node.text ||
+				before.node.checkbox !== node.checkbox ||
+				before.node.kind !== node.kind ||
+				before.depth !== layout.depth ||
+				overlaps(before, nearView)
+			) {
+				continue;
+			}
+			layout.width = before.width;
+			layout.height = before.height;
+			layout.cardWidth = before.cardWidth;
+			layout.cardHeight = before.cardHeight;
+			element.offscreen = true;
+			element.el.addClass("is-offscreen");
+			reused++;
+		}
+		this.perf.span("paint-build", started, { reason, nodes: visible.length, reused });
+
+		// On the content layer, not on the view root: the root is the box
+		// Obsidian's workspace observes for resizes, and nothing a paint does may
+		// give that observer a reason to fire.
+		this.canvas.content.toggleClass("mm-dense", visible.length > DENSE_NODE_COUNT);
+
+		// Attached only now that every card exists: one mutation of the live
+		// tree per paint, and the measuring pass below is the first thing that
+		// makes the browser lay any of it out.
+		this.canvas.content.replaceChildren(this.edgeLayer, this.nodeLayer);
+
+		// The fold shape and the selection are both final by now, and neither
+		// changes again before the next paint.
+		this.rememberState();
+
+		this.paintRoot = rootLayout;
+		const framing: Framing = {
+			fit: this.needsFit,
+			focus: this.restoreFocusKey,
+			reveal: this.pendingReveal,
+		};
+		this.measureAndPlace(rootLayout, visible, anchor, reason);
+		this.perf.span("paint", started, { reason, nodes: visible.length, reused });
+		if (!sawMath) return;
+
+		if (!mathSettled()) {
+			// First map with formulas this session: what is on screen right now
+			// is placeholder source text, because `renderMath` is only
+			// synchronous once MathJax is up. `ensureMath` settles either way, so
+			// this can run at most once per session.
+			void this.typesetMath(token, rootLayout, visible, anchor, framing);
+			return;
+		}
+		if (!mathAvailable()) return;
+
+		// MathJax emits its stylesheet adaptively, one glyph at a time, so a
+		// formula reaching for a glyph nobody has used yet measures short until
+		// the flush lands. Re-measure, but never rebuild: `measureAndPlace` only
+		// reads and positions, so it cannot schedule itself again.
+		//
+		// The flush is only ever worth a re-measure while a glyph is still new to
+		// the session, and the formulas on screen say whether this paint was one
+		// of those: when none of them moved, the pass is a layout of the whole
+		// note for no change at all, so it is skipped.
+		void finishRenderMath().then(() => {
+			if (token !== this.paintToken) return;
+			const mathStarted = this.perf.now();
+			if (!this.mathSizeChanged(visible)) {
+				this.perf.span("math-remeasure", mathStarted, { changed: false });
+				return;
+			}
+			this.reframe(framing);
+			this.measureAndPlace(rootLayout, this.staleMathCards(visible), anchor, "math-remeasure");
+			this.perf.span("math-remeasure", mathStarted, { changed: true });
+		});
+	}
+
+	/**
+	 * Put the formulas into the map that is already on screen, then measure it.
+	 *
+	 * The one thing the first paint of the session could not do was typeset, so
+	 * that is the only thing this does: the cards, their text and the layout
+	 * around them are all still right, and rebuilding them would render every
+	 * formula a second time to arrive at the same map.
+	 */
+	private async typesetMath(
+		token: number,
+		rootLayout: LayoutNode,
+		visible: LayoutNode[],
+		anchor: Anchor | null,
+		framing: Framing,
+	): Promise<void> {
+		await ensureMath();
+		if (token !== this.paintToken) return;
+
+		const started = this.perf.now();
+		const upgraded = upgradePendingMath();
+		if (upgraded === 0) {
+			// MathJax never came up. The source text on the cards is the final
+			// answer, and it is what the map was laid out around already.
+			this.perf.span("math-typeset", started, { upgraded });
+			return;
+		}
+
+		// The formulas are in their cards, but MathJax emits its stylesheet
+		// adaptively, so they measure short until the flush lands.
+		await finishRenderMath();
+		if (token !== this.paintToken) return;
+
+		this.reframe(framing);
+		this.measureAndPlace(rootLayout, this.staleMathCards(visible), anchor, "math-remeasure");
+		this.perf.span("math-typeset", started, { upgraded });
+	}
+
+	/** Promise the camera again what the paint that waited on MathJax owed it. */
+	private reframe(framing: Framing): void {
+		if (framing.fit) {
+			this.needsFit = true;
+			this.restoreFocusKey = framing.focus;
+		}
+		// Outside the guard on purpose: a jump has to be honoured on the map that
+		// formulas were actually rendered into, fit or no fit.
+		this.pendingReveal = framing.reveal;
+	}
+
+	/**
+	 * The cards a formula just changed the size of, and which of them can say so.
+	 *
+	 * Only a card carrying a formula can have moved, so the rest of the note is
+	 * left alone -- a whole-map pass here is a measurement of every card in the
+	 * note to correct a few dozen. A culled card has no size to read, so it is
+	 * marked unmeasured instead and the cull that puts it back takes the
+	 * measurement, which is the path a card built off screen already takes.
+	 */
+	private staleMathCards(visible: LayoutNode[]): LayoutNode[] {
+		const readable: LayoutNode[] = [];
+		for (const layout of visible) {
+			const element = this.elements.get(layout.node.id);
+			if (!element || !element.hasMath) continue;
+			if (element.offscreen) element.measured = false;
+			else readable.push(layout);
+		}
+		return readable;
+	}
+
+	/**
+	 * Did the stylesheet flush move a formula that is actually on screen?
+	 *
+	 * Only the cards in the document are asked: a culled one has no size to
+	 * compare, and a card built off screen is carrying a size from a paint where
+	 * it was measured, not from this one.
+	 */
+	private mathSizeChanged(visible: LayoutNode[]): boolean {
+		for (const layout of visible) {
+			const element = this.elements.get(layout.node.id);
+			if (!element || !element.hasMath || element.offscreen) continue;
+			if (
+				element.el.offsetWidth !== layout.width ||
+				element.el.offsetHeight !== layout.height
+			) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Measure cards and position everything.
+	 *
+	 * `measure` is what a paint has just built, or -- for a re-measure -- only the
+	 * cards something can have changed the size of. Everything else keeps the size
+	 * it was last measured at, which is the size the layout it is about to be run
+	 * through was given.
+	 *
+	 * Safe to run more than once over the same tree: `layoutTree` assigns
+	 * coordinates outright rather than accumulating them, and `renderEdges`
+	 * clears the layer before it draws.
+	 */
+	private measureAndPlace(
+		rootLayout: LayoutNode,
+		measure: LayoutNode[],
+		anchor: Anchor | null,
+		reason: PaintReason,
+	): void {
+		const started = this.perf.now();
+		let measured = 0;
+
+		// One batched read pass: every write above, every measurement here.
+		// offsetWidth, not getBoundingClientRect -- the cards sit inside a
+		// scaled `.mm-content`, and a rect would feed the zoom back into layout.
+		for (const layout of measure) {
+			const element = this.elements.get(layout.node.id);
+			// A culled card is out of the document and measures as nothing. The
+			// size it had when it was last in view is the one that still holds,
+			// and it is already on the layout node.
+			if (!element || element.offscreen) continue;
+			layout.width = element.el.offsetWidth;
+			layout.height = element.el.offsetHeight;
+			// The card apart from the node: an annotation strip is inside
+			// `.mm-node` and below `.mm-card`, and the layout centres, anchors
+			// and offsets on the card while spacing siblings by the node.
+			layout.cardWidth = element.card.offsetWidth;
+			layout.cardHeight = element.card.offsetHeight;
+			element.measured = true;
+			measured++;
+		}
+		this.perf.span("paint-measure", started, { reason, measured });
+
+		this.paintedEmpty = rootLayout.width === 0;
+		if (this.paintedEmpty) return;
+
+		this.applySelection();
+		this.applySearchState();
+		this.place(rootLayout, anchor, reason, true);
+	}
+
+	/**
+	 * Lay the measured cards out and write the result to the DOM.
+	 *
+	 * `frame` is what separates a paint from a re-measure: a paint owes the
+	 * camera whatever it was promised -- a fit, a restored focus, a jump to a
+	 * search match -- and a re-measure of a few cards the cull just showed owes
+	 * it nothing at all.
+	 */
+	private place(
+		rootLayout: LayoutNode,
+		anchor: Anchor | null,
+		reason: PaintReason,
+		frame: boolean,
+	): void {
+		const result = this.layOut(rootLayout, reason);
+
+		if (frame) {
+			// Read here, past the `paintedEmpty` return and before the framing
+			// branches: a map painted while hidden keeps its jump until `onResize`
+			// repaints it, and a jump that survives the read is spent either way.
+			const reveal = this.pendingReveal;
+			this.pendingReveal = null;
+			this.frameMap(result, anchor, reveal);
+		}
+
+		// Last, and unconditionally: the camera has finished moving, so this is
+		// the first moment the map can tell which cards are worth keeping. It
+		// draws the connectors too, which is why it runs even when nothing has
+		// changed hands -- a fresh paint has an empty layer to fill.
+		this.cullToView(true);
+	}
+
+	/**
+	 * Run the layout over the measured cards and write it to the DOM.
+	 *
+	 * Everything a repositioning needs and nothing a repaint does, which is what
+	 * lets the export re-place a map it has just shown in full without the cull
+	 * that would take half of it away again.
+	 */
+	private layOut(rootLayout: LayoutNode, reason: PaintReason): LayoutResult {
+		const s = this.plugin.settings;
+		const laidOut = this.perf.now();
+		const result = layoutTree(rootLayout, {
+			mode: s.layout,
+			horizontalGap: s.horizontalGap,
+			verticalGap: s.verticalGap,
+			padding: 60,
+		});
+		this.perf.span("paint-layout", laidOut, { reason, nodes: result.nodes.length });
+
+		const written = this.perf.now();
+		for (const layout of result.nodes) {
+			const element = this.elements.get(layout.node.id);
+			if (!element) continue;
+			element.el.style.transform = `translate(${layout.x}px, ${layout.y}px)`;
+			element.el.dataset.side = layout.side === 1 ? "right" : "left";
+		}
+
+		this.canvas.content.style.width = `${result.width}px`;
+		this.canvas.content.style.height = `${result.height}px`;
+		this.mapWidth = result.width;
+		this.mapHeight = result.height;
+		this.layoutNodes = result.nodes;
+		this.layoutElements = result.nodes.map(
+			(layout) => this.elements.get(layout.node.id) ?? null,
+		);
+		this.perf.span("paint-transform", written, { reason, nodes: result.nodes.length });
+		return result;
+	}
+
+	/**
+	 * Measure the cards a cull has just put back for the first time, and lay the
+	 * map out again around them.
+	 *
+	 * A card built off screen carries the size the paint before it measured, and
+	 * that size is what the layout used. Once it is actually in the document it
+	 * can say what it really is, and a title that grew or shrank since moves
+	 * everything below it -- so the map is placed again, and the cull at the end
+	 * of that may show more cards that have never been measured either. Bounded
+	 * rather than run to a fixed point: each round is a whole layout, and the
+	 * sizes it is correcting were real measurements to begin with.
+	 */
+	private measureNewlyShown(): void {
+		const root = this.paintRoot;
+		if (root === null || this.remeasuring) return;
+		this.remeasuring = true;
+		try {
+			for (let round = 0; round < REMEASURE_ROUNDS; round++) {
+				const started = this.perf.now();
+				const { measured, changed } = this.measureUnmeasured();
+				if (measured === 0) return;
+				this.perf.span("cull-measure", started, { measured, changed, round });
+				// Almost always nothing: the size a card was built with is one it
+				// was measured at, under the same text and the same rules, so the
+				// map it was laid out into is already the right one.
+				if (changed === 0) return;
+				this.place(root, null, "cull", false);
+			}
+		} finally {
+			this.remeasuring = false;
+		}
+	}
+
+	/**
+	 * Measure every card that is in the document without ever having been
+	 * measured there.
+	 *
+	 * Reports both how many it read and how many turned out to be a size other
+	 * than the one the layout was given, because only the second number is worth
+	 * a layout: the cards it read are ones a cull has just put back, and a card
+	 * whose reused size was right changes nothing about where anything sits.
+	 */
+	private measureUnmeasured(): { measured: number; changed: number } {
+		let measured = 0;
+		let changed = 0;
+		for (let i = 0; i < this.layoutNodes.length; i++) {
+			const element = this.layoutElements[i];
+			if (!element || element.offscreen || element.measured) continue;
+			const layout = this.layoutNodes[i];
+			const width = element.el.offsetWidth;
+			const height = element.el.offsetHeight;
+			const cardWidth = element.card.offsetWidth;
+			const cardHeight = element.card.offsetHeight;
+			element.measured = true;
+			measured++;
+			if (
+				width === layout.width &&
+				height === layout.height &&
+				cardWidth === layout.cardWidth &&
+				cardHeight === layout.cardHeight
+			) {
+				continue;
+			}
+			layout.width = width;
+			layout.height = height;
+			layout.cardWidth = cardWidth;
+			layout.cardHeight = cardHeight;
+			changed++;
+		}
+		return { measured, changed };
+	}
+
+	/** Point the camera at whatever this paint owes it. */
+	private frameMap(result: LayoutResult, anchor: Anchor | null, reveal: string | null): void {
+		if (this.needsFit) {
+			// A first look at the map reframes it deliberately; holding a node
+			// still would fight that. Where it reframes *to* is the one thing a
+			// restored session gets to change -- and only when the node it names
+			// actually made it onto the canvas.
+			this.needsFit = false;
+			const focus = this.restoreFocusKey;
+			this.restoreFocusKey = null;
+			const framed = focus === null ? undefined : result.nodes.find((l) => l.node.key === focus);
+			if (framed) {
+				this.canvas.centreOn(framed.x + framed.width / 2, framed.y + framed.height / 2);
+			} else {
+				this.canvas.fit(result.width, result.height);
+			}
+			return;
+		}
+		if (anchor) {
+			const held = result.nodes.find((l) => l.node.key === anchor.key);
+			if (held) this.canvas.placeAt(held.x, held.y, anchor.screenX, anchor.screenY);
+		}
+		// After the anchor, never before it: holding a node still re-origins the
+		// whole map, and the smallest pan that brings a match into view is only
+		// the smallest one once the map has stopped moving.
+		if (reveal !== null) {
+			const target = result.nodes.find((l) => l.node.key === reveal);
+			if (target) this.canvas.reveal(target.x, target.y, target.width, target.height);
+		}
+	}
+
+	/**
+	 * Keep the document down to the cards the viewport can nearly see.
+	 *
+	 * A map is one composited layer holding every card and every connector, and
+	 * a few hundred nodes is already tens of thousands of pixels of it -- all of
+	 * it rasterised, hit-tested and restyled on the frames where any of that has
+	 * to happen, however far off screen it sits. Culling makes that work
+	 * proportional to a screenful rather than to the note.
+	 *
+	 * Cheap enough to run on every frame of a pan: the scan is arithmetic over
+	 * the layout the last paint produced, and only the cards that actually
+	 * crossed the boundary touch the DOM -- at most `CULL_BUDGET` of them, with
+	 * the rest carried to the next frame by the continuation at the end. The
+	 * connectors keep their own, wider region and are left alone until the camera
+	 * leaves it.
+	 *
+	 * `force` is the paint's own cull and the export's: no budget, no
+	 * continuation, and the connectors redrawn whether the camera moved or not.
+	 */
+	private cullToView(force = false): void {
+		const started = this.perf.now();
+		this.cancelFrame();
+
+		// One read of the viewport, two boxes: the cards' and the connectors'.
+		const metrics = this.canvas.metrics();
+		const show = viewBoxFrom(metrics, CULL_MARGIN);
+		const hide = viewBoxFrom(metrics, CULL_MARGIN + CULL_HYSTERESIS);
+
+		const nodes = this.layoutNodes;
+		const cards = this.layoutElements;
+		const editing = this.editingId;
+		const plan = this.cullPlan;
+		planCull(
+			{
+				boxes: nodes,
+				offscreen: (i) => cards[i]?.offscreen === true,
+				// A card with no element of its own cannot be flipped either way,
+				// and the one being edited holds the focus: taking it out of the
+				// document would drop the caret mid-word.
+				keep: (i) => cards[i] === null || nodes[i].node.id === editing,
+				show,
+				hide,
+				// A forced cull is the paint's own, and the export's: both need a
+				// map that is right now rather than right in a few frames.
+				budget: force ? Infinity : CULL_BUDGET,
+			},
+			plan,
+		);
+
+		let unmeasured = false;
+		for (const i of plan.show) {
+			const element = cards[i];
+			if (!element) continue;
+			element.offscreen = false;
+			element.el.removeClass("is-offscreen");
+			if (!element.measured) unmeasured = true;
+		}
+		for (const i of plan.hide) {
+			const element = cards[i];
+			if (!element) continue;
+			element.offscreen = true;
+			element.el.addClass("is-offscreen");
+		}
+
+		let paths = 0;
+		const redrew = force || !covers(this.edgeView, show);
+		if (redrew) {
+			this.edgeView = viewBoxFrom(
+				metrics,
+				clampedMargin(EDGE_MARGIN, metrics.scale, EDGE_MAX_CONTENT),
+			);
+			paths = this.drawEdges(this.edgeView);
+		}
+
+		// A resize still on the books is one this cull was not the answer to --
+		// only `runFrame` knows what a map painted at zero size owes it.
+		if (plan.backlog > 0 || this.resized) this.requestFrame();
+
+		this.perf.span("cull", started, {
+			total: nodes.length,
+			shown: plan.show.length,
+			hidden: plan.hide.length,
+			backlog: plan.backlog,
+			edgesRedrawn: redrew,
+			pathCount: paths,
+		});
+
+		// Last: a card that has never been in the document is on the map at the
+		// size some earlier paint measured, and only now can it say what it
+		// really is. The re-measure lays the map out again and culls once more,
+		// which is why nothing below here may depend on this frame's plan.
+		if (unmeasured) this.measureNewlyShown();
+	}
+
+	/** Nothing may be left to fire at a map that has been repainted or closed. */
+	private cancelFrame(): void {
+		this.frame.cancel();
+	}
+
+	/** Returns how many connectors it drew. */
+	private drawEdges(view: ViewBox | null): number {
+		if (!this.edgeLayer) return 0;
+		const started = this.perf.now();
+		const paths = renderEdges(
+			this.edgeLayer,
+			this.layoutNodes,
+			this.mapWidth,
+			this.mapHeight,
+			this.plugin.settings.branchColors,
+			view,
+		);
+		this.perf.span("edges", started, { paths, whole: view === null });
+		return paths;
+	}
+
+	/**
+	 * Put every card back in the document.
+	 *
+	 * The one thing culling cannot survive is a re-measure: a card that is out
+	 * of the document has no size to report, so anything that means to measure
+	 * the whole map again has to undo the culling first and let the pass that
+	 * follows redo it.
+	 */
+	private showAllCards(): void {
+		for (const element of this.elements.values()) {
+			if (!element.offscreen) continue;
+			element.offscreen = false;
+			element.el.removeClass("is-offscreen");
+		}
+	}
+
+	private applySelection(): void {
+		for (const element of this.elements.values()) element.el.removeClass("is-selected");
+		const node = this.selectedNode();
+		if (!node) return;
+		this.elements.get(node.id)?.el.addClass("is-selected");
+	}
+
+	private selectedNode(): MindNode | null {
+		if (!this.parsed || this.selectionKey === null) return null;
+		return this.parsed.byKey.get(this.selectionKey) ?? null;
+	}
+
+	private layoutFor(id: string): LayoutNode | null {
+		return this.layoutNodes.find((l) => l.node.id === id) ?? null;
+	}
+
+	// --- mutation plumbing ----------------------------------------------------
+
+	private apply(mutation: Mutation, edit = false): void {
+		if (!mutation.ok) return;
+		// A drop onto the position a node already holds rewrites it to exactly what
+		// it was. Nothing changed, so it earns neither an undo step nor a save.
+		if (mutation.text === this.data) return;
+		this.undoStack.push(this.data);
+		if (this.undoStack.length > UNDO_LIMIT) this.undoStack.shift();
+		this.redoStack = [];
+		this.commit(mutation.text, mutation.focusLine, edit);
+	}
+
+	private commit(text: string, focusLine: number, edit: boolean): void {
+		this.data = text;
+		this.pendingFocus = focusLine >= 0 ? { line: focusLine, edit } : null;
+		this.requestSave();
+		this.render("edit");
+	}
+
+	private withNode(id: string, run: (parsed: ParsedDoc, node: MindNode) => void): void {
+		const parsed = this.parsed;
+		const node = parsed?.byId.get(id);
+		if (!parsed || !node) return;
+		run(parsed, node);
+	}
+
+	// --- MapController --------------------------------------------------------
+
+	isEditing(): boolean {
+		return this.editingId !== null;
+	}
+
+	selectedId(): string | null {
+		return this.selectedNode()?.id ?? null;
+	}
+
+	select(id: string | null): void {
+		const before = this.selectionKey;
+		// A body card is not something the map can act on, so picking one drops
+		// the selection rather than leaving the previous card looking active.
+		if (id === null || this.bodyNodes.has(id)) {
+			this.selectionKey = null;
+		} else {
+			const node = this.parsed?.byId.get(id);
+			if (!node) return;
+			this.selectionKey = node.key;
+		}
+		this.applySelection();
+		// Moving the selection is the one change that never repaints, so it is
+		// the one change that has to record itself.
+		if (this.selectionKey !== before) this.rememberState();
+	}
+
+	beginEdit(id: string): void {
+		// Body cards hold lines the note owns, not a node title. Editing one means
+		// the block editor, which rewrites exactly those lines and nothing else.
+		if (this.bodyNodes.has(id)) {
+			this.openBody(id);
+			return;
+		}
+
+		const element = this.elements.get(id);
+		const node = this.parsed?.byId.get(id);
+		if (!element || !node) return;
+		if (!canRename(node)) {
+			new Notice("This node is the file name. Rename the note to change it.");
+			return;
+		}
+
+		this.editingId = id;
+		this.select(id);
+
+		// A card culled for being off screen is out of the document and cannot
+		// take the focus. Setting `editingId` above keeps the next cull off it.
+		if (element.offscreen) {
+			element.offscreen = false;
+			element.el.removeClass("is-offscreen");
+		}
+
+		const el = element.text;
+		el.empty();
+		el.setText(node.text);
+		el.addClass("is-editing");
+		try {
+			el.contentEditable = "plaintext-only";
+		} catch {
+			el.contentEditable = "true";
+		}
+		if (el.contentEditable !== "plaintext-only") el.contentEditable = "true";
+		el.focus();
+
+		const range = document.createRange();
+		range.selectNodeContents(el);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+
+		let settled = false;
+		const finish = (save: boolean): void => {
+			if (settled) return;
+			settled = true;
+			const value = el.textContent ?? "";
+			el.contentEditable = "false";
+			el.removeClass("is-editing");
+			this.editingId = null;
+			if (save) {
+				this.withNode(id, (parsed, current) => {
+					this.apply(renameNode(parsed, current, value));
+				});
+			} else {
+				this.render("edit");
+			}
+			this.canvas.viewport.focus({ preventScroll: true });
+		};
+
+		el.addEventListener("keydown", (ev) => {
+			// While editing, the map's own shortcuts must not fire.
+			ev.stopPropagation();
+			if (ev.key === "Enter") {
+				ev.preventDefault();
+				finish(true);
+			} else if (ev.key === "Escape") {
+				ev.preventDefault();
+				finish(false);
+			} else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "f") {
+				// The `stopPropagation` above swallows everything, so search has
+				// to be let out by name -- the view's keymap scope cannot be
+				// relied on to have seen a key this editor stopped. The rename is
+				// committed first, so the query runs against the text the user
+				// just typed.
+				ev.preventDefault();
+				finish(true);
+				this.openSearch();
+			}
+		});
+		el.addEventListener("blur", () => finish(true), { once: true });
+	}
+
+	addChildTo(id: string): void {
+		this.withNode(id, (parsed, node) => {
+			this.collapsedKeys.delete(node.key);
+			this.apply(addChild(parsed, node, ""), true);
+		});
+	}
+
+	addSiblingTo(id: string): void {
+		this.withNode(id, (parsed, node) => {
+			if (!node.parent) {
+				this.addChildTo(id);
+				return;
+			}
+			this.apply(addSibling(parsed, node, ""), true);
+		});
+	}
+
+	addSiblingBeforeTo(id: string): void {
+		this.withNode(id, (parsed, node) => {
+			if (!node.parent) {
+				this.addChildTo(id);
+				return;
+			}
+			this.apply(addSiblingBefore(parsed, node, ""), true);
+		});
+	}
+
+	removeNode(id: string): void {
+		this.withNode(id, (parsed, node) => {
+			if (!node.parent) {
+				new Notice("The root node cannot be deleted from the map.");
+				return;
+			}
+			this.apply(deleteNode(parsed, node));
+		});
+	}
+
+	indent(id: string): void {
+		this.withNode(id, (parsed, node) => this.apply(indentNode(parsed, node)));
+	}
+
+	outdent(id: string): void {
+		this.withNode(id, (parsed, node) => this.apply(outdentNode(parsed, node)));
+	}
+
+	/**
+	 * Swap the node with the sibling above / below it -- the same drop dragging
+	 * it onto that sibling's near edge performs.
+	 *
+	 * Nothing else is needed to keep the selection and the folds: the mutation
+	 * focuses the line the block landed on, and fold state is keyed by text
+	 * path, which a swap between siblings written the same way never disturbs.
+	 */
+	moveUp(id: string): void {
+		this.withNode(id, (parsed, node) => this.apply(reorderUp(parsed, node)));
+	}
+
+	moveDown(id: string): void {
+		this.withNode(id, (parsed, node) => this.apply(reorderDown(parsed, node)));
+	}
+
+	/** Whether the commands have a selection with somewhere to move it. */
+	canMoveSelection(direction: "up" | "down"): boolean {
+		const node = this.selectedNode();
+		if (!node) return false;
+		return direction === "up" ? canReorderUp(node) : canReorderDown(node);
+	}
+
+	moveSelection(direction: "up" | "down"): void {
+		const id = this.selectedId();
+		if (!id) return;
+		if (direction === "up") this.moveUp(id);
+		else this.moveDown(id);
+	}
+
+	toggleCheck(id: string): void {
+		this.withNode(id, (parsed, node) => this.apply(toggleCheckbox(parsed, node)));
+	}
+
+	removeCheck(id: string): void {
+		this.withNode(id, (parsed, node) => this.apply(removeCheckbox(parsed, node)));
+	}
+
+	toggleFold(id: string): void {
+		this.withNode(id, (_parsed, node) => {
+			// Has to agree with the `hasChildren` that decided whether to draw the
+			// toggle at all, or the button exists and does nothing.
+			if (this.childCount(node, this.plugin.settings.showBodyNodes) === 0) return;
+			// Folded or unfolded by hand: the branch is the user's from here on,
+			// and closing the search must not undo what they just did.
+			this.searchRevealed.delete(node.key);
+			this.markAnchor(node.key);
+			if (this.collapsedKeys.has(node.key)) this.collapsedKeys.delete(node.key);
+			else this.collapsedKeys.add(node.key);
+			this.paint("fold");
+		});
+	}
+
+	canDrop(id: string, targetId: string, mode: DropMode): boolean {
+		const node = this.parsed?.byId.get(id);
+		const target = this.parsed?.byId.get(targetId);
+		if (!node || !target) return false;
+		return mode === "child" ? canMove(node, target) : canReorder(node, target);
+	}
+
+	move(id: string, targetId: string, mode: DropMode): void {
+		const parsed = this.parsed;
+		const node = parsed?.byId.get(id);
+		const target = parsed?.byId.get(targetId);
+		if (!parsed || !node || !target) return;
+
+		if (mode === "child") {
+			this.collapsedKeys.delete(target.key);
+			this.apply(moveNode(parsed, node, target));
+			return;
+		}
+		// Dropped beside the target, so it is the target's parent that must be
+		// open for the node to be visible where it landed.
+		if (target.parent) this.collapsedKeys.delete(target.parent.key);
+		this.apply(
+			mode === "before"
+				? moveBefore(parsed, node, target)
+				: moveAfter(parsed, node, target),
+		);
+	}
+
+	/**
+	 * Follow a link written in a note-content card.
+	 *
+	 * Anything with a scheme is handed to the platform, but only from a short
+	 * list: the target came out of a note, and `javascript:` must never reach a
+	 * window. Everything else is a vault link -- a note, a heading, a PDF -- and
+	 * goes through the workspace so it opens the way Obsidian opens it anywhere
+	 * else.
+	 */
+	openLink(href: string, ev: MouseEvent): void {
+		const newLeaf = Keymap.isModEvent(ev);
+		if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+			if (/^(https?|obsidian|mailto):/i.test(href)) window.open(href, "_blank");
+			return;
+		}
+		// `[a](My%20File.pdf)` is the same file as `[[My File.pdf]]`; only the
+		// wikilink spelling arrives ready to resolve.
+		let path = href;
+		try {
+			path = decodeURIComponent(href);
+		} catch {
+			// A stray `%` is not an escape. Take the target as written.
+		}
+		void this.app.workspace.openLinkText(path, this.file?.path ?? "", newLeaf);
+	}
+
+	showMenu(id: string, ev: MouseEvent): void {
+		const menu = new Menu();
+
+		// A content card stands for lines the note owns: it can be read and
+		// edited, but never renamed, moved or given children.
+		if (this.bodyNodes.has(id)) {
+			menu.addItem((item) =>
+				item
+					.setTitle("Show the whole block")
+					.setIcon("maximize-2")
+					.onClick(() => this.expandBody(id)),
+			);
+			menu.addItem((item) =>
+				item
+					.setTitle("Edit the block source")
+					.setIcon("pencil")
+					.onClick(() => this.openBody(id, "edit")),
+			);
+			menu.showAtMouseEvent(ev);
+			return;
+		}
+
+		const node = this.parsed?.byId.get(id);
+		if (!node) return;
+		this.select(id);
+
+		menu.addItem((item) =>
+			item
+				.setTitle("Add child")
+				.setIcon("corner-down-right")
+				.onClick(() => this.addChildTo(id)),
+		);
+		if (!node.virtual && this.plugin.settings.inlineAnnotations) {
+			menu.addItem((item) => item
+				.setTitle(node.annotationIndices.length ? "Edit annotation" : "Add annotation")
+				.setIcon("sticky-note")
+				.onClick(() => this.editAnnotation(id)));
+		}
+		// Checking a task never takes its checkbox away -- so removing one lives
+		// here, where adding one does too.
+		if (node.kind === "listitem") {
+			menu.addItem((item) =>
+				item
+					.setTitle(node.checkbox === null ? "Add checkbox" : "Remove checkbox")
+					.setIcon(node.checkbox === null ? "square-check" : "square")
+					.onClick(() => {
+						if (node.checkbox === null) this.toggleCheck(id);
+						else this.removeCheck(id);
+					}),
+			);
+		}
+		if (node.parent) {
+			menu.addItem((item) =>
+				item
+					.setTitle("Add sibling below")
+					.setIcon("plus")
+					.onClick(() => this.addSiblingTo(id)),
+			);
+			menu.addItem((item) =>
+				item
+					.setTitle("Add sibling above")
+					.setIcon("plus")
+					.onClick(() => this.addSiblingBeforeTo(id)),
+			);
+		}
+
+		if (this.childCount(node, this.plugin.settings.showBodyNodes) > 0) {
+			menu.addSeparator();
+			menu.addItem((item) =>
+				item
+					.setTitle(this.collapsedKeys.has(node.key) ? "Unfold" : "Fold")
+					.setIcon("chevrons-down-up")
+					.onClick(() => this.toggleFold(id)),
+			);
+		}
+
+		if (canRename(node) || node.parent) {
+			menu.addSeparator();
+			if (canRename(node)) {
+				menu.addItem((item) =>
+					item
+						.setTitle("Rename")
+						.setIcon("text-cursor-input")
+						.onClick(() => this.beginEdit(id)),
+				);
+			}
+			if (node.parent) {
+				menu.addItem((item) =>
+					item
+						.setTitle("Delete")
+						.setIcon("trash-2")
+						.onClick(() => this.removeNode(id)),
+				);
+			}
+		}
+
+		menu.showAtMouseEvent(ev);
+	}
+
+	navigate(direction: Direction): void {
+		if (this.layoutNodes.length === 0) return;
+		const currentId = this.selectedId();
+		const current = currentId ? this.layoutFor(currentId) : null;
+		if (!current) {
+			this.select(this.parsed?.root.id ?? null);
+			this.revealSelection();
+			return;
+		}
+
+		// Card centres, not node centres: an annotation hangs below the card
+		// without being part of it, and a step between cards should go where the
+		// cards look, not where the strips end.
+		const cx = current.x + current.cardWidth / 2;
+		const cy = current.y + current.cardHeight / 2;
+		let best: LayoutNode | null = null;
+		let bestScore = Infinity;
+
+		for (const candidate of this.layoutNodes) {
+			if (candidate === current) continue;
+			// Body cards cannot hold the selection, so stepping onto one would
+			// leave the arrow keys apparently stuck.
+			if (this.bodyNodes.has(candidate.node.id)) continue;
+			const dx = candidate.x + candidate.cardWidth / 2 - cx;
+			const dy = candidate.y + candidate.cardHeight / 2 - cy;
+
+			let along: number;
+			let across: number;
+			if (direction === "right") {
+				if (dx <= 1) continue;
+				along = dx;
+				across = Math.abs(dy);
+			} else if (direction === "left") {
+				if (dx >= -1) continue;
+				along = -dx;
+				across = Math.abs(dy);
+			} else if (direction === "down") {
+				if (dy <= 1) continue;
+				along = dy;
+				across = Math.abs(dx);
+			} else {
+				if (dy >= -1) continue;
+				along = -dy;
+				across = Math.abs(dx);
+			}
+
+			// Favour candidates that stay near the current axis.
+			const score = along + across * 2;
+			if (score < bestScore) {
+				bestScore = score;
+				best = candidate;
+			}
+		}
+
+		if (best) {
+			this.select(best.node.id);
+			this.revealSelection();
+		}
+	}
+
+	undo(): void {
+		const previous = this.undoStack.pop();
+		if (previous === undefined) {
+			new Notice("Nothing to undo on the map.");
+			return;
+		}
+		this.redoStack.push(this.data);
+		this.commit(previous, -1, false);
+	}
+
+	redo(): void {
+		const next = this.redoStack.pop();
+		if (next === undefined) return;
+		this.undoStack.push(this.data);
+		this.commit(next, -1, false);
+	}
+
+	fit(): void {
+		const width = parseFloat(this.canvas.content.style.width) || 0;
+		const height = parseFloat(this.canvas.content.style.height) || 0;
+		this.canvas.fit(width, height);
+	}
+
+	centreOnSelection(): void {
+		const id = this.selectedId();
+		const layout = id ? this.layoutFor(id) : null;
+		if (!layout) {
+			this.fit();
+			return;
+		}
+		this.canvas.centreOn(layout.x + layout.width / 2, layout.y + layout.height / 2);
+	}
+
+	private revealSelection(): void {
+		const id = this.selectedId();
+		const layout = id ? this.layoutFor(id) : null;
+		if (!layout) return;
+		this.canvas.reveal(layout.x, layout.y, layout.width, layout.height);
+	}
+
+	// --- search ---------------------------------------------------------------
+
+	/** Put the find bar up, or hand it the focus when it is already there. */
+	openSearch(): void {
+		if (this.search) {
+			this.search.focus();
+			return;
+		}
+		this.search = new SearchBar(this.contentEl, {
+			query: this.searchQuery,
+			onQuery: (query) => this.onQueryChanged(query),
+			onStep: (delta) => this.stepMatch(delta),
+			onClose: () => {
+				this.closeSearch();
+			},
+		});
+		// A remembered query is run again rather than replayed: the note may well
+		// have changed since the bar was last closed.
+		this.refreshSearch();
+		this.applySearchState();
+		this.search.focus();
+	}
+
+	/** True when a bar was actually up, which is what makes Escape ours. */
+	closeSearch(): boolean {
+		if (!this.search) return false;
+		const refolded = this.restoreSearchFolds();
+		this.resetSearch();
+		if (refolded) {
+			this.markGlobalAnchor();
+			this.paint("search");
+		} else {
+			this.applySearchState();
+		}
+		this.canvas.viewport.focus({ preventScroll: true });
+		return true;
+	}
+
+	/** Take the bar down and drop the match list. Folds are left as they are. */
+	private resetSearch(): void {
+		this.search?.destroy();
+		this.search = null;
+		this.matchKeys = [];
+		this.matchIndex = 0;
+		this.pendingReveal = null;
+		// The bookkeeping only means something while a session runs; whoever
+		// wanted those branches folded again has already asked for it.
+		this.searchRevealed.clear();
+	}
+
+	private currentMatchKey(): string | null {
+		return this.matchKeys[this.matchIndex] ?? null;
+	}
+
+	/** The node the current match names, or null once the note has lost it. */
+	private currentMatchNode(): MindNode | null {
+		const key = this.currentMatchKey();
+		if (key === null) return null;
+		return this.parsed?.byKey.get(key) ?? null;
+	}
+
+	/**
+	 * Recompute the match list against the current parse, keeping the current
+	 * match when it survived.
+	 *
+	 * Never touches the camera: this runs on every render, including the one
+	 * behind every keystroke of an inline edit.
+	 */
+	private refreshSearch(): void {
+		if (!this.search) return;
+		const current = this.currentMatchKey();
+		const result = this.parsed
+			? searchTree(this.parsed.root, this.searchQuery)
+			: { matches: [], invalid: false };
+		this.matchKeys = result.matches.map((match) => match.key);
+		const index = current === null ? -1 : this.matchKeys.indexOf(current);
+		this.matchIndex = index < 0 ? 0 : index;
+		this.search.setStatus(
+			this.matchKeys.length === 0 ? 0 : this.matchIndex + 1,
+			this.matchKeys.length,
+			result.invalid,
+		);
+	}
+
+	private onQueryChanged(query: SearchQuery): void {
+		this.searchQuery = query;
+		const before = this.currentMatchKey();
+		this.refreshSearch();
+		const after = this.currentMatchKey();
+		// Only a change of match moves the map. Typing on past a hit that still
+		// matches leaves the camera where it is, rather than pulling it back to
+		// the same card once per keystroke.
+		if (after !== null && after !== before) this.jumpToCurrent();
+		else this.applySearchState();
+	}
+
+	private stepMatch(delta: number): void {
+		const total = this.matchKeys.length;
+		if (total === 0) return;
+		this.matchIndex = (this.matchIndex + delta + total) % total;
+		this.search?.setStatus(this.matchIndex + 1, total, false);
+		this.jumpToCurrent();
+	}
+
+	/**
+	 * Bring the current match on screen: fold back what the search opened for the
+	 * match before it, then open whatever is hiding this one.
+	 *
+	 * A branch is only owed its open state while the match inside it is the one
+	 * being looked at, so a step across the map puts the last one away again --
+	 * both changes in a single paint, or the map would shuffle twice per step.
+	 */
+	private jumpToCurrent(): void {
+		const key = this.currentMatchKey();
+		const node = key === null ? undefined : this.parsed?.byKey.get(key);
+		if (key === null || !node) return;
+
+		// Read before anything folds: whatever the user is looking at now is what
+		// has to hold still while branches open and close under it.
+		const held = this.selectedNode();
+
+		// The selection moves first, so the fold that follows is deciding about a
+		// branch the selection has already left.
+		this.select(node.id);
+		const refolded = this.refoldSearch(node);
+		const revealed = this.revealForSearch(node);
+		if (!refolded && !revealed) {
+			this.applySearchState();
+			this.revealSelection();
+			return;
+		}
+
+		// A card the refold just hid cannot hold anything still; the root can.
+		this.markAnchor(held && this.isVisible(held) ? held.key : this.parsed?.root.key);
+		// The card may not exist yet; the paint that builds it does the pan.
+		this.pendingReveal = key;
+		this.paint("search");
+	}
+
+	/**
+	 * Open only the ancestors actually in the way, and remember which.
+	 *
+	 * Not `revealAncestors`: that clears the whole chain, and a key deleted from
+	 * a set that never held it would still be recorded as a fold the search
+	 * opened -- and dutifully closed again on the way out.
+	 */
+	private revealForSearch(node: MindNode): boolean {
+		let opened = false;
+		for (const key of hiddenAncestorKeys(node, this.collapsedKeys)) {
+			this.collapsedKeys.delete(key);
+			this.searchRevealed.add(key);
+			opened = true;
+		}
+		return opened;
+	}
+
+	/**
+	 * Fold back the recorded branches that are not holding `keep` on the map, and
+	 * drop every key it decided about from the record.
+	 *
+	 * A key the note no longer has, and one the user has since folded themselves,
+	 * are both simply dropped. Reports whether the map actually changed shape.
+	 */
+	private refoldSearch(keep: MindNode | null): boolean {
+		if (this.searchRevealed.size === 0) return false;
+		const showBody = this.plugin.settings.showBodyNodes;
+		let changed = false;
+		for (const key of refoldKeys(this.searchRevealed, keep)) {
+			this.searchRevealed.delete(key);
+			const node = this.parsed?.byKey.get(key);
+			if (!node || this.childCount(node, showBody) === 0) continue;
+			if (this.collapsedKeys.has(key)) continue;
+			this.collapsedKeys.add(key);
+			changed = true;
+		}
+		return changed;
+	}
+
+	/**
+	 * Wind the session up: fold back what it opened, except the path to the match
+	 * it ended on. Reports whether anything moved.
+	 *
+	 * The one branch a search may leave behind is the one holding what it found --
+	 * closing the bar is not a reason to hide the card that answered the query,
+	 * and putting it away is a fold the user can ask for themselves. When the
+	 * match has been edited away there is nothing to keep, and the whole record
+	 * goes back.
+	 */
+	private restoreSearchFolds(): boolean {
+		if (this.searchRevealed.size === 0) return false;
+		const changed = this.refoldSearch(this.currentMatchNode());
+		// Whatever survived is the kept path, and the session is over: those
+		// branches belong to the map now rather than to the search.
+		this.searchRevealed.clear();
+		if (!changed) return false;
+
+		// The selection may have just been folded away -- it sits wherever the user
+		// last clicked, which is not necessarily the match. The fold wins -- the
+		// same rule `seedFolds` follows -- and the card that swallowed it takes
+		// over, so the keyboard is never left aimed at something off the map.
+		const selected = this.selectedNode();
+		const hidden = selected ? hiddenAncestorKeys(selected, this.collapsedKeys) : [];
+		if (hidden.length > 0) this.selectionKey = hidden[0];
+		return true;
+	}
+
+	/**
+	 * Redraw the rings from the current match list.
+	 *
+	 * Stripped and rebuilt through `byKey` every time: a paint hands out new
+	 * elements, and a match inside a folded branch has no card to mark at all.
+	 */
+	private applySearchState(): void {
+		for (const element of this.elements.values()) {
+			element.el.removeClasses(["is-search-match", "is-search-current"]);
+		}
+		if (!this.search || !this.parsed) return;
+		const current = this.currentMatchKey();
+		for (const key of this.matchKeys) {
+			const node = this.parsed.byKey.get(key);
+			const element = node ? this.elements.get(node.id) : undefined;
+			element?.el.addClass(key === current ? "is-search-current" : "is-search-match");
+		}
+	}
+
+	// --- popovers -------------------------------------------------------------
+
+	private openPopover(): HTMLElement {
+		this.closePopover();
+		const panel = this.contentEl.createDiv({ cls: "mm-popover" });
+		this.popover = panel;
+
+		const onOutside = (ev: MouseEvent): void => {
+			if (!panel.contains(ev.target as Node)) this.closePopover();
+		};
+		const onKey = (ev: KeyboardEvent): void => {
+			if (ev.key === "Escape") this.closePopover();
+		};
+		// Deferred so the click that opened the panel does not close it.
+		window.setTimeout(() => document.addEventListener("mousedown", onOutside), 0);
+		document.addEventListener("keydown", onKey);
+		this.popoverCleanup = () => {
+			document.removeEventListener("mousedown", onOutside);
+			document.removeEventListener("keydown", onKey);
+		};
+		return panel;
+	}
+
+	private popoverCleanup: (() => void) | null = null;
+
+	private closePopover(): void {
+		this.popoverCleanup?.();
+		this.popoverCleanup = null;
+		this.popover?.remove();
+		this.popover = null;
+	}
+
+	// --- the block dialog -----------------------------------------------------
+
+	expandBody(id: string): void {
+		this.openBody(id, "read");
+	}
+
+	/** Edit the annotation independently of the title and other body content. */
+	editAnnotation(id: string): void {
+		const parsed = this.parsed;
+		const node = parsed?.byId.get(id);
+		if (!parsed || !node || node.virtual || !this.plugin.settings.inlineAnnotations) return;
+		this.closePopover();
+		this.closeDialog();
+		const original = annotationText(parsed, node);
+		const key = node.key;
+		this.dialog = new AnnotationDialog(this.app, node.text, original, (text) => {
+			const snapshot = parseMarkdown(this.data, this.parseOptions());
+			const current = snapshot.byKey.get(key);
+			if (!this.plugin.settings.inlineAnnotations || !current || annotationText(snapshot, current) !== original) {
+				new Notice("This annotation changed while the editor was open. Copy your draft and reopen it before saving.");
+				return false;
+			}
+			this.apply(setAnnotation(snapshot, current, text));
+			return true;
+		}, () => { this.dialog = null; });
+		this.dialog.open();
+	}
+
+	/** Show the original, untruncated source of a note-content block. */
+	openBody(id: string, mode: BlockDialogMode = "edit"): void {
+		const parsed = this.parsed;
+		if (!parsed) return;
+
+		// A body card shows its own block; anything else shows all of its blocks.
+		const ref = this.bodyNodes.get(id);
+		const node = ref ? parsed.byKey.get(ref.ownerKey) : parsed.byId.get(id);
+		if (!node || node.bodyRanges.length === 0) return;
+		const only = ref?.index;
+		if (only !== undefined && !node.bodyRanges[only]) return;
+
+		const blocks: DialogBlock[] = [];
+		node.bodyRanges.forEach((range, index) => {
+			// One block when a body card asked; otherwise every block the node
+			// owns -- except its annotation, which is not note content the way a
+			// paragraph is. It has its own editor, and `childrenOf` has already
+			// kept it from becoming a card of its own.
+			if (only === undefined ? node.annotationIndices.includes(index) : index !== only) {
+				return;
+			}
+			blocks.push({ index, range, text: bodyRangeText(parsed, range) });
+		});
+		// Nothing left to show: a node whose only body ranges are annotations has
+		// no note content, exactly like one with no body ranges at all.
+		if (blocks.length === 0) return;
+
+		// Only one panel at a time: a dialog opened over the shortcuts popover
+		// would leave it stranded behind the modal's own backdrop.
+		this.closePopover();
+		this.closeDialog();
+
+		const key = node.key;
+		this.dialog = new BlockDialog(this.app, {
+			title: node.text || "Note content",
+			sourcePath: this.file?.path ?? "",
+			blocks,
+			mode,
+			onSave: (edits) => this.saveBody(key, edits),
+			onClosed: () => {
+				this.dialog = null;
+				this.canvas.viewport.focus({ preventScroll: true });
+			},
+		});
+		this.dialog.open();
+	}
+
+	private closeDialog(): void {
+		const dialog = this.dialog;
+		this.dialog = null;
+		dialog?.close();
+	}
+
+	/**
+	 * Write edited blocks back, one splice each.
+	 *
+	 * Re-parsing between edits is what keeps this correct: every splice can move
+	 * the lines under the ranges that follow it, and the node is re-found by key
+	 * rather than held across the change.
+	 */
+	private saveBody(key: string, edits: Array<{ index: number; text: string }>): void {
+		const before = this.data;
+		let text = this.data;
+
+		// Highest index first so the earlier ranges' line numbers stay valid.
+		for (const edit of [...edits].sort((a, b) => b.index - a.index)) {
+			const snapshot = parseMarkdown(text, this.parseOptions());
+			const current = snapshot.byKey.get(key);
+			if (!current) break;
+			const result = replaceBodyRange(snapshot, current, edit.index, edit.text);
+			if (!result.ok) break;
+			text = result.text;
+		}
+		if (text === before) return;
+
+		this.undoStack.push(before);
+		if (this.undoStack.length > UNDO_LIMIT) this.undoStack.shift();
+		this.redoStack = [];
+		this.commit(text, -1, false);
+	}
+
+	// --- export ---------------------------------------------------------------
+
+	/**
+	 * Write the map out beside the note.
+	 *
+	 * What is exported is what is shown: the fold state as it stands, the
+	 * layout mode in force, the branch colours if they are on, and the colours
+	 * of the theme that is running. Nothing is re-derived from the note.
+	 */
+	exportAs(format: ExportFormat): void {
+		void runExport(this.app, this.file, format, {
+			canvasFile: () => this.buildCanvasFile(),
+			snapshot: () => this.buildSnapshot(),
+		});
+	}
+
+	/** True once there is a measured map on screen to export. */
+	private hasMap(): boolean {
+		return this.layoutNodes.length > 0 && this.mapWidth > 0 && !this.paintedEmpty;
+	}
+
+	/**
+	 * The ten branch colours, resolved through the theme.
+	 *
+	 * `--mm-b0`…`--mm-b9` are declared on the map's own container, so a theme or
+	 * a snippet that overrides one is what the export picks up. Null when branch
+	 * colours are switched off, which is what leaves every card its default.
+	 */
+	private branchPalette(): string[] | null {
+		if (!this.plugin.settings.branchColors) return null;
+		const style = getComputedStyle(this.contentEl);
+		const colors: string[] = [];
+		for (let i = 0; i < 10; i++) colors.push(style.getPropertyValue(`--mm-b${i}`).trim());
+		return colors;
+	}
+
+	private buildCanvasFile(): string | null {
+		if (!this.hasMap()) return null;
+		const parsed = this.parsed;
+		const palette = this.branchPalette();
+		return serializeCanvas(
+			buildCanvas(
+				{ nodes: this.layoutNodes },
+				{
+					title: this.file?.basename ?? "Untitled",
+					branchColor: (branch) =>
+						palette === null || branch < 0 ? null : palette[branch % palette.length],
+					nextId: randomId,
+					// A body card shows a preview; the file it goes into holds the
+					// block whole. An annotation has no card of its own on the map
+					// -- and gets none in the file either: its text goes into the
+					// card it hangs under, which is where it is read, and the box
+					// that card is exported at already includes the strip.
+					fullText: (item) => {
+						if (!parsed) return null;
+						if (item.node.kind === "body") {
+							return bodyRangeText(parsed, [item.node.lineStart, item.node.blockEnd]);
+						}
+						if (item.node.annotationIndices.length === 0) return null;
+						return `${item.node.text}\n\n${annotationText(parsed, item.node)}`;
+					},
+				},
+			),
+		);
+	}
+
+	/**
+	 * The map, read out of the live document.
+	 *
+	 * Two things have to be whole before it is read, and both are undone by the
+	 * cull that follows: a culled card is out of the document and has neither
+	 * size nor style, and the connector layer holds only the region the camera
+	 * is over.
+	 */
+	private buildSnapshot(): Snapshot | null {
+		if (!this.hasMap()) return null;
+		// Inside the try, not in front of it: whatever these two throw, the cull
+		// in the `finally` is what puts the map back the way the camera left it.
+		try {
+			this.showAllCards();
+			// A card that has only ever been off screen is on the map at the size
+			// some earlier paint measured for it. The file is not a frame that the
+			// next pan corrects, so it is measured properly first.
+			if (this.measureUnmeasured().changed > 0 && this.paintRoot) {
+				this.layOut(this.paintRoot, "export");
+			}
+			this.drawEdges(null);
+			return snapshotMap({
+				content: this.canvas.content,
+				width: this.mapWidth,
+				height: this.mapHeight,
+				background: this.mapBackground(),
+			});
+		} finally {
+			this.cullToView(true);
+		}
+	}
+
+	private mapBackground(): string {
+		const color = getComputedStyle(this.canvas.viewport).backgroundColor;
+		return color === "" || color === "transparent" || color === "rgba(0, 0, 0, 0)"
+			? "#ffffff"
+			: color;
+	}
+
+	// --- file lifecycle -------------------------------------------------------
+
+	override async onLoadFile(file: TFile): Promise<void> {
+		this.needsFit = true;
+		await super.onLoadFile(file);
+	}
+}
