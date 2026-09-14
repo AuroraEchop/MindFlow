@@ -761,6 +761,50 @@
 	box-sizing: border-box;
 }
 
+/* The settings window. Groups down the side, one page of rows beside them --
+   the settings are past a screenful, and a scroll with no map of it is what
+   this is meant to save the user from. */
+.mm-settings {
+	display: flex;
+	gap: 16px;
+	min-height: 320px;
+	max-height: 60vh;
+}
+
+.mm-settings-nav {
+	flex: 0 0 150px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding-right: 12px;
+	border-right: 1px solid var(--background-modifier-border);
+}
+
+.mm-settings-tab {
+	padding: 6px 10px;
+	border-radius: 6px;
+	color: var(--text-muted);
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.mm-settings-tab:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.mm-settings-tab.is-active {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	font-weight: 500;
+}
+
+.mm-settings-pane {
+	flex: 1 1 auto;
+	overflow-y: auto;
+	padding-right: 4px;
+}
+
 .mm-add:hover {
 	border-style: solid;
 	background: var(--mm-branch, var(--interactive-accent));

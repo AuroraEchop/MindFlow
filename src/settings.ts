@@ -482,17 +482,93 @@ function conflictNote(action: ShortcutAction, bindings: ShortcutBindings): strin
 	return t("settings.shortcut.conflict", { actions: [...others].join(", ") });
 }
 
-export class MindmapSettingTab extends PluginSettingTab {
+/**
+ * The settings, drawn into a container the caller owns.
+ *
+ * One renderer with two doors: the plugin's own settings tab, and the dialog
+ * the map opens from its toolbar. The dialog is a second way in rather than a
+ * second set of settings, and sharing this is what stops the two drifting -- a
+ * row added here turns up in both without being written twice.
+ */
+export class SettingsPanel {
 	private readonly plugin: MindmapPlugin;
 
-	constructor(app: App, plugin: MindmapPlugin) {
-		super(app, plugin);
+	/**
+	 * Redraws whatever this panel is being drawn into.
+	 *
+	 * Set by the host, because only the host knows whether it is showing one
+	 * group or all of them -- and a change of language has to redraw whichever
+	 * it is.
+	 */
+	repaint: () => void = () => {};
+
+	constructor(plugin: MindmapPlugin) {
 		this.plugin = plugin;
+	}
+
+	// --- the two ways of drawing it --------------------------------------------
+
+	/** Every group, in order. What the settings tab wants. */
+	display(containerEl: HTMLElement): void {
+		this.endRecording();
+		this.shortcutRows = [];
+		containerEl.empty();
+		for (const group of GROUPS) this.renderGroup(containerEl, group);
+		this.renderShortcuts(containerEl);
+	}
+
+	/** One group, heading included. What the dialog wants, a page at a time. */
+	renderGroup(containerEl: HTMLElement, group: SettingGroup): void {
+		new Setting(containerEl).setName(t(group.heading)).setHeading();
+		for (const item of group.items) this.renderItem(containerEl, item);
+	}
+
+	/**
+	 * The pages a dialog can offer, in the order it should list them.
+	 *
+	 * Read off the groups rather than written out again, so a group added to
+	 * `GROUPS` turns up in the dialog's navigation without anybody remembering
+	 * to add it.
+	 */
+	get pages(): I18nKey[] {
+		return [...GROUPS.map((group) => group.heading), "settings.group.shortcuts"];
+	}
+
+	/** One page by index: a group, or the shortcut rows past the last one. */
+	renderPage(containerEl: HTMLElement, index: number): void {
+		const group = GROUPS[index];
+		if (group) this.renderGroup(containerEl, group);
+		else this.renderShortcuts(containerEl);
+	}
+
+	/**
+	 * The Shortcuts group.
+	 *
+	 * Not one of `GROUPS`: a row there is a live key capture rather than a
+	 * control with a value, so both renderers hand it to `renderShortcutRow`.
+	 */
+	renderShortcuts(containerEl: HTMLElement): void {
+		new Setting(containerEl).setName(t("settings.group.shortcuts")).setHeading();
+		for (const entry of SHORTCUTS) {
+			const setting = new Setting(containerEl)
+				.setName(t(entry.nameKey))
+				.setDesc(t(entry.descKey));
+			this.renderShortcutRow(setting, entry);
+		}
+		this.renderRestoreAll(
+			new Setting(containerEl).setName(t(RESTORE_ALL.name)).setDesc(t(RESTORE_ALL.desc)),
+		);
 	}
 
 	// --- Obsidian 1.13 and later ------------------------------------------------
 
-	override getSettingDefinitions(): SettingDefinitionItem[] {
+	/**
+	 * The same rows in the shape 1.13 renders a settings tab from.
+	 *
+	 * Older versions know only `display`, which is why both paths read this one
+	 * set of definitions rather than each being written out.
+	 */
+	getSettingDefinitions(): SettingDefinitionItem[] {
 		this.shortcutRows = [];
 		const groups: SettingDefinitionItem[] = GROUPS.map((group) => ({
 			type: "group" as const,
@@ -511,47 +587,6 @@ export class MindmapSettingTab extends PluginSettingTab {
 		});
 		groups.push({ type: "group", heading: t("settings.group.shortcuts"), items: rows });
 		return groups;
-	}
-
-	/**
-	 * Writes the value rather than delegating to `super`. The base implementation
-	 * would do the same thing, but calling it is a call into an API newer than
-	 * `minAppVersion`, which the directory's review rejects -- and rightly, since
-	 * on 1.12 there would be nothing there to call. Overriding a method Obsidian
-	 * calls into is free; calling one it may not have is not.
-	 */
-	override async setControlValue(key: string, value: unknown): Promise<void> {
-		await this.commit(key, value);
-	}
-
-	// --- Obsidian 1.12 and earlier ----------------------------------------------
-
-	override display(): void {
-		const { containerEl } = this;
-		this.endRecording();
-		this.shortcutRows = [];
-		containerEl.empty();
-
-		for (const group of GROUPS) {
-			new Setting(containerEl).setName(t(group.heading)).setHeading();
-			for (const item of group.items) this.renderItem(containerEl, item);
-		}
-
-		new Setting(containerEl).setName(t("settings.group.shortcuts")).setHeading();
-		for (const entry of SHORTCUTS) {
-			const setting = new Setting(containerEl)
-				.setName(t(entry.nameKey))
-				.setDesc(t(entry.descKey));
-			this.renderShortcutRow(setting, entry);
-		}
-		this.renderRestoreAll(
-			new Setting(containerEl).setName(t(RESTORE_ALL.name)).setDesc(t(RESTORE_ALL.desc)),
-		);
-	}
-
-	/** A capture still listening when the tab goes away would never stop. */
-	override hide(): void {
-		this.endRecording();
 	}
 
 	private renderItem(containerEl: HTMLElement, item: ControlItem): void {
@@ -752,7 +787,7 @@ export class MindmapSettingTab extends PluginSettingTab {
 		return resolveBindings(this.plugin.settings.shortcuts);
 	}
 
-	private endRecording(): void {
+	endRecording(): void {
 		this.endCapture?.();
 	}
 
@@ -777,7 +812,7 @@ export class MindmapSettingTab extends PluginSettingTab {
 	// --- shared ------------------------------------------------------------------
 
 	/** The single write path, whichever renderer collected the value. */
-	private async commit(key: string, value: unknown): Promise<void> {
+	async commit(key: string, value: unknown): Promise<void> {
 		this.store[key] = value;
 		await this.plugin.saveSettings();
 		this.applySideEffects(key);
@@ -792,9 +827,9 @@ export class MindmapSettingTab extends PluginSettingTab {
 			this.plugin.applyLanguage();
 			// Redraw the rows the user is looking at, so they are in the
 			// language they just picked rather than the one they arrived in.
-			// Both renderers rebuild from the same `GROUPS`, so this is the
-			// legacy path doing exactly what it does on open.
-			this.display();
+			// The host decides what that means -- a settings tab redraws all of
+			// them, the dialog redraws the page it is on.
+			this.repaint();
 			return;
 		}
 		this.plugin.refreshAllViews();
@@ -811,5 +846,46 @@ export class MindmapSettingTab extends PluginSettingTab {
 
 	private read(key: SettingKey): unknown {
 		return this.store[key];
+	}
+}
+
+/**
+ * The plugin's own settings tab, which is where Obsidian's own settings window
+ * sends a user who goes looking. The dialog the map opens is the other door
+ * into the same panel.
+ */
+export class MindmapSettingTab extends PluginSettingTab {
+	private readonly panel: SettingsPanel;
+
+	constructor(app: App, plugin: MindmapPlugin) {
+		super(app, plugin);
+		this.panel = new SettingsPanel(plugin);
+		// A change of language redraws whatever the panel is drawing into, and
+		// this instance is drawing into Obsidian's own window.
+		this.panel.repaint = () => this.display();
+	}
+
+	override getSettingDefinitions(): SettingDefinitionItem[] {
+		return this.panel.getSettingDefinitions();
+	}
+
+	/**
+	 * Writes the value rather than delegating to `super`. The base implementation
+	 * would do the same thing, but calling it is a call into an API newer than
+	 * `minAppVersion`, which the directory's review rejects -- and rightly, since
+	 * on 1.12 there would be nothing there to call. Overriding a method Obsidian
+	 * calls into is free; calling one it may not have is not.
+	 */
+	override async setControlValue(key: string, value: unknown): Promise<void> {
+		await this.panel.commit(key, value);
+	}
+
+	override display(): void {
+		this.panel.display(this.containerEl);
+	}
+
+	/** A capture still listening when the tab goes away would never stop. */
+	override hide(): void {
+		this.panel.endRecording();
 	}
 }

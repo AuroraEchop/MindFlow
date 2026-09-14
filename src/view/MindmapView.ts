@@ -79,6 +79,7 @@ import {
 } from "./shortcuts.ts";
 import type { KeyCombo, ShortcutBindings } from "./shortcuts.ts";
 import { SearchBar } from "./searchBar.ts";
+import { SettingsModal } from "./settingsModal.ts";
 import { BlockDialog } from "./blockDialog.ts";
 import { AnnotationDialog } from "./annotationDialog.ts";
 import type { BlockDialogMode, DialogBlock } from "./blockDialog.ts";
@@ -782,6 +783,19 @@ export class MindmapView extends TextFileView implements MapController {
 		button(camera, "chevrons-down-up", t("view.tool.collapseAll"), () => this.collapseAll());
 		button(camera, "search", t("shortcut.search.name"), () => this.openSearch());
 		button(camera, "help-circle", t("view.tool.shortcuts"), () => this.showShortcuts());
+		button(camera, "settings", t("view.tool.settings"), () => this.openSettings());
+	}
+
+	/**
+	 * The settings, as a window over the map.
+	 *
+	 * The plugin's own settings tab is still where Obsidian's settings window
+	 * sends anyone who goes looking. This is the door for somebody who is
+	 * looking at the map and wants to change one thing about it.
+	 */
+	private openSettings(): void {
+		this.closePopover();
+		new SettingsModal(this.app, this.plugin).open();
 	}
 
 	/**

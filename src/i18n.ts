@@ -216,6 +216,7 @@ const EN = {
 	"view.tool.collapseAll": "Collapse all",
 	"view.tool.shortcuts": "Keyboard shortcuts",
 	"view.tool.export": "Export",
+	"view.tool.settings": "Settings",
 
 	// --- the furniture on a card, read out by a screen reader ---------------
 	"view.node.expand": "Expand",
@@ -282,6 +283,7 @@ const EN = {
 	"dialog.block.preview": "Preview",
 	"dialog.block.source": "Source",
 	"dialog.block.lines": "Lines {from}–{to}",
+	"dialog.settings.title": "Mind map settings",
 
 	// --- the find bar -------------------------------------------------------
 	"search.regex": "Regular expression",
@@ -508,6 +510,7 @@ const ZH: Record<I18nKey, string> = {
 	"view.tool.collapseAll": "全部折叠",
 	"view.tool.shortcuts": "快捷键",
 	"view.tool.export": "导出",
+	"view.tool.settings": "设置",
 
 	// --- 卡片上的部件，供读屏软件朗读 -----------------------------------------
 	"view.node.expand": "展开",
@@ -573,6 +576,7 @@ const ZH: Record<I18nKey, string> = {
 	"dialog.block.preview": "预览",
 	"dialog.block.source": "源码",
 	"dialog.block.lines": "第 {from}–{to} 行",
+	"dialog.settings.title": "思维导图设置",
 
 	// --- 查找栏 --------------------------------------------------------------
 	"search.regex": "正则表达式",
