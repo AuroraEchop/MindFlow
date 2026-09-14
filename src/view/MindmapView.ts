@@ -661,19 +661,6 @@ export class MindmapView extends TextFileView implements MapController {
 				.setIcon("maximize")
 				.onClick(() => this.fit()),
 		);
-
-		// One named section rather than four loose items: Obsidian sorts a pane
-		// menu by section, so a separator added by hand can end up somewhere
-		// other than in front of the group it was meant to open.
-		for (const entry of EXPORT_COMMANDS) {
-			menu.addItem((item) =>
-				item
-					.setSection("mindmap-export")
-					.setTitle(t(entry.menuKey))
-					.setIcon(entry.icon)
-					.onClick(() => this.exportAs(entry.format)),
-			);
-		}
 	}
 
 	/** Called by the plugin when settings change. */
@@ -718,23 +705,23 @@ export class MindmapView extends TextFileView implements MapController {
 			bar: HTMLElement,
 			icon: string,
 			label: string,
-			onClick: () => void,
+			onClick: (ev: MouseEvent) => void,
 		): HTMLElement => {
 			const el = bar.createDiv({ cls: "mm-tool", attr: { "aria-label": label } });
 			setIcon(el, icon);
 			el.addEventListener("click", (ev) => {
 				ev.preventDefault();
-				onClick();
+				onClick(ev);
 			});
 			return el;
 		};
 
-		// The same four entries the palette and the tab menu are built from, in
-		// the same order and under the same names: three places offering the
-		// export, one list saying what the export is.
-		for (const entry of EXPORT_COMMANDS) {
-			button(exports, entry.icon, t(entry.menuKey), () => this.exportAs(entry.format));
-		}
+		// One button rather than four. The export is one thing the user wants to
+		// do, and which file it lands in is the second question -- so the second
+		// question is a menu, and the corner keeps its width for the camera. The
+		// palette still lists all four by name, which is where a format becomes
+		// something worth binding a key to.
+		button(exports, "share", t("view.tool.export"), (ev) => this.showExportMenu(ev));
 
 		// The camera buttons borrow the shortcut table's own wording, so a
 		// tooltip and the settings row that rebinds the same action agree.
@@ -748,6 +735,25 @@ export class MindmapView extends TextFileView implements MapController {
 		button(camera, "chevrons-down-up", t("view.tool.collapseAll"), () => this.collapseAll());
 		button(camera, "search", t("shortcut.search.name"), () => this.openSearch());
 		button(camera, "help-circle", t("view.tool.shortcuts"), () => this.showShortcuts());
+	}
+
+	/**
+	 * The formats, under the button that offers them.
+	 *
+	 * Built from the same list the palette registers its commands from, so the
+	 * two cannot drift and neither is the source of truth on its own.
+	 */
+	private showExportMenu(ev: MouseEvent): void {
+		const menu = new Menu();
+		for (const entry of EXPORT_COMMANDS) {
+			menu.addItem((item) =>
+				item
+					.setTitle(t(entry.menuKey))
+					.setIcon(entry.icon)
+					.onClick(() => this.exportAs(entry.format)),
+			);
+		}
+		menu.showAtMouseEvent(ev);
 	}
 
 	/**
@@ -1699,6 +1705,7 @@ export class MindmapView extends TextFileView implements MapController {
 			this.mapWidth,
 			this.mapHeight,
 			this.plugin.settings.branchColors,
+			this.plugin.settings.edgeStyle,
 			view,
 		);
 		this.perf.span("edges", started, { paths, whole: view === null });

@@ -455,6 +455,11 @@ export function attachInteractions(controller: MapController): () => void {
 				ev.preventDefault();
 				controller.beginEdit(id);
 				return;
+			case "edit-annotation":
+				if (!id) return;
+				ev.preventDefault();
+				controller.editAnnotation(id);
+				return;
 			case "delete-node":
 				if (!id) return;
 				ev.preventDefault();

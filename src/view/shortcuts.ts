@@ -209,7 +209,8 @@ function mustParse(text: string): KeyCombo {
 const TABLE = [
 	{ action: "add-child", defaults: ["Tab"] },
 	{ action: "add-sibling", defaults: ["Enter"] },
-	{ action: "edit-title", defaults: ["Shift+Enter", "F2"] },
+	{ action: "edit-title", defaults: ["F2"] },
+	{ action: "edit-annotation", defaults: ["Shift+Enter"] },
 	{ action: "delete-node", defaults: ["Delete", "Backspace"] },
 	{ action: "toggle-check", defaults: ["Mod+Enter"] },
 	{ action: "expand-body", defaults: [] },

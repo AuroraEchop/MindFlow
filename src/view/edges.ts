@@ -30,15 +30,52 @@ function strokeWidth(depth: number): number {
 }
 
 /**
+ * How a connector is drawn between a parent's face and a child's.
+ *
+ * `curve` is the organic S-curve the map has always drawn; `orthogonal` is the
+ * right-angled elbow of an org chart. Neither is more correct -- the first
+ * reads as a mind map, the second as a hierarchy somebody is meant to audit.
+ */
+export type EdgeStyle = "curve" | "orthogonal";
+
+/**
+ * The `d` attribute for one connector.
+ *
+ * Both styles stay inside the bounding box of their two anchors -- the curve
+ * because its control points share their x range with the anchors and their y
+ * with one or the other, the elbow because it turns at a point between them.
+ * That is what lets `edgeInView` cull on that box and be exact rather than
+ * approximate, so a new style has to keep the property or the culling lies.
+ */
+export function edgePath(
+	from: [number, number],
+	to: [number, number],
+	style: EdgeStyle,
+): string {
+	const [px, py] = from;
+	const [cx, cy] = to;
+
+	if (style === "orthogonal") {
+		// Out of the parent's face, across, up or down, and in to the child's.
+		// The turn sits halfway between the two faces, which is what makes a
+		// column of children read as one bus rather than as a fan.
+		const mx = (px + cx) / 2;
+		return `M ${px} ${py} L ${mx} ${py} L ${mx} ${cy} L ${cx} ${cy}`;
+	}
+
+	const dx = (cx - px) * 0.5;
+	return `M ${px} ${py} C ${px + dx} ${py}, ${cx - dx} ${cy}, ${cx} ${cy}`;
+}
+
+/**
  * Draw the connector layer.
  *
  * The organic S-curve is what reads as "mind map" rather than "org chart":
  * a cubic bezier whose control points sit halfway between the two anchors.
  *
  * `view` is the part of the map worth drawing; pass null for all of it. Both
- * control points share their x range with the two anchors and their y with one
- * or the other, so the anchors' bounding box contains the whole curve and a
- * cheap rectangle test is exact rather than approximate.
+ * styles keep to the anchors' bounding box, which is what makes a cheap
+ * rectangle test exact rather than approximate -- see `edgePath`.
  *
  * Returns how many paths it drew, which is what a redraw costs.
  */
@@ -48,6 +85,7 @@ export function renderEdges(
 	width: number,
 	height: number,
 	branchColors: boolean,
+	style: EdgeStyle,
 	view: ViewBox | null = null,
 ): number {
 	svg.replaceChildren();
@@ -67,13 +105,9 @@ export function renderEdges(
 		const [px, py] = anchorFor(parent, true, child.side);
 		const [cx, cy] = anchorFor(child, false, child.side);
 		if (view && !edgeInView(px, py, cx, cy, STROKE_PAD, view)) continue;
-		const dx = (cx - px) * 0.5;
 
 		const path = createSvg("path");
-		path.setAttribute(
-			"d",
-			`M ${px} ${py} C ${px + dx} ${py}, ${cx - dx} ${cy}, ${cx} ${cy}`,
-		);
+		path.setAttribute("d", edgePath([px, py], [cx, cy], style));
 		path.setAttribute("fill", "none");
 		path.setAttribute("stroke-width", String(strokeWidth(child.depth)));
 		path.setAttribute("stroke-linecap", "round");

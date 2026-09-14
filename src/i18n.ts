@@ -34,6 +34,9 @@ const EN = {
 		"Add an empty node below the selected one, at the same level.",
 	"shortcut.edit-title.name": "Edit the title",
 	"shortcut.edit-title.description": "Edit the selected node's text in place.",
+	"shortcut.edit-annotation.name": "Add or edit the annotation",
+	"shortcut.edit-annotation.description":
+		"Open the note under the selected node for editing, or start one where there is none. The same as double-clicking an annotation.",
 	"shortcut.delete-node.name": "Delete the node",
 	"shortcut.delete-node.description":
 		"Delete the selected node and everything under it.",
@@ -120,6 +123,11 @@ const EN = {
 	"settings.layout.option.balanced": "Balanced (both sides)",
 	"settings.layout.option.right": "Single side (right)",
 
+	"settings.edgeStyle.name": "Branch connectors",
+	"settings.edgeStyle.desc": "Curved reads as a mind map; right-angled as a hierarchy.",
+	"settings.edgeStyle.option.curve": "Curved",
+	"settings.edgeStyle.option.orthogonal": "Right-angled",
+
 	"settings.branchColors.name": "Colour branches",
 	"settings.branchColors.desc": "Give each top-level branch its own colour.",
 
@@ -186,6 +194,7 @@ const EN = {
 	"view.tool.expandAll": "Expand all",
 	"view.tool.collapseAll": "Collapse all",
 	"view.tool.shortcuts": "Keyboard shortcuts",
+	"view.tool.export": "Export",
 
 	// --- the furniture on a card, read out by a screen reader ---------------
 	"view.node.expand": "Expand",
@@ -301,6 +310,9 @@ const ZH: Record<I18nKey, string> = {
 	"shortcut.add-sibling.description": "在选中节点下方、同一层级添加一个空节点。",
 	"shortcut.edit-title.name": "编辑标题",
 	"shortcut.edit-title.description": "就地编辑选中节点的文字。",
+	"shortcut.edit-annotation.name": "添加或编辑注解",
+	"shortcut.edit-annotation.description":
+		"编辑选中节点下方的注解，没有则新建。等同于双击注解。",
 	"shortcut.delete-node.name": "删除节点",
 	"shortcut.delete-node.description": "删除选中节点及其下的全部内容。",
 	"shortcut.toggle-check.name": "勾选或取消勾选",
@@ -380,6 +392,11 @@ const ZH: Record<I18nKey, string> = {
 	"settings.layout.option.balanced": "均衡（两侧）",
 	"settings.layout.option.right": "单侧（右侧）",
 
+	"settings.edgeStyle.name": "分支连线",
+	"settings.edgeStyle.desc": "曲线更像思维导图，直角更像层级图。",
+	"settings.edgeStyle.option.curve": "曲线",
+	"settings.edgeStyle.option.orthogonal": "直角",
+
 	"settings.branchColors.name": "分支着色",
 	"settings.branchColors.desc": "让每个顶级分支拥有各自的颜色。",
 
@@ -444,6 +461,7 @@ const ZH: Record<I18nKey, string> = {
 	"view.tool.expandAll": "全部展开",
 	"view.tool.collapseAll": "全部折叠",
 	"view.tool.shortcuts": "快捷键",
+	"view.tool.export": "导出",
 
 	// --- 卡片上的部件，供读屏软件朗读 -----------------------------------------
 	"view.node.expand": "展开",

@@ -10,6 +10,7 @@ import type {
 import type { NodeSource, RootPolicy } from "./model/types.ts";
 import { t } from "./i18n.ts";
 import type { I18nKey, LanguagePreference } from "./i18n.ts";
+import type { EdgeStyle } from "./view/edges.ts";
 import {
 	SHORTCUTS,
 	comboToString,
@@ -37,6 +38,8 @@ export interface MindmapSettings {
 	maxHeadingDepth: number;
 	rootPolicy: RootPolicy;
 	layout: LayoutMode;
+	/** How the connectors between cards are drawn. */
+	edgeStyle: EdgeStyle;
 	indentUnit: "auto" | "two" | "four" | "tab";
 	wheel: WheelMode;
 	rememberFolds: boolean;
@@ -70,6 +73,7 @@ export const DEFAULT_SETTINGS: MindmapSettings = {
 	maxHeadingDepth: 6,
 	rootPolicy: "auto",
 	layout: "balanced",
+	edgeStyle: "curve",
 	indentUnit: "auto",
 	wheel: "zoom",
 	rememberFolds: true,
@@ -287,6 +291,18 @@ const GROUPS: SettingGroup[] = [
 					options: {
 						balanced: "settings.layout.option.balanced",
 						right: "settings.layout.option.right",
+					},
+				},
+			},
+			{
+				name: "settings.edgeStyle.name",
+				desc: "settings.edgeStyle.desc",
+				control: {
+					type: "dropdown",
+					key: "edgeStyle",
+					options: {
+						curve: "settings.edgeStyle.option.curve",
+						orthogonal: "settings.edgeStyle.option.orthogonal",
 					},
 				},
 			},
