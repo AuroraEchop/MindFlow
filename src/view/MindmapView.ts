@@ -1885,7 +1885,7 @@ export class MindmapView extends TextFileView implements MapController {
 		const line = node.lineStart;
 
 		await this.save();
-		await this.plugin.setMarkdownView(this.leaf);
+		await this.plugin.setMarkdownView(this.leaf, false);
 
 		// Read off the leaf rather than `this`: the view that was here is gone.
 		const view = this.leaf.view;

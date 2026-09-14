@@ -32,6 +32,14 @@ import type MindmapPlugin from "./main.ts";
 
 export type LayoutMode = "balanced" | "right";
 export type WheelMode = "zoom" | "pan";
+/**
+ * Whether a note that was last left as a map opens as one again.
+ *
+ * `session` is the middle ground: the mark survives the note's tab being closed
+ * and reopened, but not Obsidian being closed. `always` writes it down, so the
+ * note opens as a map the next morning too.
+ */
+export type RememberViewMode = "off" | "session" | "always";
 
 export interface MindmapSettings {
 	source: NodeSource;
@@ -43,6 +51,8 @@ export interface MindmapSettings {
 	indentUnit: "auto" | "two" | "four" | "tab";
 	wheel: WheelMode;
 	rememberFolds: boolean;
+	/** Whether a note left as a map opens as one again. */
+	rememberView: RememberViewMode;
 	branchColors: boolean;
 	showBodyNodes: boolean;
 	inlineAnnotations: boolean;
@@ -77,6 +87,7 @@ export const DEFAULT_SETTINGS: MindmapSettings = {
 	indentUnit: "auto",
 	wheel: "zoom",
 	rememberFolds: true,
+	rememberView: "session",
 	branchColors: true,
 	showBodyNodes: true,
 	inlineAnnotations: true,
@@ -353,6 +364,19 @@ const GROUPS: SettingGroup[] = [
 				name: "settings.rememberFolds.name",
 				desc: "settings.rememberFolds.desc",
 				control: { type: "toggle", key: "rememberFolds" },
+			},
+			{
+				name: "settings.rememberView.name",
+				desc: "settings.rememberView.desc",
+				control: {
+					type: "dropdown",
+					key: "rememberView",
+					options: {
+						off: "settings.rememberView.option.off",
+						session: "settings.rememberView.option.session",
+						always: "settings.rememberView.option.always",
+					},
+				},
 			},
 			{
 				name: "settings.addHeaderButton.name",

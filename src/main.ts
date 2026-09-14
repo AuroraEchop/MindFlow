@@ -29,6 +29,18 @@ const HEADER_BUTTON_CLASS = "mindmap-mode-toggle";
 /** Where the fold store sits in `data.json`, beside the flat settings. */
 const FOLD_STATE_KEY = "foldState";
 
+/** Where the notes that open as maps sit, under their own reserved key. */
+const MAP_NOTES_KEY = "mapNotes";
+
+/**
+ * How many notes that list keeps.
+ *
+ * The same budget the fold store uses, and for the same reason: a vault is
+ * worked in for years, and a list that only ever grows is a file that only ever
+ * gets slower to load.
+ */
+const MAP_NOTES_LIMIT = 200;
+
 /** Where the last version this vault ran sits, beside the other two. */
 const VERSION_KEY = "lastSeenVersion";
 
@@ -64,6 +76,18 @@ export default class MindmapPlugin extends Plugin {
 	 * to. Keyed by path so a map that loads some other note leaves it alone.
 	 */
 	private pendingReveal: { path: string; line: number } | null = null;
+
+	/** Notes this session has been left showing as a map. */
+	private mapNotes = new Set<string>();
+
+	/**
+	 * The same list as a previous session left it, read only in `always` mode.
+	 *
+	 * Kept apart from the session set rather than merged into it, because
+	 * switching the setting from `always` to `session` has to stop reopening
+	 * yesterday's notes without losing the record of them.
+	 */
+	private storedMapNotes: string[] = [];
 
 	/**
 	 * The markdown view state a leaf had before it became a map, so toggling
@@ -245,6 +269,19 @@ export default class MindmapPlugin extends Plugin {
 			}),
 		);
 
+		// A note the user last left as a map opens as one again. Only when the
+		// leaf is showing it as markdown, which is what a fresh open looks like
+		// -- and what stops this from firing on the swap it has just made.
+		this.registerEvent(
+			this.app.workspace.on("file-open", (file) => {
+				if (!file || !this.markedAsMap(file.path)) return;
+				const leaf = this.app.workspace.getMostRecentLeaf();
+				if (!leaf || leaf.view.getViewType() !== "markdown") return;
+				if ((leaf.view as { file?: TFile }).file?.path !== file.path) return;
+				void this.setMindmapView(leaf);
+			}),
+		);
+
 		this.registerEvent(
 			this.app.workspace.on("layout-change", () => this.refreshHeaderButtons()),
 		);
@@ -295,9 +332,13 @@ export default class MindmapPlugin extends Plugin {
 		// beside them under one reserved key. Lifting it out before the spread is
 		// what stops it riding into `this.settings` as an unrecognised setting --
 		// which the next save would then write back inside itself, once per save.
-		const { [FOLD_STATE_KEY]: folds, [VERSION_KEY]: seen, ...rest } = stored ?? {};
+		const { [FOLD_STATE_KEY]: folds, [VERSION_KEY]: seen, [MAP_NOTES_KEY]: maps, ...rest } =
+			stored ?? {};
 		this.foldStore = readStore(folds);
 		this.lastSeenVersion = typeof seen === "string" ? seen : null;
+		this.storedMapNotes = Array.isArray(maps)
+			? maps.filter((path): path is string => typeof path === "string")
+			: [];
 		this.freshInstall = Object.keys(rest).length === 0;
 		const merged = { ...DEFAULT_SETTINGS, ...(rest as Partial<MindmapSettings>) };
 		// The spread is shallow, so a vault with no rebound shortcuts would share
@@ -337,7 +378,12 @@ export default class MindmapPlugin extends Plugin {
 		// settings change spends the pending fold save rather than racing it.
 		this.queueSave.cancel();
 		const version = this.lastSeenVersion === null ? {} : { [VERSION_KEY]: this.lastSeenVersion };
-		await this.saveData({ ...this.settings, [FOLD_STATE_KEY]: this.foldStore, ...version });
+		await this.saveData({
+			...this.settings,
+			[FOLD_STATE_KEY]: this.foldStore,
+			[MAP_NOTES_KEY]: this.storedMapNotes,
+			...version,
+		});
 	}
 
 	/** Swap the store and schedule a write, unless nothing actually changed. */
@@ -364,6 +410,41 @@ export default class MindmapPlugin extends Plugin {
 	 */
 	forgetNoteState(path: string): void {
 		this.updateStore(forgetNote(this.foldStore, path));
+	}
+
+	// --- notes that open as a map ---------------------------------------------
+
+	/** Whether the map is what this note should open as. */
+	private markedAsMap(path: string): boolean {
+		if (this.settings.rememberView === "off") return false;
+		if (this.mapNotes.has(path)) return true;
+		// The persisted list, and only when the user asked the mark to outlive
+		// the session.
+		return this.settings.rememberView === "always" && this.storedMapNotes.includes(path);
+	}
+
+	/**
+	 * Record what a note was left showing.
+	 *
+	 * Called on every switch, not only when the mark changes, so that a note put
+	 * back to markdown is forgotten in the stored list as well -- otherwise the
+	 * mark would come back on the next load and reopen the note as a map the
+	 * user had just left.
+	 */
+	private rememberView(path: string, asMap: boolean): void {
+		if (asMap) {
+			this.mapNotes.add(path);
+			if (this.settings.rememberView !== "always") return;
+			if (this.storedMapNotes.includes(path)) return;
+			this.storedMapNotes = [...this.storedMapNotes, path].slice(-MAP_NOTES_LIMIT);
+			this.queueSave();
+			return;
+		}
+
+		this.mapNotes.delete(path);
+		if (!this.storedMapNotes.includes(path)) return;
+		this.storedMapNotes = this.storedMapNotes.filter((other) => other !== path);
+		this.queueSave();
 	}
 
 	// --- undo history across a view swap --------------------------------------
@@ -457,6 +538,7 @@ export default class MindmapPlugin extends Plugin {
 		}
 
 		this.previousState.set(leaf, state);
+		this.rememberView(file.path, true);
 		await leaf.setViewState(
 			{
 				type: MINDMAP_VIEW_TYPE,
@@ -467,8 +549,16 @@ export default class MindmapPlugin extends Plugin {
 		);
 	}
 
-	async setMarkdownView(leaf: WorkspaceLeaf): Promise<void> {
+	/**
+	 * Swap back to the editor.
+	 *
+	 * `remember` is false for a switch the plugin made on the user's behalf.
+	 * Ctrl/Cmd+clicking a card to see the line it is written on is a look at the
+	 * note, not a decision to stop opening that note as a map.
+	 */
+	async setMarkdownView(leaf: WorkspaceLeaf, remember = true): Promise<void> {
 		const file = (leaf.view as { file?: TFile }).file;
+		if (remember && file) this.rememberView(file.path, false);
 		const remembered = this.previousState.get(leaf);
 
 		const next: ViewState = remembered

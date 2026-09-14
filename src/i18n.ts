@@ -156,8 +156,14 @@ const EN = {
 	"settings.rememberFolds.desc":
 		"Reopen a note to the shape you left it in, focus included. The state is kept in the plugin's own data, never in the note — your markdown is untouched either way. Turn this off and every map opens at the root plus its top-level branches.",
 
-	"settings.addHeaderButton.name": "Button in the note header",
-	"settings.addHeaderButton.desc":
+	"settings.rememberView.name": "Reopen as a mind map",
+	"settings.rememberView.desc":
+		"A note you last left showing the map opens showing the map again rather than the editor. Off leaves every note to open as markdown.",
+	"settings.rememberView.option.off": "Never",
+	"settings.rememberView.option.session": "Until Obsidian is closed",
+	"settings.rememberView.option.always": "Always",
+
+	"settings.addHeaderButton.name": "Button in the note header",	"settings.addHeaderButton.desc":
 		"Adds a mind map toggle beside the other view actions. The command and ribbon icon work either way.",
 
 	"settings.debugTiming.name": "Log render timings",
@@ -427,6 +433,13 @@ const ZH: Record<I18nKey, string> = {
 	"settings.rememberFolds.name": "记住折叠状态",
 	"settings.rememberFolds.desc":
 		"重新打开笔记时恢复成你离开时的形态，包括选中状态。状态存在插件自己的数据里，绝不写入笔记 —— 无论开关如何，你的 Markdown 都不会被改动。关闭后，每张导图都只展开根节点和它的顶级分支。",
+
+	"settings.rememberView.name": "重开时显示为导图",
+	"settings.rememberView.desc":
+		"上次以导图形式查看的笔记，下次打开时仍显示导图，而不是编辑器。选「从不」则所有笔记都以 Markdown 打开。",
+	"settings.rememberView.option.off": "从不",
+	"settings.rememberView.option.session": "本次 Obsidian 关闭前",
+	"settings.rememberView.option.always": "始终",
 
 	"settings.addHeaderButton.name": "笔记标题栏按钮",
 	"settings.addHeaderButton.desc":
