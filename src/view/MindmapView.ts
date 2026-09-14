@@ -60,7 +60,14 @@ import { buildNodeElement } from "./nodes.ts";
 import type { NodeElement } from "./nodes.ts";
 import { nodeMaxWidth } from "./nodeWidth.ts";
 import { attachInteractions } from "./interactions.ts";
-import { SHORTCUTS, comboToString, resolveBindings } from "./shortcuts.ts";
+import {
+	SHORTCUTS,
+	comboFromEvent,
+	comboToString,
+	resolveAction,
+	resolveBindings,
+	survivesEditing,
+} from "./shortcuts.ts";
 import type { KeyCombo, ShortcutBindings } from "./shortcuts.ts";
 import { SearchBar } from "./searchBar.ts";
 import { BlockDialog } from "./blockDialog.ts";
@@ -316,6 +323,15 @@ export class MindmapView extends TextFileView implements MapController {
 	private anchor: Anchor | null = null;
 	private selectionKey: string | null = null;
 	private editingId: string | null = null;
+	/**
+	 * The title element a card is being edited in, and what it held when the
+	 * editor opened. Together they are the answer to "has anything been typed",
+	 * which is what decides whether undo belongs to the card or to the map.
+	 */
+	private editTextEl: HTMLElement | null = null;
+	private editStartText: string | null = null;
+	/** Ends the edit in progress. True writes the text back to the note. */
+	private endEdit: ((save: boolean) => void) | null = null;
 	private pendingFocus: PendingFocus | null = null;
 
 	private undoStack: string[] = [];
@@ -1739,6 +1755,36 @@ export class MindmapView extends TextFileView implements MapController {
 		return this.editingId !== null;
 	}
 
+	/**
+	 * Whether the card being edited has been typed into.
+	 *
+	 * Read off the element rather than tracked with an input listener: the text
+	 * is what the user sees, and a listener that missed one path -- a paste, a
+	 * spell-check correction, an undo inside the field -- would leave this
+	 * answering for a document that no longer matches the screen.
+	 */
+	editingHasTyped(): boolean {
+		if (this.editTextEl === null || this.editStartText === null) return false;
+		return (this.editTextEl.textContent ?? "") !== this.editStartText;
+	}
+
+	/**
+	 * Close an editor that has typed nothing, so the map can act on the key.
+	 *
+	 * Discarded rather than committed: there is nothing to write, and a commit
+	 * would push a rename step that undoes straight back to the text the user
+	 * is already looking at.
+	 *
+	 * Closing it first is not optional. The undo that follows repaints, and the
+	 * element the editor was living in goes with the node it belonged to -- a
+	 * blur that never fires, which is how `editingId` gets stuck and the map
+	 * goes deaf to every key afterwards.
+	 */
+	private discardIdleEdit(): void {
+		if (this.editingId === null || this.editingHasTyped()) return;
+		this.endEdit?.(false);
+	}
+
 	selectedId(): string | null {
 		return this.selectedNode()?.id ?? null;
 	}
@@ -1787,6 +1833,10 @@ export class MindmapView extends TextFileView implements MapController {
 		}
 
 		const el = element.text;
+		// Recorded before the first keystroke can arrive, so "has anything been
+		// typed" answers for this editor and not the last one.
+		this.editTextEl = el;
+		this.editStartText = node.text;
 		el.empty();
 		el.setText(node.text);
 		el.addClass("is-editing");
@@ -1812,6 +1862,9 @@ export class MindmapView extends TextFileView implements MapController {
 			el.contentEditable = "false";
 			el.removeClass("is-editing");
 			this.editingId = null;
+			this.editTextEl = null;
+			this.editStartText = null;
+			this.endEdit = null;
 			if (save) {
 				this.withNode(id, (parsed, current) => {
 					this.apply(renameNode(parsed, current, value));
@@ -1822,8 +1875,30 @@ export class MindmapView extends TextFileView implements MapController {
 			this.canvas.viewport.focus({ preventScroll: true });
 		};
 
+		// Handed to the viewport handler by `finishEdit` on the way out, so the
+		// map can close this editor before it acts.
+		this.endEdit = finish;
+
 		el.addEventListener("keydown", (ev) => {
-			// While editing, the map's own shortcuts must not fire.
+			// While editing, the map's own shortcuts must not fire: this field
+			// owns the keyboard, and every key the map would claim is one the
+			// user is typing.
+			//
+			// Undo and redo are the exception, and only while nothing has been
+			// typed. A node added by accident is left with this editor open and
+			// its text still empty, and taking that add back is the very next
+			// thing the user wants. The key is carried to the map by name rather
+			// than bubbled, because this listener stops everything at the
+			// boundary -- and a press let past it would reach Obsidian's own
+			// keymap first.
+			const action = resolveAction(this.bindings(), comboFromEvent(ev));
+			if (action !== null && survivesEditing(action, this.editingHasTyped())) {
+				ev.preventDefault();
+				ev.stopPropagation();
+				if (action === "undo") this.undo();
+				else this.redo();
+				return;
+			}
 			ev.stopPropagation();
 			if (ev.key === "Enter") {
 				ev.preventDefault();
@@ -2157,6 +2232,10 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	undo(): void {
+		// An editor left open by an add has to close before the stack moves: the
+		// repaint takes the element it lives in, and a blur that never fires
+		// leaves `editingId` set and the map deaf to every key after it.
+		this.discardIdleEdit();
 		const previous = this.undoStack.pop();
 		if (previous === undefined) {
 			new Notice(t("view.notice.nothingToUndo"));
@@ -2167,6 +2246,7 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	redo(): void {
+		this.discardIdleEdit();
 		const next = this.redoStack.pop();
 		if (next === undefined) return;
 		this.undoStack.push(this.data);

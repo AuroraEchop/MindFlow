@@ -332,6 +332,25 @@ export function resolveAction(
 	return null;
 }
 
+/**
+ * Whether the map still answers this action while a card's title is open for
+ * editing.
+ *
+ * A card being edited is a text field, so every key the map would otherwise
+ * claim is one the user is typing, and the map has to keep its hands off.
+ *
+ * Undo and redo are the exception, and only while nothing has been typed. A
+ * node added by accident is left with its editor open and its text still
+ * empty, so the one thing the user wants next is to take the add back -- and
+ * requiring them to click away from the card first, without saying so, is a
+ * trap with no way out. Once a character has been typed the card has something
+ * of its own to undo, and the platform's own undo is the right answer.
+ */
+export function survivesEditing(action: ShortcutAction, typed: boolean): boolean {
+	if (typed) return false;
+	return action === "undo" || action === "redo";
+}
+
 /** Every combo more than one action answers to, in table order. */
 export function findConflicts(
 	bindings: ShortcutBindings,

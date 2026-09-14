@@ -15,6 +15,7 @@ import {
 	sameCombo,
 	serializeCombo,
 	shortcutFor,
+	survivesEditing,
 } from "./shortcuts.ts";
 import type { KeyCombo, ShortcutAction, StoredShortcuts } from "./shortcuts.ts";
 import { t } from "../i18n.ts";
@@ -330,4 +331,23 @@ test("only a changed binding counts as changed", () => {
 	for (const entry of SHORTCUTS) {
 		assert.equal(isDefaultBinding(entry.action, bindings[entry.action]), true, entry.action);
 	}
+});
+
+// --- what a card being edited keeps for itself --------------------------------
+
+test("a card being edited keeps every key but undo and redo", () => {
+	// A node added by accident is left with its editor open and nothing typed,
+	// so undo has to reach the map or the add cannot be taken back without
+	// first clicking away from the card.
+	for (const entry of SHORTCUTS) {
+		const expected = entry.action === "undo" || entry.action === "redo";
+		assert.equal(survivesEditing(entry.action, false), expected, entry.action);
+	}
+});
+
+test("once a character has been typed the card keeps undo too", () => {
+	// Now the field has something of its own to undo, and the platform's undo
+	// is the right answer rather than the map's.
+	assert.equal(survivesEditing("undo", true), false);
+	assert.equal(survivesEditing("redo", true), false);
 });

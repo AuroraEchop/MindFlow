@@ -130,11 +130,20 @@ export function attachInteractions(controller: MapController): () => void {
 			ev.stopPropagation();
 			return;
 		}
+		// The fold toggle and the checkbox are plain divs, so pressing one moves
+		// the focus to the body and the map's keyboard stops answering -- a
+		// click on a card does not, because the fallback below takes the focus
+		// back. Neither of these opens anything that wants the focus itself, so
+		// it is put back where the keyboard lives.
+		//
+		// The add button and the expand button are deliberately not in this
+		// group: both hand the focus on to something they open.
 		const toggle = target.closest<HTMLElement>(".mm-toggle");
 		if (toggle) {
 			const id = nodeIdFrom(toggle);
 			if (id) controller.toggleFold(id);
 			ev.stopPropagation();
+			viewport.focus({ preventScroll: true });
 			return;
 		}
 		const checkbox = target.closest<HTMLElement>(".mm-checkbox");
@@ -142,6 +151,7 @@ export function attachInteractions(controller: MapController): () => void {
 			const id = nodeIdFrom(checkbox);
 			if (id) controller.toggleCheck(id);
 			ev.stopPropagation();
+			viewport.focus({ preventScroll: true });
 			return;
 		}
 		const id = nodeIdFrom(target);
