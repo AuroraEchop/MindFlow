@@ -41,6 +41,15 @@ export type WheelMode = "zoom" | "pan";
  */
 export type RememberViewMode = "off" | "session" | "always";
 
+/**
+ * Where the corner toolbar sits.
+ *
+ * The three docks are CSS. `free` is wherever the user dragged it to, which is
+ * why the coordinates below are settings rather than view state -- the corner
+ * should be where they left it the next time a map is opened.
+ */
+export type ToolbarDock = "bottom-right" | "bottom-centre" | "right" | "free";
+
 export interface MindmapSettings {
 	source: NodeSource;
 	maxHeadingDepth: number;
@@ -60,6 +69,11 @@ export interface MindmapSettings {
 	horizontalGap: number;
 	verticalGap: number;
 	addHeaderButton: boolean;
+	/** Where the corner toolbar sits. */
+	toolbarDock: ToolbarDock;
+	/** The toolbar's position once dragged. Read only while `toolbarDock` is `free`. */
+	toolbarX: number;
+	toolbarY: number;
 	/**
 	 * Which language the plugin speaks. `"auto"` follows Obsidian's own
 	 * interface language, which is what almost everybody wants.
@@ -95,6 +109,9 @@ export const DEFAULT_SETTINGS: MindmapSettings = {
 	horizontalGap: 64,
 	verticalGap: 14,
 	addHeaderButton: true,
+	toolbarDock: "bottom-right",
+	toolbarX: 12,
+	toolbarY: 12,
 	language: "auto",
 	debugTiming: false,
 	shortcuts: {},
@@ -331,6 +348,20 @@ const GROUPS: SettingGroup[] = [
 				name: "settings.inlineAnnotations.name",
 				desc: annotationDesc,
 				control: { type: "toggle", key: "inlineAnnotations" },
+			},
+			{
+				name: "settings.toolbarDock.name",
+				desc: "settings.toolbarDock.desc",
+				control: {
+					type: "dropdown",
+					key: "toolbarDock",
+					options: {
+						"bottom-right": "settings.toolbarDock.option.bottom-right",
+						"bottom-centre": "settings.toolbarDock.option.bottom-centre",
+						right: "settings.toolbarDock.option.right",
+						free: "settings.toolbarDock.option.free",
+					},
+				},
 			},
 			{
 				name: "settings.maxNodeWidth.name",

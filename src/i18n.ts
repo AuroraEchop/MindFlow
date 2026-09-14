@@ -144,6 +144,14 @@ const EN = {
 	"settings.inlineAnnotations.desc.5":
 		" is a blank line between them. Obsidian's own editing and reading views show such a line as an ordinary paragraph that starts with a colon. Double-click an annotation on the map, or pick Add annotation from a node's context menu, to edit one — the colon prefixes are written back to the note for you. Turn this off to read those lines as ordinary body cards again.",
 
+	"settings.toolbarDock.name": "Corner toolbar",
+	"settings.toolbarDock.desc":
+		"Where the buttons sit. Drag the toolbar itself to move it anywhere; the dock follows the drag and remembers where you left it.",
+	"settings.toolbarDock.option.bottom-right": "Bottom right",
+	"settings.toolbarDock.option.bottom-centre": "Bottom centre",
+	"settings.toolbarDock.option.right": "Right edge",
+	"settings.toolbarDock.option.free": "Wherever I dragged it",
+
 	"settings.maxNodeWidth.name": "Maximum card width",
 	"settings.horizontalGap.name": "Horizontal spacing",
 	"settings.verticalGap.name": "Vertical spacing",
@@ -421,6 +429,14 @@ const ZH: Record<I18nKey, string> = {
 	"settings.inlineAnnotations.desc.4": " 行会保留换行，单独的 ",
 	"settings.inlineAnnotations.desc.5":
 		" 表示它们之间的空行。Obsidian 自身的编辑和阅读视图会把这样的行显示为以冒号开头的普通段落。在导图上双击注解，或从节点右键菜单选择「添加注解」即可编辑 —— 冒号前缀会替你写回笔记。关闭此项后，这些行会重新作为普通正文卡片显示。",
+
+	"settings.toolbarDock.name": "角落工具栏",
+	"settings.toolbarDock.desc":
+		"按钮停靠的位置。直接拖动工具栏本身即可移动；停靠方式会跟随拖动，并记住你放下的位置。",
+	"settings.toolbarDock.option.bottom-right": "右下角",
+	"settings.toolbarDock.option.bottom-centre": "底部居中",
+	"settings.toolbarDock.option.right": "右侧边缘",
+	"settings.toolbarDock.option.free": "我拖动到的位置",
 
 	"settings.maxNodeWidth.name": "卡片最大宽度",
 	"settings.horizontalGap.name": "水平间距",

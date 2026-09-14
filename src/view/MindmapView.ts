@@ -99,6 +99,14 @@ import type MindmapPlugin from "../main.ts";
 
 export const MINDMAP_VIEW_TYPE = "mindmap-mode-view";
 
+/** How far a press has to travel before it is a drag rather than a click. */
+const TOOLBAR_DRAG_THRESHOLD = 5;
+
+/** Kept inside its host: a corner dragged off the edge cannot be dragged back. */
+function clamp(value: number, min: number, max: number): number {
+	return Math.min(Math.max(value, min), max);
+}
+
 /**
  * Depth kept open when a map is first painted. 0 would leave only the root, 1
  * shows the root plus its top-level branches with a descendant count on each
@@ -720,6 +728,8 @@ export class MindmapView extends TextFileView implements MapController {
 	 */
 	private buildToolbar(): void {
 		const bars = this.contentEl.createDiv({ cls: "mm-toolbars" });
+		this.applyToolbarDock(bars);
+		this.attachToolbarDrag(bars);
 		const exports = bars.createDiv({ cls: ["mm-toolbar", "mm-toolbar-export"] });
 		const camera = bars.createDiv({ cls: ["mm-toolbar", "mm-toolbar-camera"] });
 
@@ -757,6 +767,100 @@ export class MindmapView extends TextFileView implements MapController {
 		button(camera, "chevrons-down-up", t("view.tool.collapseAll"), () => this.collapseAll());
 		button(camera, "search", t("shortcut.search.name"), () => this.openSearch());
 		button(camera, "help-circle", t("view.tool.shortcuts"), () => this.showShortcuts());
+	}
+
+	/**
+	 * Where the corner sits.
+	 *
+	 * The three docks are classes the stylesheet positions; the free one is a
+	 * pair of coordinates set here, because they come from the settings rather
+	 * than from the stylesheet.
+	 */
+	private applyToolbarDock(bars: HTMLElement): void {
+		const { toolbarDock, toolbarX, toolbarY } = this.plugin.settings;
+		bars.toggleClass("is-dock-bottom-right", toolbarDock === "bottom-right");
+		bars.toggleClass("is-dock-bottom-centre", toolbarDock === "bottom-centre");
+		bars.toggleClass("is-dock-right", toolbarDock === "right");
+		bars.toggleClass("is-dock-free", toolbarDock === "free");
+		if (toolbarDock !== "free") return;
+		bars.style.setProperty("--mm-toolbar-x", `${toolbarX}px`);
+		bars.style.setProperty("--mm-toolbar-y", `${toolbarY}px`);
+	}
+
+	/**
+	 * Let the corner be dragged.
+	 *
+	 * A press that travels is a drag and one that does not is a click, on the
+	 * same threshold the cards use -- the buttons under the pointer have to keep
+	 * working. The first real movement switches the dock to `free`, so the place
+	 * the user chose is the one that is kept rather than being snapped back to a
+	 * corner on the next paint.
+	 *
+	 * Everything is measured against `contentEl`, which is the positioned
+	 * ancestor the toolbar is absolutely placed in, and clamped to it: a corner
+	 * dragged past the edge could not be reached again to be dragged back.
+	 */
+	private attachToolbarDrag(bars: HTMLElement): void {
+		let pointer = -1;
+		let dragging = false;
+		let origin = { x: 0, y: 0 };
+		let start = { x: 0, y: 0 };
+
+		const move = (x: number, y: number): void => {
+			bars.style.setProperty("--mm-toolbar-x", `${x}px`);
+			bars.style.setProperty("--mm-toolbar-y", `${y}px`);
+		};
+
+		bars.addEventListener("pointerdown", (ev) => {
+			if (ev.button !== 0) return;
+			pointer = ev.pointerId;
+			dragging = false;
+			origin = { x: ev.clientX, y: ev.clientY };
+			const host = this.contentEl.getBoundingClientRect();
+			const rect = bars.getBoundingClientRect();
+			start = { x: rect.left - host.left, y: rect.top - host.top };
+		});
+
+		bars.addEventListener("pointermove", (ev) => {
+			if (pointer !== ev.pointerId) return;
+			const dx = ev.clientX - origin.x;
+			const dy = ev.clientY - origin.y;
+			if (!dragging) {
+				if (Math.hypot(dx, dy) < TOOLBAR_DRAG_THRESHOLD) return;
+				dragging = true;
+				bars.setPointerCapture(ev.pointerId);
+				bars.addClass("is-dragging");
+				bars.removeClass("is-dock-bottom-right");
+				bars.removeClass("is-dock-bottom-centre");
+				bars.removeClass("is-dock-right");
+				bars.addClass("is-dock-free");
+			}
+			ev.preventDefault();
+			const host = this.contentEl.getBoundingClientRect();
+			const rect = bars.getBoundingClientRect();
+			move(
+				clamp(start.x + dx, 0, Math.max(0, host.width - rect.width)),
+				clamp(start.y + dy, 0, Math.max(0, host.height - rect.height)),
+			);
+		});
+
+		const finish = (ev: PointerEvent): void => {
+			if (pointer !== ev.pointerId) return;
+			pointer = -1;
+			if (!dragging) return;
+			dragging = false;
+			bars.removeClass("is-dragging");
+
+			const host = this.contentEl.getBoundingClientRect();
+			const rect = bars.getBoundingClientRect();
+			const settings = this.plugin.settings;
+			settings.toolbarDock = "free";
+			settings.toolbarX = Math.round(rect.left - host.left);
+			settings.toolbarY = Math.round(rect.top - host.top);
+			void this.plugin.saveSettings();
+		};
+		bars.addEventListener("pointerup", finish);
+		bars.addEventListener("pointercancel", finish);
 	}
 
 	/**

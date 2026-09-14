@@ -742,13 +742,51 @@
    knows and the export panel stacks over it, both flush to the right edge. */
 .mm-toolbars {
 	position: absolute;
-	right: 12px;
-	bottom: 12px;
 	z-index: 10;
 	display: flex;
 	flex-direction: column;
 	align-items: flex-end;
 	gap: 8px;
+	/* Free is the dock that reads these; the three named ones set their own
+	   edge below and leave the coordinates alone. */
+	left: var(--mm-toolbar-x, 12px);
+	top: var(--mm-toolbar-y, 12px);
+	right: auto;
+	bottom: auto;
+}
+
+/* Where the corner has always been, and the default. */
+.mm-toolbars.is-dock-bottom-right {
+	left: auto;
+	top: auto;
+	right: 12px;
+	bottom: 12px;
+}
+
+.mm-toolbars.is-dock-bottom-centre {
+	left: 50%;
+	top: auto;
+	right: auto;
+	bottom: 12px;
+	transform: translateX(-50%);
+}
+
+.mm-toolbars.is-dock-right {
+	left: auto;
+	top: 50%;
+	right: 12px;
+	bottom: auto;
+	transform: translateY(-50%);
+}
+
+.mm-toolbars.is-dragging {
+	cursor: grabbing;
+	opacity: 0.85;
+}
+
+/* A drag that passes over a button must not read as a press on it. */
+.mm-toolbars.is-dragging .mm-tool {
+	pointer-events: none;
 }
 
 /* The panel itself -- one rule, worn by both. */
