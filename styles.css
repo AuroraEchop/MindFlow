@@ -743,6 +743,24 @@
 	pointer-events: auto;
 }
 
+/* The copy of a card that follows the pointer while one is being dragged. On
+   the body, so it is in screen space and outside the viewport's own transform,
+   and never hit-testable -- `resolveDrop` finds its target with
+   `elementFromPoint`, which would otherwise only ever find this. */
+.mm-drag-ghost {
+	position: fixed;
+	z-index: 100;
+	pointer-events: none;
+	opacity: 0.6;
+	transform: translate(-50%, -50%);
+}
+
+.mm-drag-ghost .mm-card {
+	width: 100%;
+	height: 100%;
+	box-sizing: border-box;
+}
+
 .mm-add:hover {
 	border-style: solid;
 	background: var(--mm-branch, var(--interactive-accent));

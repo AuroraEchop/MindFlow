@@ -283,8 +283,51 @@ export function attachInteractions(controller: MapController): () => void {
 		else targetEl.addClass(mode === "before" ? "is-drop-before" : "is-drop-after");
 	};
 
+	/**
+	 * A copy of the card that follows the pointer while it is being dragged.
+	 *
+	 * Built once per drag from the card's own box, so what the pointer carries
+	 * is the thing the user picked up rather than a rectangle standing in for
+	 * it. On `document.body` rather than in the view: the ghost is in screen
+	 * space, where the pointer lives, and the viewport it came from is inside a
+	 * transform that would drag the ghost along with the pan.
+	 *
+	 * `pointer-events: none` is load-bearing. `resolveDrop` hit-tests with
+	 * `elementFromPoint`, and a ghost that could be hit would be the only thing
+	 * ever found under the pointer.
+	 */
+	let ghost: HTMLElement | null = null;
+
+	const moveGhost = (ev: PointerEvent): void => {
+		if (!ghost) return;
+		ghost.style.left = `${ev.clientX}px`;
+		ghost.style.top = `${ev.clientY}px`;
+	};
+
+	const startGhost = (node: HTMLElement, ev: PointerEvent): void => {
+		const card = node.querySelector<HTMLElement>(".mm-card");
+		if (!card) return;
+		const rect = card.getBoundingClientRect();
+
+		ghost = document.body.createDiv({ cls: "mm-drag-ghost" });
+		ghost.style.width = `${rect.width}px`;
+		ghost.style.height = `${rect.height}px`;
+		// The branch colour is set by a rule on the node the copy has left
+		// behind, so it is read off the original and carried over by hand.
+		const branch = getComputedStyle(card).getPropertyValue("--mm-branch");
+		if (branch.trim() !== "") ghost.style.setProperty("--mm-branch", branch.trim());
+		ghost.appendChild(card.cloneNode(true));
+		moveGhost(ev);
+	};
+
+	const endGhost = (): void => {
+		ghost?.remove();
+		ghost = null;
+	};
+
 	const endDrag = (): void => {
 		cancelDropFrame();
+		endGhost();
 		if (dragId) {
 			viewport
 				.querySelector<HTMLElement>(`.mm-node[data-id="${CSS.escape(dragId)}"]`)
@@ -322,10 +365,17 @@ export function attachInteractions(controller: MapController): () => void {
 			if (moved < DRAG_THRESHOLD) return;
 			dragging = true;
 			viewport.addClass("is-dragging-node");
-			viewport
-				.querySelector<HTMLElement>(`.mm-node[data-id="${CSS.escape(dragId)}"]`)
-				?.addClass("is-dragging");
+			const node = viewport.querySelector<HTMLElement>(
+				`.mm-node[data-id="${CSS.escape(dragId)}"]`,
+			);
+			node?.addClass("is-dragging");
+			// The card the drag left behind goes faint, and a copy of it goes
+			// with the pointer -- which is what says the card is being carried
+			// rather than the map being panned.
+			if (node) startGhost(node, ev);
 			viewport.setPointerCapture(ev.pointerId);
+		} else {
+			moveGhost(ev);
 		}
 
 		dropAt = { x: ev.clientX, y: ev.clientY };
