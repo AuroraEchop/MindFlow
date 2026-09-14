@@ -18,6 +18,8 @@ export interface MapController {
 	select(id: string | null): void;
 	beginEdit(id: string): void;
 	editAnnotation(id: string): void;
+	/** Take the user to the line this card is written on. */
+	revealInNote(id: string): void;
 
 	addChildTo(id: string): void;
 	addSiblingTo(id: string): void;
@@ -114,10 +116,22 @@ export function attachInteractions(controller: MapController): () => void {
 			return;
 		}
 
+		// Ctrl/Cmd+click on a card is "show me where this is written", which is
+		// the map's half of a round trip the note's own caret can start back.
+		// Deliberately after the link check: the same gesture on a link inside a
+		// content card is already the link's, and has been for longer.
+		if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey) {
+			const id = nodeIdFrom(target);
+			if (id) {
+				ev.preventDefault();
+				controller.revealInNote(id);
+				return;
+			}
+		}
+
 		// Ahead of the fallback below: the expand button sits inside the card,
 		// so letting the click through would also drop the selection.
-		const expand = target.closest<HTMLElement>(".mm-expand");
-		if (expand) {
+		const expand = target.closest<HTMLElement>(".mm-expand");		if (expand) {
 			const id = nodeIdFrom(expand);
 			if (id) controller.expandBody(id);
 			ev.stopPropagation();

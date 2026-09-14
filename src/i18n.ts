@@ -210,6 +210,8 @@ const EN = {
 	"view.shortcuts.mouse.expand.what": "Show the whole block, rendered",
 	"view.shortcuts.mouse.link.keys": "Click a link in a content card",
 	"view.shortcuts.mouse.link.what": "Open it",
+	"view.shortcuts.mouse.reveal.keys": "Ctrl/Cmd+click a card",
+	"view.shortcuts.mouse.reveal.what": "Show where it is written in the note",
 	"view.shortcuts.mouse.add.keys": "+ beside a card",
 	"view.shortcuts.mouse.add.what": "New child",
 	"view.shortcuts.mouse.menu.keys": "Right-click a card",
@@ -272,6 +274,7 @@ const EN = {
 	"command.moveUp": "Move the selected node up among its siblings",
 	"command.moveDown": "Move the selected node down among its siblings",
 	"command.openAsMindmap": "Open current note as a mind map",
+	"command.revealLineOnMap": "Reveal the line at the cursor on the map",
 
 	// --- what the plugin says at load ---------------------------------------
 	"main.notice.onlyMarkdown": "Only markdown notes can be shown as a mind map.",
@@ -477,6 +480,8 @@ const ZH: Record<I18nKey, string> = {
 	"view.shortcuts.mouse.expand.what": "完整渲染该块内容",
 	"view.shortcuts.mouse.link.keys": "点击正文卡片中的链接",
 	"view.shortcuts.mouse.link.what": "打开它",
+	"view.shortcuts.mouse.reveal.keys": "Ctrl/Cmd+点击卡片",
+	"view.shortcuts.mouse.reveal.what": "跳到它在笔记中的位置",
 	"view.shortcuts.mouse.add.keys": "卡片旁的 +",
 	"view.shortcuts.mouse.add.what": "新建子节点",
 	"view.shortcuts.mouse.menu.keys": "右键点击卡片",
@@ -538,6 +543,7 @@ const ZH: Record<I18nKey, string> = {
 	"command.moveUp": "把选中节点在同级中上移",
 	"command.moveDown": "把选中节点在同级中下移",
 	"command.openAsMindmap": "以思维导图打开当前笔记",
+	"command.revealLineOnMap": "在导图中定位光标所在的行",
 
 	// --- 加载时的提示 --------------------------------------------------------
 	"main.notice.onlyMarkdown": "只有 Markdown 笔记可以显示为思维导图。",

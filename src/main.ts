@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile, TFolder, debounce, setIcon } from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile, TFolder, debounce, setIcon } from "obsidian";
 import type { ViewState, WorkspaceLeaf } from "obsidian";
 
 import { MINDMAP_VIEW_TYPE, MindmapView } from "./view/MindmapView.ts";
@@ -58,6 +58,12 @@ export default class MindmapPlugin extends Plugin {
 
 	/** The note a read is in flight for, so two cannot land out of order. */
 	private readingFor: string | null = null;
+
+	/**
+	 * A line the next map is to put its selection on, and the note it belongs
+	 * to. Keyed by path so a map that loads some other note leaves it alone.
+	 */
+	private pendingReveal: { path: string; line: number } | null = null;
 
 	/**
 	 * The markdown view state a leaf had before it became a map, so toggling
@@ -168,6 +174,27 @@ export default class MindmapPlugin extends Plugin {
 				const leaf = this.app.workspace.getMostRecentLeaf();
 				if (!leaf || leaf.view.getViewType() !== "markdown") return false;
 				if (!checking) void this.setMindmapView(leaf);
+				return true;
+			},
+		});
+
+		// The note's half of the round trip Ctrl/Cmd+click starts from the map:
+		// open the map on the card the caret is sitting in. Bound to nothing by
+		// default -- it is here for the palette, and to be rebound.
+		this.addCommand({
+			id: "reveal-line-on-the-map",
+			name: t("command.revealLineOnMap"),
+			checkCallback: (checking) => {
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				const leaf = this.app.workspace.getMostRecentLeaf();
+				if (!view?.file || !leaf || leaf.view.getViewType() !== "markdown") return false;
+				if (!checking) {
+					this.pendingReveal = {
+						path: view.file.path,
+						line: view.editor.getCursor().line,
+					};
+					void this.setMindmapView(leaf);
+				}
 				return true;
 			},
 		});
@@ -454,6 +481,20 @@ export default class MindmapPlugin extends Plugin {
 		}
 
 		await leaf.setViewState(next, { focus: true });
+	}
+
+	/**
+	 * The line a map loading this note is to select, or null.
+	 *
+	 * Taken once. A map that loads some other note leaves it standing rather
+	 * than eating it -- the user asked for a card on the note they were reading,
+	 * not on whichever note happened to open next.
+	 */
+	takeReveal(path: string): number | null {
+		const pending = this.pendingReveal;
+		if (!pending || pending.path !== path) return null;
+		this.pendingReveal = null;
+		return pending.line;
 	}
 
 	private async openFileAsMindmap(file: TFile): Promise<void> {

@@ -1,4 +1,13 @@
-import { Keymap, Menu, Notice, Platform, Scope, TextFileView, setIcon } from "obsidian";
+import {
+	Keymap,
+	MarkdownView,
+	Menu,
+	Notice,
+	Platform,
+	Scope,
+	TextFileView,
+	setIcon,
+} from "obsidian";
 import type {
 	KeymapContext,
 	KeymapEventHandler,
@@ -550,6 +559,19 @@ export class MindmapView extends TextFileView implements MapController {
 			this.foldSeedPending = true;
 		}
 		this.render("setViewData");
+
+		// The other half of Ctrl+click on a card, run backwards: the note was
+		// showing a line, and the map is to put its selection on the card written
+		// there. Taken once, and only by a map that loaded the note it names.
+		const path = this.file?.path;
+		const reveal = path === undefined ? null : this.plugin.takeReveal(path);
+		if (reveal !== null) {
+			const target = this.nodeAtLine(reveal);
+			if (target) {
+				this.select(target.id);
+				this.revealSelection();
+			}
+		}
 	}
 
 	override clear(): void {
@@ -770,6 +792,7 @@ export class MindmapView extends TextFileView implements MapController {
 			["view.shortcuts.mouse.edit.keys", "view.shortcuts.mouse.edit.what"],
 			["view.shortcuts.mouse.expand.keys", "view.shortcuts.mouse.expand.what"],
 			["view.shortcuts.mouse.link.keys", "view.shortcuts.mouse.link.what"],
+			["view.shortcuts.mouse.reveal.keys", "view.shortcuts.mouse.reveal.what"],
 			["view.shortcuts.mouse.add.keys", "view.shortcuts.mouse.add.what"],
 			["view.shortcuts.mouse.menu.keys", "view.shortcuts.mouse.menu.what"],
 			["view.shortcuts.mouse.reparent.keys", "view.shortcuts.mouse.reparent.what"],
@@ -1118,6 +1141,23 @@ export class MindmapView extends TextFileView implements MapController {
 		if (!this.parsed || line < 0) return null;
 		for (const node of this.parsed.byId.values()) {
 			if (node.lineStart === line) return node;
+		}
+		return null;
+	}
+
+	/**
+	 * The card the note writes at `line`, or the one whose block contains it.
+	 *
+	 * A caret sits wherever it was left, which is as often inside a node's
+	 * paragraphs as on its marker line -- and the card is the same card either
+	 * way. Falling back to the containing block is what makes the note-to-map
+	 * direction land on something the user recognises rather than on nothing.
+	 */
+	private nodeAtLine(line: number): MindNode | null {
+		const exact = this.findByLine(line);
+		if (exact) return exact;
+		for (const node of this.parsed?.byId.values() ?? []) {
+			if (node.lineStart >= 0 && line > node.lineStart && line <= node.blockEnd) return node;
 		}
 		return null;
 	}
@@ -1828,6 +1868,32 @@ export class MindmapView extends TextFileView implements MapController {
 	private discardIdleEdit(): void {
 		if (this.editingId === null || this.editingHasTyped()) return;
 		this.endEdit?.(false);
+	}
+
+	/**
+	 * Take the user to where this card is written.
+	 *
+	 * The map and the note share one leaf, so this is a change of view type and
+	 * a scroll -- no file is opened and nothing is written. The pending save is
+	 * flushed first: the editor reads the file, and a write still sitting on the
+	 * debounce timer would hand it the text from before the last edit, which is
+	 * the wrong note to land in even by one line.
+	 */
+	async revealInNote(id: string): Promise<void> {
+		const node = this.parsed?.byId.get(id);
+		if (!node || node.lineStart < 0) return;
+		const line = node.lineStart;
+
+		await this.save();
+		await this.plugin.setMarkdownView(this.leaf);
+
+		// Read off the leaf rather than `this`: the view that was here is gone.
+		const view = this.leaf.view;
+		if (!(view instanceof MarkdownView)) return;
+		const at = { line, ch: 0 };
+		view.editor.setCursor(at);
+		view.editor.scrollIntoView({ from: at, to: at }, true);
+		view.editor.focus();
 	}
 
 	selectedId(): string | null {
