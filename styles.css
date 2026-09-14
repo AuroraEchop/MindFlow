@@ -728,6 +728,21 @@
 	pointer-events: auto;
 }
 
+/* Which cards show their add button. The rule above is the `hover` mode -- what
+   the map did before -- and these two narrow or widen it.
+   The fold toggle is deliberately in neither: it carries the count of what is
+   hidden, which is information rather than chrome, and hiding it would take the
+   count away with it. */
+.mm-tools-on-selection .mm-node:not(.is-selected):hover .mm-add {
+	opacity: 0;
+	pointer-events: none;
+}
+
+.mm-tools-always .mm-add {
+	opacity: 1;
+	pointer-events: auto;
+}
+
 .mm-add:hover {
 	border-style: solid;
 	background: var(--mm-branch, var(--interactive-accent));

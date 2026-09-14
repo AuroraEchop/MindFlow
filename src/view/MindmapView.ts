@@ -612,6 +612,7 @@ export class MindmapView extends TextFileView implements MapController {
 		// should not pay for it at Obsidian startup.
 		void ensureMath();
 		this.detachInteractions = attachInteractions(this);
+		this.applyNodeTools();
 		this.addAction("file-text", t("view.action.editMarkdown"), () => {
 			void this.plugin.toggleLeaf(this.leaf);
 		});
@@ -706,7 +707,21 @@ export class MindmapView extends TextFileView implements MapController {
 		clearMathCache();
 		if (this.scope) this.bindScope(this.scope);
 		this.canvas.setOptions({ wheel: this.plugin.settings.wheel });
+		this.applyNodeTools();
 		this.render("settings");
+	}
+
+	/**
+	 * Which cards show their add button.
+	 *
+	 * A class on the viewport rather than on every card: cards are rebuilt on
+	 * every paint, and this is a property of the map rather than of a card.
+	 */
+	private applyNodeTools(): void {
+		const mode = this.plugin.settings.nodeTools;
+		const viewport = this.canvas.viewport;
+		viewport.toggleClass("mm-tools-on-selection", mode === "selection");
+		viewport.toggleClass("mm-tools-always", mode === "always");
 	}
 
 	bindings(): ShortcutBindings {

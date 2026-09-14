@@ -144,6 +144,13 @@ const EN = {
 	"settings.inlineAnnotations.desc.5":
 		" is a blank line between them. Obsidian's own editing and reading views show such a line as an ordinary paragraph that starts with a colon. Double-click an annotation on the map, or pick Add annotation from a node's context menu, to edit one — the colon prefixes are written back to the note for you. Turn this off to read those lines as ordinary body cards again.",
 
+	"settings.nodeTools.name": "A card's own buttons",
+	"settings.nodeTools.desc":
+		"When the fold toggle and the add button appear. On selection keeps the map clean until a card is picked; on hover is what the map did before; always leaves them on every card.",
+	"settings.nodeTools.option.selection": "On the selected card only",
+	"settings.nodeTools.option.hover": "On the card under the pointer",
+	"settings.nodeTools.option.always": "Always",
+
 	"settings.toolbarDock.name": "Corner toolbar",
 	"settings.toolbarDock.desc":
 		"Where the buttons sit. Drag the toolbar itself to move it anywhere; the dock follows the drag and remembers where you left it.",
@@ -429,6 +436,13 @@ const ZH: Record<I18nKey, string> = {
 	"settings.inlineAnnotations.desc.4": " 行会保留换行，单独的 ",
 	"settings.inlineAnnotations.desc.5":
 		" 表示它们之间的空行。Obsidian 自身的编辑和阅读视图会把这样的行显示为以冒号开头的普通段落。在导图上双击注解，或从节点右键菜单选择「添加注解」即可编辑 —— 冒号前缀会替你写回笔记。关闭此项后，这些行会重新作为普通正文卡片显示。",
+
+	"settings.nodeTools.name": "卡片自带按钮",
+	"settings.nodeTools.desc":
+		"折叠开关和新建按钮何时出现。「仅选中时」让导图保持干净，直到选中某张卡片；「悬停时」是导图原本的行为；「始终」则每张卡片都常驻显示。",
+	"settings.nodeTools.option.selection": "仅选中的卡片",
+	"settings.nodeTools.option.hover": "指针悬停的卡片",
+	"settings.nodeTools.option.always": "始终显示",
 
 	"settings.toolbarDock.name": "角落工具栏",
 	"settings.toolbarDock.desc":
