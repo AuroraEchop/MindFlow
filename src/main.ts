@@ -21,7 +21,7 @@ import {
 	updateNotice,
 	versionToRecord,
 } from "./updateNotice.ts";
-import { parkUndo, takeUndo } from "./undoPark.ts";
+import { parkUndo, recordExternalEdit, takeUndo } from "./undoPark.ts";
 import type { ParkedUndo, UndoStacks } from "./undoPark.ts";
 
 const HEADER_BUTTON_CLASS = "mindmap-mode-toggle";
@@ -55,6 +55,9 @@ export default class MindmapPlugin extends Plugin {
 
 	/** The last map's undo history, for the next view that shows the same note. */
 	private parkedUndo: ParkedUndo | null = null;
+
+	/** The note a read is in flight for, so two cannot land out of order. */
+	private readingFor: string | null = null;
 
 	/**
 	 * The markdown view state a leaf had before it became a map, so toggling
@@ -205,6 +208,16 @@ export default class MindmapPlugin extends Plugin {
 			}),
 		);
 
+		// A note this plugin is holding a history for can be written by something
+		// that is not the map -- the markdown editor, a second window, a sync
+		// client. Each of those is a step back, and it belongs on the same stack
+		// as the map's own, or switching views would mean switching histories.
+		this.registerEvent(
+			this.app.vault.on("modify", (file) => {
+				if (file instanceof TFile && file.extension === "md") void this.trackExternalEdit(file);
+			}),
+		);
+
 		this.registerEvent(
 			this.app.workspace.on("layout-change", () => this.refreshHeaderButtons()),
 		);
@@ -348,6 +361,33 @@ export default class MindmapPlugin extends Plugin {
 		const take = takeUndo(this.parkedUndo, path, data);
 		this.parkedUndo = take.slot;
 		return take.stacks;
+	}
+
+	/**
+	 * Fold a change made outside the map into the history the map will come
+	 * back to.
+	 *
+	 * The document has to be read to know what arrived, and a read is a turn of
+	 * the event loop -- so a second one is not started while the first is still
+	 * out. Two landing out of order would file the revisions backwards. The
+	 * cost is a state nobody saw: the next save reads the newest document and
+	 * files the step from wherever the history had got to, so the stack stays
+	 * a coherent sequence even when it is not an exhaustive one.
+	 */
+	private async trackExternalEdit(file: TFile): Promise<void> {
+		const slot = this.parkedUndo;
+		if (!slot || slot.path !== file.path || this.readingFor !== null) return;
+		this.readingFor = file.path;
+		try {
+			const data = await this.app.vault.read(file);
+			// The slot can be replaced or spent while the read is out, and the
+			// note it is holding is then not this one.
+			const current = this.parkedUndo;
+			if (!current || current.path !== file.path) return;
+			this.parkedUndo = recordExternalEdit(current, data);
+		} finally {
+			this.readingFor = null;
+		}
 	}
 
 	refreshAllViews(): void {

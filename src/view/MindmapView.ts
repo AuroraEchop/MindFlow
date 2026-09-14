@@ -84,12 +84,11 @@ import {
 } from "./math.ts";
 import type { Direction, DropMode, MapController } from "./interactions.ts";
 import { resolveIndentUnit } from "../settings.ts";
+import { pushRevision } from "../undoPark.ts";
 import type { UndoStacks } from "../undoPark.ts";
 import type MindmapPlugin from "../main.ts";
 
 export const MINDMAP_VIEW_TYPE = "mindmap-mode-view";
-
-const UNDO_LIMIT = 100;
 
 /**
  * Depth kept open when a map is first painted. 0 would leave only the root, 1
@@ -508,6 +507,16 @@ export class MindmapView extends TextFileView implements MapController {
 			return;
 		}
 		this.perf.event("setViewData", { clear, skipped: false });
+
+		// Reached with the map already drawn and a different document in hand,
+		// which is a document that changed without the map's help -- the
+		// markdown editor in the next split, another window, a sync client. It
+		// is a step back like any other, and filing it here is what keeps one
+		// stack for both views while they are open at the same time.
+		if (!clear && this.parsed !== null) {
+			pushRevision(this.undoStack, this.data);
+			this.redoStack = [];
+		}
 
 		this.data = data;
 		if (clear) {
@@ -1735,8 +1744,7 @@ export class MindmapView extends TextFileView implements MapController {
 		// A drop onto the position a node already holds rewrites it to exactly what
 		// it was. Nothing changed, so it earns neither an undo step nor a save.
 		if (mutation.text === this.data) return;
-		this.undoStack.push(this.data);
-		if (this.undoStack.length > UNDO_LIMIT) this.undoStack.shift();
+		pushRevision(this.undoStack, this.data);
 		this.redoStack = [];
 		this.commit(mutation.text, mutation.focusLine, edit);
 	}
@@ -2666,8 +2674,7 @@ export class MindmapView extends TextFileView implements MapController {
 		}
 		if (text === before) return;
 
-		this.undoStack.push(before);
-		if (this.undoStack.length > UNDO_LIMIT) this.undoStack.shift();
+		pushRevision(this.undoStack, before);
 		this.redoStack = [];
 		this.commit(text, -1, false);
 	}
