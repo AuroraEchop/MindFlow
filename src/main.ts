@@ -21,6 +21,8 @@ import {
 	updateNotice,
 	versionToRecord,
 } from "./updateNotice.ts";
+import { parkUndo, takeUndo } from "./undoPark.ts";
+import type { ParkedUndo, UndoStacks } from "./undoPark.ts";
 
 const HEADER_BUTTON_CLASS = "mindmap-mode-toggle";
 
@@ -50,6 +52,9 @@ export default class MindmapPlugin extends Plugin {
 
 	/** Whether `data.json` held no settings, which is a first install. */
 	private freshInstall = false;
+
+	/** The last map's undo history, for the next view that shows the same note. */
+	private parkedUndo: ParkedUndo | null = null;
 
 	/**
 	 * The markdown view state a leaf had before it became a map, so toggling
@@ -319,6 +324,30 @@ export default class MindmapPlugin extends Plugin {
 	 */
 	forgetNoteState(path: string): void {
 		this.updateStore(forgetNote(this.foldStore, path));
+	}
+
+	// --- undo history across a view swap --------------------------------------
+
+	/**
+	 * Keep a map's history, against the document it was recorded from.
+	 *
+	 * Called on every write rather than on the way out. The view is torn down in
+	 * an order this cannot rely on, and `clear()` blanks `data` before the view
+	 * is done -- so a hook on the way out can arrive with nothing left to record.
+	 */
+	parkUndo(path: string, data: string, undo: readonly string[], redo: readonly string[]): void {
+		this.parkedUndo = parkUndo(path, data, undo, redo);
+	}
+
+	/**
+	 * The history recorded for exactly this document, or null.
+	 *
+	 * `takeUndo` holds the rule and its reasoning; this only keeps the slot.
+	 */
+	adoptUndo(path: string, data: string): UndoStacks | null {
+		const take = takeUndo(this.parkedUndo, path, data);
+		this.parkedUndo = take.slot;
+		return take.stacks;
 	}
 
 	refreshAllViews(): void {

@@ -84,6 +84,7 @@ import {
 } from "./math.ts";
 import type { Direction, DropMode, MapController } from "./interactions.ts";
 import { resolveIndentUnit } from "../settings.ts";
+import type { UndoStacks } from "../undoPark.ts";
 import type MindmapPlugin from "../main.ts";
 
 export const MINDMAP_VIEW_TYPE = "mindmap-mode-view";
@@ -517,8 +518,13 @@ export class MindmapView extends TextFileView implements MapController {
 			this.collapsedKeys.clear();
 			this.selectionKey = null;
 			this.restoreFocusKey = null;
-			this.undoStack = [];
-			this.redoStack = [];
+			// A view is destroyed when its leaf changes view type, so a note
+			// toggled to markdown and back arrives here as a brand new instance
+			// with empty stacks. The plugin has been holding them, and hands them
+			// back when this note is still the document they were recorded from.
+			const adopted = this.adoptHistory(data);
+			this.undoStack = adopted?.undo ?? [];
+			this.redoStack = adopted?.redo ?? [];
 			this.needsFit = true;
 			// Nothing this map measured is about the note now arriving, and the
 			// camera is about to be reframed for it, so the next paint measures
@@ -1738,8 +1744,32 @@ export class MindmapView extends TextFileView implements MapController {
 	private commit(text: string, focusLine: number, edit: boolean): void {
 		this.data = text;
 		this.pendingFocus = focusLine >= 0 ? { line: focusLine, edit } : null;
+		// Parked on every write, not on the way out: the leaf swaps this view for
+		// a markdown one by way of a brand new instance, so the stacks have to
+		// live somewhere that outlasts this one.
+		this.parkHistory();
 		this.requestSave();
 		this.render("edit");
+	}
+
+	/**
+	 * Hand this map's history to the plugin, which outlives the view.
+	 *
+	 * The stacks are only meaningful against the document they were recorded
+	 * from, so the current text goes with them -- see `adoptUndo` for what the
+	 * plugin does with that.
+	 */
+	private parkHistory(): void {
+		const path = this.file?.path;
+		if (path === undefined) return;
+		this.plugin.parkUndo(path, this.data, this.undoStack, this.redoStack);
+	}
+
+	/** Take back this note's history, if the note is still the one it was. */
+	private adoptHistory(data: string): UndoStacks | null {
+		const path = this.file?.path;
+		if (path === undefined) return null;
+		return this.plugin.adoptUndo(path, data);
 	}
 
 	private withNode(id: string, run: (parsed: ParsedDoc, node: MindNode) => void): void {
