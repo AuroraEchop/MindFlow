@@ -6,9 +6,16 @@
  * row per entry and rebinds it, and the in-app help panel prints whatever is
  * bound right now. Adding an action here is what makes it appear in all three.
  *
+ * The wording is not here. Each row carries the *keys* its two strings live
+ * under in `src/i18n.ts`, derived from the action name, so a row added to the
+ * table cannot arrive without its words -- the derived key has to land on one
+ * the English table actually holds, or this does not compile.
+ *
  * Nothing in this file imports `obsidian` -- the tests run the sources through
  * Node's type stripping, where that module does not exist.
  */
+
+import type { I18nKey } from "../i18n.ts";
 
 /**
  * One press, normalised.
@@ -200,158 +207,56 @@ function mustParse(text: string): KeyCombo {
  * and the earlier one answers. The settings tab warns about exactly that.
  */
 const TABLE = [
-	{
-		action: "add-child",
-		name: "Add a child",
-		description: "Add an empty child to the selected node and start editing it.",
-		defaults: ["Tab"],
-	},
-	{
-		action: "add-sibling",
-		name: "Add a sibling",
-		description: "Add an empty node below the selected one, at the same level.",
-		defaults: ["Enter"],
-	},
-	{
-		action: "edit-title",
-		name: "Edit the title",
-		description: "Edit the selected node's text in place.",
-		defaults: ["Shift+Enter", "F2"],
-	},
-	{
-		action: "delete-node",
-		name: "Delete the node",
-		description: "Delete the selected node and everything under it.",
-		defaults: ["Delete", "Backspace"],
-	},
-	{
-		action: "toggle-check",
-		name: "Check or uncheck",
-		description:
-			"Tick the selected list item off, or clear it again. An item with no checkbox gets an empty one; Remove checkbox in the node's context menu takes one away.",
-		defaults: ["Mod+Enter"],
-	},
-	{
-		action: "expand-body",
-		name: "Show the note content",
-		description:
-			"Open the selected node's paragraphs and code blocks whole, rendered, in their own dialog. Unbound by default; the ⤢ button on a content card does the same thing.",
-		defaults: [],
-	},
-	{
-		action: "indent",
-		name: "Indent",
-		description: "Make the selected node a child of the sibling above it.",
-		defaults: ["]"],
-	},
-	{
-		action: "outdent",
-		name: "Outdent",
-		description: "Make the selected node a sibling of its own parent.",
-		defaults: ["Shift+Tab"],
-	},
-	{
-		action: "move-up",
-		name: "Move up among siblings",
-		description: "Swap the selected node, subtree and all, with the sibling above it.",
-		defaults: ["Mod+ArrowUp"],
-	},
-	{
-		action: "move-down",
-		name: "Move down among siblings",
-		description: "Swap the selected node, subtree and all, with the sibling below it.",
-		defaults: ["Mod+ArrowDown"],
-	},
-	{
-		action: "toggle-fold",
-		name: "Fold or unfold",
-		description: "Hide or show the selected node's children.",
-		defaults: ["Space"],
-	},
-	{
-		action: "navigate-up",
-		name: "Select the node above",
-		description: "Move the selection to the nearest card above.",
-		defaults: ["ArrowUp"],
-	},
-	{
-		action: "navigate-down",
-		name: "Select the node below",
-		description: "Move the selection to the nearest card below.",
-		defaults: ["ArrowDown"],
-	},
-	{
-		action: "navigate-left",
-		name: "Select the node to the left",
-		description: "Move the selection to the nearest card to the left.",
-		defaults: ["ArrowLeft"],
-	},
-	{
-		action: "navigate-right",
-		name: "Select the node to the right",
-		description: "Move the selection to the nearest card to the right.",
-		defaults: ["ArrowRight"],
-	},
-	{
-		action: "search",
-		name: "Find in the map",
-		description:
-			"Open the find bar over the canvas. Enter and Shift+Enter step through the matches.",
-		defaults: ["Mod+f"],
-	},
-	{
-		action: "close-search",
-		name: "Close the find bar",
-		description:
-			"Only the map's while a find bar is open; with no bar up the key keeps whatever meaning Obsidian gives it.",
-		defaults: ["Escape"],
-	},
-	{
-		action: "undo",
-		name: "Undo",
-		description: "Undo the last edit made on the map.",
-		defaults: ["Mod+z"],
-	},
-	{
-		action: "redo",
-		name: "Redo",
-		description: "Redo the last undone edit.",
-		defaults: ["Mod+Shift+z", "Mod+y"],
-	},
-	{
-		action: "fit",
-		name: "Fit to window",
-		description: "Frame the whole map in the viewport.",
-		defaults: ["Mod+0"],
-	},
-	{
-		action: "zoom-in",
-		name: "Zoom in",
-		description: "Zoom the canvas in one step.",
-		defaults: ["Mod+=", "Mod++"],
-	},
-	{
-		action: "zoom-out",
-		name: "Zoom out",
-		description: "Zoom the canvas out one step.",
-		defaults: ["Mod+-"],
-	},
-	{
-		action: "centre-selection",
-		name: "Centre on the selection",
-		description: "Bring the selected node to the middle of the viewport.",
-		defaults: ["Mod+."],
-	},
+	{ action: "add-child", defaults: ["Tab"] },
+	{ action: "add-sibling", defaults: ["Enter"] },
+	{ action: "edit-title", defaults: ["Shift+Enter", "F2"] },
+	{ action: "delete-node", defaults: ["Delete", "Backspace"] },
+	{ action: "toggle-check", defaults: ["Mod+Enter"] },
+	{ action: "expand-body", defaults: [] },
+	{ action: "indent", defaults: ["]"] },
+	{ action: "outdent", defaults: ["Shift+Tab"] },
+	{ action: "move-up", defaults: ["Mod+ArrowUp"] },
+	{ action: "move-down", defaults: ["Mod+ArrowDown"] },
+	{ action: "toggle-fold", defaults: ["Space"] },
+	{ action: "navigate-up", defaults: ["ArrowUp"] },
+	{ action: "navigate-down", defaults: ["ArrowDown"] },
+	{ action: "navigate-left", defaults: ["ArrowLeft"] },
+	{ action: "navigate-right", defaults: ["ArrowRight"] },
+	{ action: "search", defaults: ["Mod+f"] },
+	{ action: "close-search", defaults: ["Escape"] },
+	{ action: "undo", defaults: ["Mod+z"] },
+	{ action: "redo", defaults: ["Mod+Shift+z", "Mod+y"] },
+	{ action: "fit", defaults: ["Mod+0"] },
+	{ action: "zoom-in", defaults: ["Mod+=", "Mod++"] },
+	{ action: "zoom-out", defaults: ["Mod+-"] },
+	{ action: "centre-selection", defaults: ["Mod+."] },
 ] as const;
 
 /** Every action the map's keyboard performs. */
 export type ShortcutAction = (typeof TABLE)[number]["action"];
 
+/**
+ * The dictionary key an action's name lives under.
+ *
+ * The return type is what makes the table and the English dictionary agree: a
+ * row whose action has no matching pair of strings in `src/i18n.ts` produces a
+ * key that is not an `I18nKey`, and this stops compiling.
+ */
+export function shortcutNameKey(action: ShortcutAction): I18nKey {
+	return `shortcut.${action}.name`;
+}
+
+/** The dictionary key an action's one-line explanation lives under. */
+export function shortcutDescKey(action: ShortcutAction): I18nKey {
+	return `shortcut.${action}.description`;
+}
+
 export interface Shortcut {
 	action: ShortcutAction;
-	/** Shown in the settings tab and the help panel. */
-	name: string;
-	description: string;
+	/** Where the name shown in the settings tab and the help panel lives. */
+	nameKey: I18nKey;
+	/** Where the line printed under it lives. */
+	descKey: I18nKey;
 	/** What the action answers to until the user says otherwise. */
 	defaults: KeyCombo[];
 }
@@ -359,15 +264,13 @@ export interface Shortcut {
 /** The table with its literal types widened, so one `map` reads every row. */
 const ROWS: ReadonlyArray<{
 	action: ShortcutAction;
-	name: string;
-	description: string;
 	defaults: readonly string[];
 }> = TABLE;
 
 export const SHORTCUTS: ReadonlyArray<Shortcut> = ROWS.map((entry) => ({
 	action: entry.action,
-	name: entry.name,
-	description: entry.description,
+	nameKey: shortcutNameKey(entry.action),
+	descKey: shortcutDescKey(entry.action),
 	defaults: entry.defaults.map(mustParse),
 }));
 

@@ -17,6 +17,7 @@ import {
 	shortcutFor,
 } from "./shortcuts.ts";
 import type { KeyCombo, ShortcutAction, StoredShortcuts } from "./shortcuts.ts";
+import { t } from "../i18n.ts";
 
 /** A keydown, with everything unpressed unless the test says otherwise. */
 const press = (
@@ -279,8 +280,25 @@ test("every action has an entry, and the entry is findable", () => {
 	assert.equal(SHORTCUTS.length, actions.length);
 	for (const action of actions) {
 		assert.equal(shortcutFor(action).action, action);
-		assert.ok(shortcutFor(action).name.length > 0);
-		assert.ok(shortcutFor(action).description.length > 0);
+		assert.ok(t(shortcutFor(action).nameKey).length > 0);
+		assert.ok(t(shortcutFor(action).descKey).length > 0);
+	}
+});
+
+test("every action's words are in the dictionary, not just a key that looks like one", () => {
+	// `t` falls back to the key itself when a row is missing, so a length check
+	// alone would pass on `shortcut.add-child.name`. Comparing against the key
+	// is what proves the row is really there.
+	for (const entry of SHORTCUTS) {
+		assert.notEqual(t(entry.nameKey), entry.nameKey, entry.action);
+		assert.notEqual(t(entry.descKey), entry.descKey, entry.action);
+	}
+});
+
+test("the keys are derived from the action, so a new row cannot arrive wordless", () => {
+	for (const entry of SHORTCUTS) {
+		assert.equal(entry.nameKey, `shortcut.${entry.action}.name`);
+		assert.equal(entry.descKey, `shortcut.${entry.action}.description`);
 	}
 });
 

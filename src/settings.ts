@@ -8,6 +8,8 @@ import type {
 	SettingDefinitionRender,
 } from "obsidian";
 import type { NodeSource, RootPolicy } from "./model/types.ts";
+import { t } from "./i18n.ts";
+import type { I18nKey, LanguagePreference } from "./i18n.ts";
 import {
 	SHORTCUTS,
 	comboToString,
@@ -46,6 +48,11 @@ export interface MindmapSettings {
 	verticalGap: number;
 	addHeaderButton: boolean;
 	/**
+	 * Which language the plugin speaks. `"auto"` follows Obsidian's own
+	 * interface language, which is what almost everybody wants.
+	 */
+	language: LanguagePreference;
+	/**
 	 * Timing for the render path, in the console and the DevTools Timings track.
 	 * Off is the default and costs one boolean branch per call site.
 	 */
@@ -73,6 +80,7 @@ export const DEFAULT_SETTINGS: MindmapSettings = {
 	horizontalGap: 64,
 	verticalGap: 14,
 	addHeaderButton: true,
+	language: "auto",
 	debugTiming: false,
 	shortcuts: {},
 };
@@ -96,6 +104,9 @@ type SettingKey = keyof MindmapSettings;
 /** The one setting that redraws the note header rather than the open maps. */
 const HEADER_BUTTON_KEY: SettingKey = "addHeaderButton";
 
+/** The one setting that changes the words on every surface at once. */
+const LANGUAGE_KEY: SettingKey = "language";
+
 /**
  * A row's description.
  *
@@ -103,50 +114,101 @@ const HEADER_BUTTON_KEY: SettingKey = "addHeaderButton";
  * empties it, so one built here at module scope would describe the first
  * rendering of the tab and nothing after it. Both renderers call it once per
  * row they draw, and Obsidian searches the text it contains either way.
+ *
+ * The string case is a dictionary key rather than the wording. `GROUPS` is
+ * built once when the plugin loads, and the language is a setting -- so a row
+ * holding its own words would go on speaking the language the plugin started
+ * in for the rest of the session.
  */
-type SettingDesc = string | (() => DocumentFragment);
+type SettingDesc = I18nKey | (() => DocumentFragment);
 
-/** A control row as Obsidian takes it, with `desc` widened to the above. */
-type ControlItem = Omit<SettingDefinitionControl<SettingKey>, "desc"> & {
+/** One control's specification, with every label replaced by a dictionary key. */
+type ControlSpec =
+	| { type: "dropdown"; key: SettingKey; options: Record<string, I18nKey> }
+	| { type: "toggle"; key: SettingKey }
+	| { type: "slider"; key: SettingKey; min: number; max: number; step: number };
+
+/** A control row, with every user-visible string replaced by a dictionary key. */
+interface ControlItem {
+	name: I18nKey;
 	desc?: SettingDesc;
-};
+	control: ControlSpec;
+}
 
 interface SettingGroup {
-	heading: string;
+	heading: I18nKey;
 	items: ControlItem[];
 }
 
 /** What either renderer hands Obsidian for one row's description. */
 function describe(desc: SettingDesc | undefined): string | DocumentFragment | undefined {
-	return typeof desc === "function" ? desc() : desc;
+	if (desc === undefined) return undefined;
+	return typeof desc === "function" ? desc() : t(desc);
+}
+
+/** A dropdown's labels, resolved. */
+function localizeOptions(options: Record<string, I18nKey>): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const [value, key] of Object.entries(options)) out[value] = t(key);
+	return out;
+}
+
+/**
+ * A row as Obsidian's newer settings API takes it, with the keys resolved.
+ *
+ * Called per rendering rather than at module scope, for the same reason the
+ * descriptions are builders: the language can change while the plugin is
+ * loaded, and the rows have to follow it.
+ */
+function localizeItem(item: ControlItem): SettingDefinitionControl<SettingKey> {
+	const shared = { name: t(item.name), desc: describe(item.desc) };
+	const control = item.control;
+	switch (control.type) {
+		case "dropdown":
+			return {
+				...shared,
+				control: {
+					type: "dropdown",
+					key: control.key,
+					options: localizeOptions(control.options),
+				},
+			};
+		case "toggle":
+			return { ...shared, control: { type: "toggle", key: control.key } };
+		case "slider":
+			return {
+				...shared,
+				control: {
+					type: "slider",
+					key: control.key,
+					min: control.min,
+					max: control.max,
+					step: control.step,
+				},
+			};
+	}
 }
 
 /**
  * The one description that has to spell out its own syntax: an annotation is a
  * convention of this plugin, so nothing in the note the user already has says
  * what a colon at the start of a line will do.
+ *
+ * Assembled from five translated chunks around four literal code samples. The
+ * samples are syntax and stay as they are in both languages; only the prose
+ * around them moves, which is why the table carries the sentence in pieces.
  */
 function annotationDesc(): DocumentFragment {
 	return createFragment((frag) => {
-		frag.appendText("A body line written as ");
+		frag.appendText(t("settings.inlineAnnotations.desc.1"));
 		frag.createEl("code", { text: ": text" });
-		frag.appendText(
-			" under a heading or list item hangs under that node's card in muted text"
-				+ " instead of becoming a card of its own — a bullet followed by ",
-		);
+		frag.appendText(t("settings.inlineAnnotations.desc.2"));
 		frag.createEl("code", { text: ": Improves during use." });
-		frag.appendText(" carries that line as its note. Consecutive ");
+		frag.appendText(t("settings.inlineAnnotations.desc.3"));
 		frag.createEl("code", { text: ": " });
-		frag.appendText(" lines keep their line breaks, and a lone ");
+		frag.appendText(t("settings.inlineAnnotations.desc.4"));
 		frag.createEl("code", { text: ":" });
-		frag.appendText(
-			" is a blank line between them. Obsidian's own editing and reading views"
-				+ " show such a line as an ordinary paragraph that starts with a colon."
-				+ " Double-click an annotation on the map, or pick Add annotation from a"
-				+ " node's context menu, to edit one — the colon prefixes are written"
-				+ " back to the note for you. Turn this off to read those lines as"
-				+ " ordinary body cards again.",
-		);
+		frag.appendText(t("settings.inlineAnnotations.desc.5"));
 	});
 }
 
@@ -164,126 +226,139 @@ function annotationDesc(): DocumentFragment {
  */
 const GROUPS: SettingGroup[] = [
 	{
-		heading: "Structure",
+		heading: "settings.group.structure",
 		items: [
 			{
-				name: "Nodes come from",
-				desc: "Which markdown structures become cards on the map.",
+				name: "settings.source.name",
+				desc: "settings.source.desc",
 				control: {
 					type: "dropdown",
 					key: "source",
 					options: {
-						"headings-and-lists": "Headings and list items",
-						"headings-only": "Headings only",
-						"lists-only": "List items only",
+						"headings-and-lists": "settings.source.option.headings-and-lists",
+						"headings-only": "settings.source.option.headings-only",
+						"lists-only": "settings.source.option.lists-only",
 					},
 				},
 			},
 			{
-				name: "Deepest heading level",
-				desc: "Headings below this level stay in the note as body content.",
+				name: "settings.maxHeadingDepth.name",
+				desc: "settings.maxHeadingDepth.desc",
 				control: { type: "slider", key: "maxHeadingDepth", min: 1, max: 6, step: 1 },
 			},
 			{
-				name: "Root node",
-				desc: "Auto uses a lone top-level heading when the note has one, and the file name otherwise.",
+				name: "settings.rootPolicy.name",
+				desc: "settings.rootPolicy.desc",
 				control: {
 					type: "dropdown",
 					key: "rootPolicy",
 					options: {
-						auto: "Auto",
-						filename: "Always the file name",
-						h1: "Always the first H1",
+						auto: "settings.rootPolicy.option.auto",
+						filename: "settings.rootPolicy.option.filename",
+						h1: "settings.rootPolicy.option.h1",
 					},
 				},
 			},
 			{
-				name: "Indent for new list items",
-				desc: "Auto copies whatever the note already uses.",
+				name: "settings.indentUnit.name",
+				desc: "settings.indentUnit.desc",
 				control: {
 					type: "dropdown",
 					key: "indentUnit",
 					options: {
-						auto: "Auto-detect",
-						two: "Two spaces",
-						four: "Four spaces",
-						tab: "Tab",
+						auto: "settings.indentUnit.option.auto",
+						two: "settings.indentUnit.option.two",
+						four: "settings.indentUnit.option.four",
+						tab: "settings.indentUnit.option.tab",
 					},
 				},
 			},
 		],
 	},
 	{
-		heading: "Appearance",
+		heading: "settings.group.appearance",
 		items: [
 			{
-				name: "Layout",
-				desc: "Balanced splits top-level branches to both sides of the root.",
+				name: "settings.layout.name",
+				desc: "settings.layout.desc",
 				control: {
 					type: "dropdown",
 					key: "layout",
 					options: {
-						balanced: "Balanced (both sides)",
-						right: "Single side (right)",
+						balanced: "settings.layout.option.balanced",
+						right: "settings.layout.option.right",
 					},
 				},
 			},
 			{
-				name: "Colour branches",
-				desc: "Give each top-level branch its own colour.",
+				name: "settings.branchColors.name",
+				desc: "settings.branchColors.desc",
 				control: { type: "toggle", key: "branchColors" },
 			},
 			{
-				name: "Show note content",
-				desc: "Paragraphs, code blocks and tables become their own cards, so they fold and unfold with the branch they belong to. Use the expand button on a card to see the whole block rendered, or double-click it to edit.",
+				name: "settings.showBodyNodes.name",
+				desc: "settings.showBodyNodes.desc",
 				control: { type: "toggle", key: "showBodyNodes" },
 			},
 			{
-				name: "Inline annotations",
+				name: "settings.inlineAnnotations.name",
 				desc: annotationDesc,
 				control: { type: "toggle", key: "inlineAnnotations" },
 			},
 			{
-				name: "Maximum card width",
+				name: "settings.maxNodeWidth.name",
 				control: { type: "slider", key: "maxNodeWidth", min: 140, max: 520, step: 20 },
 			},
 			{
-				name: "Horizontal spacing",
+				name: "settings.horizontalGap.name",
 				control: { type: "slider", key: "horizontalGap", min: 24, max: 160, step: 4 },
 			},
 			{
-				name: "Vertical spacing",
+				name: "settings.verticalGap.name",
 				control: { type: "slider", key: "verticalGap", min: 4, max: 60, step: 2 },
 			},
 		],
 	},
 	{
-		heading: "Behaviour",
+		heading: "settings.group.behaviour",
 		items: [
 			{
-				name: "Mouse wheel",
+				name: "settings.wheel.name",
 				control: {
 					type: "dropdown",
 					key: "wheel",
 					options: {
-						zoom: "Zooms (hold Shift to pan)",
-						pan: "Pans (hold Ctrl to zoom)",
+						zoom: "settings.wheel.option.zoom",
+						pan: "settings.wheel.option.pan",
 					},
 				},
 			},
 			{
-				name: "Remember fold state",
-				desc: "Reopen a note to the shape you left it in, focus included. The state is kept in the plugin's own data, never in the note — your markdown is untouched either way. Turn this off and every map opens at the root plus its top-level branches.",
+				name: "settings.rememberFolds.name",
+				desc: "settings.rememberFolds.desc",
 				control: { type: "toggle", key: "rememberFolds" },
 			},
 			{
-				name: "Button in the note header",
-				desc: "Adds a mind map toggle beside the other view actions. The command and ribbon icon work either way.",
+				name: "settings.addHeaderButton.name",
+				desc: "settings.addHeaderButton.desc",
 				control: { type: "toggle", key: HEADER_BUTTON_KEY },
 			},
 			{
-				name: "Log render timings",
-				desc: "Write how long each paint, cull and connector redraw took to the developer console, and to the Timings track of a performance profile. For diagnosing a slow map; leave it off otherwise.",
+				name: "settings.language.name",
+				desc: "settings.language.desc",
+				control: {
+					type: "dropdown",
+					key: "language",
+					options: {
+						auto: "settings.language.option.auto",
+						en: "settings.language.option.en",
+						zh: "settings.language.option.zh",
+					},
+				},
+			},
+			{
+				name: "settings.debugTiming.name",
+				desc: "settings.debugTiming.desc",
 				control: { type: "toggle", key: "debugTiming" },
 			},
 		],
@@ -292,9 +367,9 @@ const GROUPS: SettingGroup[] = [
 
 /** The row that closes the Shortcuts group, worded once for both renderers. */
 const RESTORE_ALL = {
-	name: "Restore all defaults",
-	desc: "Put every shortcut back to the key the map shipped with.",
-};
+	name: "settings.restoreAll.name",
+	desc: "settings.restoreAll.desc",
+} as const;
 
 /** What to warn a row about, or "" when its keys are its own. */
 function conflictNote(action: ShortcutAction, bindings: ShortcutBindings): string {
@@ -302,13 +377,13 @@ function conflictNote(action: ShortcutAction, bindings: ShortcutBindings): strin
 	for (const group of findConflicts(bindings)) {
 		if (!group.actions.includes(action)) continue;
 		for (const other of group.actions) {
-			if (other !== action) others.add(shortcutFor(other).name);
+			if (other !== action) others.add(t(shortcutFor(other).nameKey));
 		}
 	}
 	if (others.size === 0) return "";
 	// Which one wins is not a detail the user can work out from the list: the
 	// map answers with whichever action is listed first here.
-	return `Also bound to ${[...others].join(", ")} — the one listed first is the one that answers.`;
+	return t("settings.shortcut.conflict", { actions: [...others].join(", ") });
 }
 
 export class MindmapSettingTab extends PluginSettingTab {
@@ -325,20 +400,20 @@ export class MindmapSettingTab extends PluginSettingTab {
 		this.shortcutRows = [];
 		const groups: SettingDefinitionItem[] = GROUPS.map((group) => ({
 			type: "group" as const,
-			heading: group.heading,
-			items: group.items.map((item) => ({ ...item, desc: describe(item.desc) })),
+			heading: t(group.heading),
+			items: group.items.map(localizeItem),
 		}));
 		const rows: SettingDefinitionRender[] = SHORTCUTS.map((entry) => ({
-			name: entry.name,
-			desc: entry.description,
+			name: t(entry.nameKey),
+			desc: t(entry.descKey),
 			render: (setting: Setting) => this.renderShortcutRow(setting, entry),
 		}));
 		rows.push({
-			name: RESTORE_ALL.name,
-			desc: RESTORE_ALL.desc,
+			name: t(RESTORE_ALL.name),
+			desc: t(RESTORE_ALL.desc),
 			render: (setting: Setting) => this.renderRestoreAll(setting),
 		});
-		groups.push({ type: "group", heading: "Shortcuts", items: rows });
+		groups.push({ type: "group", heading: t("settings.group.shortcuts"), items: rows });
 		return groups;
 	}
 
@@ -362,17 +437,19 @@ export class MindmapSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		for (const group of GROUPS) {
-			new Setting(containerEl).setName(group.heading).setHeading();
+			new Setting(containerEl).setName(t(group.heading)).setHeading();
 			for (const item of group.items) this.renderItem(containerEl, item);
 		}
 
-		new Setting(containerEl).setName("Shortcuts").setHeading();
+		new Setting(containerEl).setName(t("settings.group.shortcuts")).setHeading();
 		for (const entry of SHORTCUTS) {
-			const setting = new Setting(containerEl).setName(entry.name).setDesc(entry.description);
+			const setting = new Setting(containerEl)
+				.setName(t(entry.nameKey))
+				.setDesc(t(entry.descKey));
 			this.renderShortcutRow(setting, entry);
 		}
 		this.renderRestoreAll(
-			new Setting(containerEl).setName(RESTORE_ALL.name).setDesc(RESTORE_ALL.desc),
+			new Setting(containerEl).setName(t(RESTORE_ALL.name)).setDesc(t(RESTORE_ALL.desc)),
 		);
 	}
 
@@ -382,7 +459,7 @@ export class MindmapSettingTab extends PluginSettingTab {
 	}
 
 	private renderItem(containerEl: HTMLElement, item: ControlItem): void {
-		const setting = new Setting(containerEl).setName(item.name);
+		const setting = new Setting(containerEl).setName(t(item.name));
 		const desc = describe(item.desc);
 		if (desc !== undefined) setting.setDesc(desc);
 
@@ -394,13 +471,15 @@ export class MindmapSettingTab extends PluginSettingTab {
 			case "dropdown":
 				setting.addDropdown((d) =>
 					d
-						.addOptions(control.options)
+						.addOptions(localizeOptions(control.options))
 						.setValue(String(this.read(control.key)))
 						.onChange(commit),
 				);
 				break;
 			case "toggle":
-				setting.addToggle((t) => t.setValue(this.read(control.key) === true).onChange(commit));
+				setting.addToggle((box) =>
+					box.setValue(this.read(control.key) === true).onChange(commit),
+				);
 				break;
 			case "slider":
 				setting.addSlider((s) =>
@@ -450,10 +529,10 @@ export class MindmapSettingTab extends PluginSettingTab {
 			if (recording) {
 				keys.createSpan({
 					cls: "mm-shortcut-capture",
-					text: "Press any key — Esc cancels",
+					text: t("settings.shortcut.capture"),
 				});
 			} else if (combos.length === 0) {
-				keys.createSpan({ cls: "mm-shortcut-unbound", text: "Not bound" });
+				keys.createSpan({ cls: "mm-shortcut-unbound", text: t("settings.shortcut.unbound") });
 			} else {
 				for (const combo of combos) {
 					keys.createEl("kbd", {
@@ -478,7 +557,7 @@ export class MindmapSettingTab extends PluginSettingTab {
 			if (this.endCapture === stop) this.endCapture = null;
 			setting.settingEl.removeClass("is-recording");
 			record?.buttonEl.removeClass("is-recording");
-			record?.setButtonText("Record");
+			record?.setButtonText(t("settings.shortcut.record"));
 			paint();
 		};
 
@@ -516,7 +595,7 @@ export class MindmapSettingTab extends PluginSettingTab {
 			this.endCapture = stop;
 			setting.settingEl.addClass("is-recording");
 			record?.buttonEl.addClass("is-recording");
-			record?.setButtonText("Cancel");
+			record?.setButtonText(t("settings.shortcut.cancel"));
 			// The button keeps the focus otherwise, and Enter or Space would be
 			// read as another click on it before this listener saw them.
 			record?.buttonEl.blur();
@@ -530,7 +609,7 @@ export class MindmapSettingTab extends PluginSettingTab {
 			unbind = button;
 			button
 				.setIcon("x")
-				.setTooltip("Unbind")
+				.setTooltip(t("settings.shortcut.unbind"))
 				.onClick(() => {
 					this.endRecording();
 					void this.bind(entry.action, []);
@@ -540,7 +619,7 @@ export class MindmapSettingTab extends PluginSettingTab {
 			reset = button;
 			button
 				.setIcon("rotate-ccw")
-				.setTooltip("Restore the default")
+				.setTooltip(t("settings.shortcut.restoreDefault"))
 				.onClick(() => {
 					this.endRecording();
 					void this.bind(entry.action, shortcutFor(entry.action).defaults);
@@ -548,7 +627,7 @@ export class MindmapSettingTab extends PluginSettingTab {
 		});
 		setting.addButton((button) => {
 			record = button;
-			button.setButtonText("Record").onClick(() => {
+			button.setButtonText(t("settings.shortcut.record")).onClick(() => {
 				if (recording) stop();
 				else start();
 			});
@@ -566,7 +645,7 @@ export class MindmapSettingTab extends PluginSettingTab {
 	private renderRestoreAll(setting: Setting): void {
 		setting.settingEl.addClass("mm-shortcut");
 		setting.addButton((button) =>
-			button.setButtonText("Restore").onClick(() => {
+			button.setButtonText(t("settings.restoreAll.button")).onClick(() => {
 				this.endRecording();
 				void this.writeShortcuts({});
 			}),
@@ -609,8 +688,20 @@ export class MindmapSettingTab extends PluginSettingTab {
 	}
 
 	private applySideEffects(key: string): void {
-		if (key === HEADER_BUTTON_KEY) this.plugin.refreshHeaderButtons();
-		else this.plugin.refreshAllViews();
+		if (key === HEADER_BUTTON_KEY) {
+			this.plugin.refreshHeaderButtons();
+			return;
+		}
+		if (key === LANGUAGE_KEY) {
+			this.plugin.applyLanguage();
+			// Redraw the rows the user is looking at, so they are in the
+			// language they just picked rather than the one they arrived in.
+			// Both renderers rebuild from the same `GROUPS`, so this is the
+			// legacy path doing exactly what it does on open.
+			this.display();
+			return;
+		}
+		this.plugin.refreshAllViews();
 	}
 
 	/**

@@ -3,6 +3,7 @@ import type { ViewState, WorkspaceLeaf } from "obsidian";
 
 import { MINDMAP_VIEW_TYPE, MindmapView } from "./view/MindmapView.ts";
 import { EXPORT_COMMANDS } from "./export/run.ts";
+import { resolveLanguage, setLanguage } from "./i18n.ts";
 import { DEFAULT_SETTINGS, MindmapSettingTab } from "./settings.ts";
 import type { MindmapSettings } from "./settings.ts";
 import {
@@ -257,6 +258,19 @@ export default class MindmapPlugin extends Plugin {
 		// the one object `DEFAULT_SETTINGS` holds -- and the first rebinding would
 		// write itself into the defaults every other reader compares against.
 		this.settings = { ...merged, shortcuts: { ...merged.shortcuts } };
+		// Before anything paints: a view built while the plugin was still
+		// speaking the fallback would have to be redrawn to catch up.
+		this.applyLanguage();
+	}
+
+	/**
+	 * Point the dictionary at whatever the setting resolves to.
+	 *
+	 * Called on load and again whenever the setting changes, and it is the only
+	 * place the plugin's language is decided -- everything else reads `t`.
+	 */
+	applyLanguage(): void {
+		setLanguage(resolveLanguage(this.settings.language));
 	}
 
 	async saveSettings(): Promise<void> {

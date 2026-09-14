@@ -8,6 +8,8 @@ import type {
 	WorkspaceLeaf,
 } from "obsidian";
 
+import { t } from "../i18n.ts";
+
 import { parseMarkdown } from "../model/parse.ts";
 import { annotationText, bodyCardCount } from "../model/annotations.ts";
 import type { MindNode, ParsedDoc } from "../model/types.ts";
@@ -746,7 +748,7 @@ export class MindmapView extends TextFileView implements MapController {
 		for (const entry of SHORTCUTS) {
 			const combos = bindings[entry.action];
 			if (combos.length === 0) continue;
-			row(combos.map((combo) => comboToString(combo, isMac)).join("  /  "), entry.name);
+			row(combos.map((combo) => comboToString(combo, isMac)).join("  /  "), t(entry.nameKey));
 		}
 		for (const [keys, what] of mouse) row(keys, what);
 
