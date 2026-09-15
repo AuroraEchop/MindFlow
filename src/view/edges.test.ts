@@ -85,15 +85,40 @@ test("the elbow is not drawn for a run too short to read as a turn", () => {
 	// at the same y and the connector is a straight line. That centring is done
 	// on measured card heights, and a measurement that lands a few pixels out
 	// leaves a run of a few pixels -- an elbow there is a step a few pixels tall,
-	// which reads as a kink in a straight line rather than as a turn. The whole
-	// bug: one branch, and a corner that should not be there.
-	assert.equal(edgePath([220, 240], [340, 249], "orthogonal"), "M 220 240 L 340 249");
-	assert.equal(edgePath([220, 240], [340, 231], "orthogonal"), "M 220 240 L 340 231");
+	// which reads as a kink in a straight line rather than as a turn.
+	//
+	// The run is absorbed, not connected: a line between the two anchors would
+	// be a diagonal, and the right-angled style is the one that never draws one.
+	// Each anchor gives up half the run, so the line stays inside the box.
+	assert.equal(edgePath([220, 240], [340, 249], "orthogonal"), "M 220 244.5 L 340 244.5");
+	assert.equal(edgePath([220, 240], [340, 231], "orthogonal"), "M 220 235.5 L 340 235.5");
 	// A run long enough to be the turn it was meant to be keeps its right angle.
 	assert.equal(
 		edgePath([220, 240], [340, 260], "orthogonal"),
 		"M 220 240 L 280 240 L 280 260 L 340 260",
 	);
+});
+
+test("the right-angled style never draws a diagonal", () => {
+	// The whole point of the style: horizontal and vertical, nothing between.
+	// Probed over runs on both sides of the threshold, because a diagonal is
+	// exactly what the short-run rule would produce if it connected the anchors
+	// instead of absorbing the run between them.
+	for (const dy of [-40, -12, -11, -1, 0, 1, 11, 12, 40]) {
+		const d = edgePath([220, 240], [340, 240 + dy], "orthogonal");
+		const numbers = (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+		const xs = numbers.filter((_, i) => i % 2 === 0);
+		const ys = numbers.filter((_, i) => i % 2 === 1);
+		assert.equal(xs.length, ys.length, `dy=${dy}: ${d}`);
+		for (let i = 1; i < xs.length; i++) {
+			const level = ys[i - 1] === ys[i];
+			const upright = xs[i - 1] === xs[i];
+			assert.ok(
+				level !== upright,
+				`dy=${dy}: segment ${i - 1}->${i} of ${d} is neither horizontal nor vertical`,
+			);
+		}
+	}
 });
 
 test("a short run on either side of the threshold stays in its anchors' box", () => {

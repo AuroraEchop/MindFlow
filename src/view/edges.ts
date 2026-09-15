@@ -52,9 +52,12 @@ export type EdgeStyle = "curve" | "orthogonal";
  * segments joined by a stub shorter than the stroke is wide, which reads as a
  * kink in an otherwise straight connector.
  *
- * Below this, the two ends are close enough to the same row that a straight
- * line is what the eye expects, so that is what it gets. Above it, the run is
- * long enough to be the turn it was meant to be.
+ * Below this, the two ends are close enough to the same row that the run reads
+ * as noise rather than as a turn, so the connector is one horizontal line
+ * through the middle of it. Not a straight line *between* the anchors -- the
+ * style is right-angled, and a line between two points of different heights is
+ * a diagonal, which is exactly what this style is not for. Above the threshold,
+ * the run is long enough to be the turn it was meant to be.
  */
 const ELBOW_MIN_RUN = 12;
 
@@ -76,16 +79,17 @@ export function edgePath(
 	const [cx, cy] = to;
 
 	if (style === "orthogonal") {
+		// A run too short to read as a turn is noise from a measurement a pixel
+		// or two out, so the two ends are drawn as one horizontal line through
+		// the middle of it -- each anchor gives up half the run, which stays
+		// inside the box, and nothing bends. See ELBOW_MIN_RUN.
+		if (Math.abs(cy - py) < ELBOW_MIN_RUN) {
+			const my = (py + cy) / 2;
+			return `M ${px} ${my} L ${cx} ${my}`;
+		}
 		// Out of the parent's face, across, up or down, and in to the child's.
 		// The turn sits halfway between the two faces, which is what makes a
 		// column of children read as one bus rather than as a fan.
-		//
-		// Except when the two faces are already on the same row, give or take a
-		// few pixels: then the "bus" between them is a stub shorter than the
-		// line is wide, and it reads as a kink rather than as a turn. See
-		// ELBOW_MIN_RUN. Straight is the same shape with the stub grown to
-		// nothing, and it stays inside the anchors' box either way.
-		if (Math.abs(cy - py) < ELBOW_MIN_RUN) return `M ${px} ${py} L ${cx} ${cy}`;
 		const mx = (px + cx) / 2;
 		return `M ${px} ${py} L ${mx} ${py} L ${mx} ${cy} L ${cx} ${cy}`;
 	}
