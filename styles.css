@@ -1190,19 +1190,16 @@
 	border-right: 1px solid var(--background-modifier-border);
 }
 
-/* The page's name, beside the window's title rather than at the top of the
-   rows: small, muted, and out of the scroller, so it is there to read however
-   far down the rows have been taken. */
-.mm-settings-caption {
-	margin-left: 10px;
-	font-size: var(--font-ui-smaller);
-	font-weight: 400;
-	color: var(--text-muted);
-}
-
-.mm-settings-caption::before {
-	content: "·";
-	margin-right: 6px;
+/* The one thing in the window that scrolls. Its right margin is what keeps the
+   scrollbar off the window's own edge -- a bar flush against it sits where a
+   hand lands to grab the window, and one page-width of travel apart is the
+   difference between scrolling and moving the window by accident. */
+.mm-settings-pane {
+	flex: 1 1 auto;
+	min-width: 0;
+	margin-right: 12px;
+	overflow-y: auto;
+	padding-right: 4px;
 }
 
 .mm-settings-tab {
@@ -1222,14 +1219,6 @@
 	background: var(--background-modifier-hover);
 	color: var(--text-normal);
 	font-weight: 500;
-}
-
-/* The one thing in the window that scrolls. */
-.mm-settings-pane {
-	flex: 1 1 auto;
-	min-width: 0;
-	overflow-y: auto;
-	padding-right: 4px;
 }
 
 .mm-add:hover {

@@ -18,7 +18,6 @@ import type MindmapPlugin from "../main.ts";
  */
 export class SettingsModal extends Modal {
 	private readonly panel: SettingsPanel;
-	private readonly version: string;
 
 	/** Both are built in `onOpen`, and neither exists before it runs. */
 	private navEl!: HTMLElement;
@@ -29,9 +28,6 @@ export class SettingsModal extends Modal {
 	constructor(app: App, plugin: MindmapPlugin) {
 		super(app);
 		this.panel = new SettingsPanel(plugin);
-		// On the title so that "which build am I running" is answerable at a
-		// glance, without a console and without guessing at a file's timestamp.
-		this.version = plugin.manifest.version;
 		// A change of language has to redraw the page on screen, and this is the
 		// only thing that knows which page that is.
 		this.panel.repaint = () => this.show(this.page);
@@ -39,7 +35,46 @@ export class SettingsModal extends Modal {
 
 	override onOpen(): void {
 		this.modalEl.addClass("mm-settings-dialog");
-		this.setTitle(`${t("dialog.settings.title")} · ${this.version}`);
+		this.setTitle(t("dialog.settings.title"));
+
+		// Make the modal draggable by its title bar. Obsidian's Modal does
+		// not do this by default — it centres on open. We add a pointer
+		// drag on the title bar so the user can park the window wherever
+		// they like while the map stays visible behind it.
+		const titleEl = this.titleEl;
+		if (titleEl) {
+			titleEl.style.cursor = "move";
+			titleEl.style.userSelect = "none";
+			let dragOrigin: { x: number; y: number; left: number; top: number } | null = null;
+			titleEl.addEventListener("pointerdown", (ev) => {
+				if (ev.button !== 0) return;
+				const rect = this.modalEl.getBoundingClientRect();
+				// Switch from centred to absolutely positioned before dragging,
+				// so `left/top` take effect.
+				this.modalEl.style.position = "fixed";
+				this.modalEl.style.left = `${rect.left}px`;
+				this.modalEl.style.top = `${rect.top}px`;
+				this.modalEl.style.transform = "none";
+				this.modalEl.style.margin = "0";
+				// Capture the pointer to the title bar. A fast drag leaves the bar
+				// long before the button goes up, and without the capture every
+				// move outside the element is delivered to whatever now sits under
+				// the pointer instead -- the drag dies the moment the hand outruns
+				// the window. With it, every move comes here until the button goes
+				// up, however far outside the window that happens.
+				titleEl.setPointerCapture(ev.pointerId);
+				dragOrigin = { x: ev.clientX, y: ev.clientY, left: rect.left, top: rect.top };
+				ev.preventDefault();
+			});
+			titleEl.addEventListener("pointermove", (ev) => {
+				if (!dragOrigin) return;
+				this.modalEl.style.left = `${dragOrigin.left + (ev.clientX - dragOrigin.x)}px`;
+				this.modalEl.style.top = `${dragOrigin.top + (ev.clientY - dragOrigin.y)}px`;
+			});
+			const stop = (): void => { dragOrigin = null; };
+			titleEl.addEventListener("pointerup", stop);
+			titleEl.addEventListener("pointercancel", stop);
+		}
 
 		const body = this.contentEl.createDiv({ cls: "mm-settings" });
 		this.navEl = body.createDiv({ cls: "mm-settings-nav" });
