@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { parseMarkdown, serialize } from "./parse.ts";
+import { bodyCardCount } from "./annotations.ts";
 import { walk } from "./types.ts";
 import type { MindNode, ParsedDoc } from "./types.ts";
 import {
@@ -223,13 +224,21 @@ test("a block lands under its node, indented, with no marker in front of it", ()
 	const p = parse("# R\n\n- Parent\n- Other\n");
 	const out = addBlock(p, find(p, "Parent"), "A long explanation.").text;
 	const after = parseMarkdown(out, { title: "Fixture" });
+	const parent = find(after, "Parent");
 
 	// The block's range reaches back over the blank line that separates it from
 	// the title, which is how this parser files every paragraph after a node.
 	assert.deepEqual(
-		bodyLines(after, find(after, "Parent")).filter((line) => line !== ""),
+		bodyLines(after, parent).filter((line) => line !== ""),
 		["  A long explanation."],
 	);
+
+	// **Not an annotation.** An annotation is the node's own note about itself,
+	// and the map gives it its own editor and no card -- so a paragraph filed as
+	// one would be invisible on the map and would have nothing to open.
+	assert.deepEqual(parent.annotationIndices, []);
+	assert.equal(bodyCardCount(parent), 1);
+
 	// Not a node of its own: the block belongs to the item above it.
 	assert.throws(() => find(after, "A long explanation."));
 	// And the item after it is untouched.

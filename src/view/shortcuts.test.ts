@@ -338,6 +338,36 @@ test("only a changed binding counts as changed", () => {
 
 // --- what a card being edited keeps for itself --------------------------------
 
+test("a real keydown reaches the action the table names for it", () => {
+	// The rest of this file builds combos by hand, which cannot catch a
+	// disagreement between what `parseCombo` reads out of a default and what
+	// `comboFromEvent` reads out of the event the browser actually sends. This
+	// one goes the whole way, from a KeyboardEvent's own fields to an action.
+	const bindings = resolveBindings(undefined);
+	const cases: Array<[Partial<KeyboardEvent>, ShortcutAction]> = [
+		[{ key: "Enter", ctrlKey: true }, "insert-block"],
+		[{ key: "Enter", metaKey: true }, "insert-block"],
+		[{ key: "Enter", ctrlKey: true, shiftKey: true }, "toggle-check"],
+		[{ key: "Enter" }, "add-sibling"],
+		[{ key: "Enter", shiftKey: true }, "edit-annotation"],
+		[{ key: "Tab" }, "add-child"],
+		[{ key: "Tab", shiftKey: true }, "outdent"],
+		[{ key: "Backspace" }, "delete-node"],
+	];
+
+	for (const [fields, expected] of cases) {
+		const ev = {
+			key: "",
+			ctrlKey: false,
+			metaKey: false,
+			shiftKey: false,
+			altKey: false,
+			...fields,
+		} as KeyboardEvent;
+		assert.equal(resolveAction(bindings, comboFromEvent(ev)), expected, JSON.stringify(fields));
+	}
+});
+
 test("a card being edited keeps every key but undo and redo", () => {
 	// A node added by accident is left with its editor open and nothing typed,
 	// so undo has to reach the map or the add cannot be taken back without

@@ -2199,6 +2199,10 @@ export class MindmapView extends TextFileView implements MapController {
 		this.withNode(id, (parsed, node) => {
 			const mutation = addBlock(parsed, node, t("view.block.placeholder"));
 			if (!mutation.ok) return;
+			// A folded node hides everything under it, its blocks included, and
+			// a block nobody can see is not an answer to "write one here". The
+			// same unfold `addChildTo` does, for the same reason.
+			this.collapsedKeys.delete(node.key);
 			this.apply(mutation);
 			this.openBody(id);
 		});
