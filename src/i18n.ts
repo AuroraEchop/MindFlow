@@ -94,7 +94,7 @@ const EN = {
 	// --- settings: the groups in `settings.ts` ------------------------------
 	"settings.group.structure": "Structure",
 	"settings.group.appearance": "Appearance",
-	"settings.group.behaviour": "Behaviour",
+	"settings.group.preference": "Preferences",
 	"settings.group.shortcuts": "Shortcuts",
 
 	"settings.source.name": "Nodes come from",
@@ -130,6 +130,13 @@ const EN = {
 	"settings.edgeStyle.desc": "Curved reads as a mind map; right-angled as a hierarchy.",
 	"settings.edgeStyle.option.curve": "Curved",
 	"settings.edgeStyle.option.orthogonal": "Right-angled",
+
+	"settings.cardStyle.name": "Card style",
+	"settings.cardStyle.desc":
+		"Bordered draws a border and background on every card, and shapes each level differently. Rounded gives the whole map one kind of card — the same quiet slab at every depth. Minimal draws nothing at rest; a card is its text until it is picked.",
+	"settings.cardStyle.option.bordered": "Bordered",
+	"settings.cardStyle.option.rounded": "Rounded card",
+	"settings.cardStyle.option.minimal": "Minimal",
 
 	"settings.branchColors.name": "Colour branches",
 	"settings.branchColors.desc": "Give each top-level branch its own colour.",
@@ -220,6 +227,7 @@ const EN = {
 	"view.tool.export": "Export",
 	"view.tool.settings": "Settings",
 	"view.block.placeholder": "Text block",
+	"view.node.placeholder": "Type something",
 
 	// --- the furniture on a card, read out by a screen reader ---------------
 	"view.node.expand": "Expand",
@@ -304,6 +312,7 @@ const EN = {
 	"command.openAsMindmap": "Open current note as a mind map",
 	"command.revealLineOnMap": "Reveal the line at the cursor on the map",
 	"command.settings": "Open the mind map settings",
+	"command.insertAnnotation": "Insert an annotation line (in markdown editor)",
 
 	// --- what the plugin says at load ---------------------------------------
 	"main.notice.onlyMarkdown": "Only markdown notes can be shown as a mind map.",
@@ -396,7 +405,7 @@ const ZH: Record<I18nKey, string> = {
 	// --- 设置 -----------------------------------------------------------------
 	"settings.group.structure": "结构",
 	"settings.group.appearance": "外观",
-	"settings.group.behaviour": "行为",
+	"settings.group.preference": "偏好",
 	"settings.group.shortcuts": "快捷键",
 
 	"settings.source.name": "节点来源",
@@ -431,6 +440,13 @@ const ZH: Record<I18nKey, string> = {
 	"settings.edgeStyle.desc": "曲线更像思维导图，直角更像层级图。",
 	"settings.edgeStyle.option.curve": "曲线",
 	"settings.edgeStyle.option.orthogonal": "直角",
+
+	"settings.cardStyle.name": "卡片样式",
+	"settings.cardStyle.desc":
+		"边框：每张卡片都有边框和背景，各层级造型不同。圆角卡片：整张导图只留一种卡片——各层级都是同样的浅灰圆角块。极简：静止时不画任何东西，卡片就是它上面的文字，选中后才出现一个框。",
+	"settings.cardStyle.option.bordered": "边框",
+	"settings.cardStyle.option.rounded": "圆角卡片",
+	"settings.cardStyle.option.minimal": "极简",
 
 	"settings.branchColors.name": "分支着色",
 	"settings.branchColors.desc": "让每个顶级分支拥有各自的颜色。",
@@ -520,6 +536,7 @@ const ZH: Record<I18nKey, string> = {
 	"view.tool.export": "导出",
 	"view.tool.settings": "设置",
 	"view.block.placeholder": "文字块",
+	"view.node.placeholder": "输入文字",
 
 	// --- 卡片上的部件，供读屏软件朗读 -----------------------------------------
 	"view.node.expand": "展开",
@@ -602,6 +619,7 @@ const ZH: Record<I18nKey, string> = {
 	"command.openAsMindmap": "以思维导图打开当前笔记",
 	"command.revealLineOnMap": "在导图中定位光标所在的行",
 	"command.settings": "打开思维导图设置",
+	"command.insertAnnotation": "插入注解行（在 Markdown 编辑器中）",
 
 	// --- 加载时的提示 --------------------------------------------------------
 	"main.notice.onlyMarkdown": "只有 Markdown 笔记可以显示为思维导图。",

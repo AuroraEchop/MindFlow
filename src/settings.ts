@@ -10,7 +10,16 @@ import type {
 import type { NodeSource, RootPolicy } from "./model/types.ts";
 import { t } from "./i18n.ts";
 import type { I18nKey, LanguagePreference } from "./i18n.ts";
+import type { CardStyle } from "./view/cardStyle.ts";
+import { CARD_STYLES } from "./view/cardStyle.ts";
 import type { EdgeStyle } from "./view/edges.ts";
+
+/**
+ * How cards are drawn -- see `cardStyle.ts` for what each style is. The list the
+ * dropdown offers and the classes the view toggles both come from there, so the
+ * setting cannot offer a style nothing draws.
+ */
+export type { CardStyle };
 import {
 	SHORTCUTS,
 	comboToString,
@@ -67,6 +76,8 @@ export interface MindmapSettings {
 	layout: LayoutMode;
 	/** How the connectors between cards are drawn. */
 	edgeStyle: EdgeStyle;
+	/** How cards are drawn: with a border, or borderless until edited. */
+	cardStyle: CardStyle;
 	indentUnit: "auto" | "two" | "four" | "tab";
 	wheel: WheelMode;
 	rememberFolds: boolean;
@@ -110,6 +121,7 @@ export const DEFAULT_SETTINGS: MindmapSettings = {
 	rootPolicy: "auto",
 	layout: "balanced",
 	edgeStyle: "curve",
+	cardStyle: "bordered",
 	indentUnit: "auto",
 	wheel: "zoom",
 	rememberFolds: true,
@@ -271,52 +283,59 @@ function annotationDesc(): DocumentFragment {
  */
 const GROUPS: SettingGroup[] = [
 	{
-		heading: "settings.group.structure",
+		heading: "settings.group.preference",
 		items: [
 			{
-				name: "settings.source.name",
-				desc: "settings.source.desc",
+				name: "settings.wheel.name",
 				control: {
 					type: "dropdown",
-					key: "source",
+					key: "wheel",
 					options: {
-						"headings-and-lists": "settings.source.option.headings-and-lists",
-						"headings-only": "settings.source.option.headings-only",
-						"lists-only": "settings.source.option.lists-only",
+						zoom: "settings.wheel.option.zoom",
+						pan: "settings.wheel.option.pan",
 					},
 				},
 			},
 			{
-				name: "settings.maxHeadingDepth.name",
-				desc: "settings.maxHeadingDepth.desc",
-				control: { type: "slider", key: "maxHeadingDepth", min: 1, max: 6, step: 1 },
+				name: "settings.rememberFolds.name",
+				desc: "settings.rememberFolds.desc",
+				control: { type: "toggle", key: "rememberFolds" },
 			},
 			{
-				name: "settings.rootPolicy.name",
-				desc: "settings.rootPolicy.desc",
+				name: "settings.rememberView.name",
+				desc: "settings.rememberView.desc",
 				control: {
 					type: "dropdown",
-					key: "rootPolicy",
+					key: "rememberView",
 					options: {
-						auto: "settings.rootPolicy.option.auto",
-						filename: "settings.rootPolicy.option.filename",
-						h1: "settings.rootPolicy.option.h1",
+						off: "settings.rememberView.option.off",
+						session: "settings.rememberView.option.session",
+						always: "settings.rememberView.option.always",
 					},
 				},
 			},
 			{
-				name: "settings.indentUnit.name",
-				desc: "settings.indentUnit.desc",
+				name: "settings.addHeaderButton.name",
+				desc: "settings.addHeaderButton.desc",
+				control: { type: "toggle", key: HEADER_BUTTON_KEY },
+			},
+			{
+				name: "settings.language.name",
+				desc: "settings.language.desc",
 				control: {
 					type: "dropdown",
-					key: "indentUnit",
+					key: "language",
 					options: {
-						auto: "settings.indentUnit.option.auto",
-						two: "settings.indentUnit.option.two",
-						four: "settings.indentUnit.option.four",
-						tab: "settings.indentUnit.option.tab",
+						auto: "settings.language.option.auto",
+						en: "settings.language.option.en",
+						zh: "settings.language.option.zh",
 					},
 				},
+			},
+			{
+				name: "settings.debugTiming.name",
+				desc: "settings.debugTiming.desc",
+				control: { type: "toggle", key: "debugTiming" },
 			},
 		],
 	},
@@ -345,6 +364,20 @@ const GROUPS: SettingGroup[] = [
 						curve: "settings.edgeStyle.option.curve",
 						orthogonal: "settings.edgeStyle.option.orthogonal",
 					},
+				},
+			},
+			{
+				name: "settings.cardStyle.name",
+				desc: "settings.cardStyle.desc",
+				control: {
+					type: "dropdown",
+					key: "cardStyle",
+					options: Object.fromEntries(
+						CARD_STYLES.map((style) => [
+							style,
+							`settings.cardStyle.option.${style}` as I18nKey,
+						]),
+					),
 				},
 			},
 			{
@@ -403,59 +436,52 @@ const GROUPS: SettingGroup[] = [
 		],
 	},
 	{
-		heading: "settings.group.behaviour",
+		heading: "settings.group.structure",
 		items: [
 			{
-				name: "settings.wheel.name",
+				name: "settings.source.name",
+				desc: "settings.source.desc",
 				control: {
 					type: "dropdown",
-					key: "wheel",
+					key: "source",
 					options: {
-						zoom: "settings.wheel.option.zoom",
-						pan: "settings.wheel.option.pan",
+						"headings-and-lists": "settings.source.option.headings-and-lists",
+						"headings-only": "settings.source.option.headings-only",
+						"lists-only": "settings.source.option.lists-only",
 					},
 				},
 			},
 			{
-				name: "settings.rememberFolds.name",
-				desc: "settings.rememberFolds.desc",
-				control: { type: "toggle", key: "rememberFolds" },
+				name: "settings.maxHeadingDepth.name",
+				desc: "settings.maxHeadingDepth.desc",
+				control: { type: "slider", key: "maxHeadingDepth", min: 1, max: 6, step: 1 },
 			},
 			{
-				name: "settings.rememberView.name",
-				desc: "settings.rememberView.desc",
+				name: "settings.rootPolicy.name",
+				desc: "settings.rootPolicy.desc",
 				control: {
 					type: "dropdown",
-					key: "rememberView",
+					key: "rootPolicy",
 					options: {
-						off: "settings.rememberView.option.off",
-						session: "settings.rememberView.option.session",
-						always: "settings.rememberView.option.always",
+						auto: "settings.rootPolicy.option.auto",
+						filename: "settings.rootPolicy.option.filename",
+						h1: "settings.rootPolicy.option.h1",
 					},
 				},
 			},
 			{
-				name: "settings.addHeaderButton.name",
-				desc: "settings.addHeaderButton.desc",
-				control: { type: "toggle", key: HEADER_BUTTON_KEY },
-			},
-			{
-				name: "settings.language.name",
-				desc: "settings.language.desc",
+				name: "settings.indentUnit.name",
+				desc: "settings.indentUnit.desc",
 				control: {
 					type: "dropdown",
-					key: "language",
+					key: "indentUnit",
 					options: {
-						auto: "settings.language.option.auto",
-						en: "settings.language.option.en",
-						zh: "settings.language.option.zh",
+						auto: "settings.indentUnit.option.auto",
+						two: "settings.indentUnit.option.two",
+						four: "settings.indentUnit.option.four",
+						tab: "settings.indentUnit.option.tab",
 					},
 				},
-			},
-			{
-				name: "settings.debugTiming.name",
-				desc: "settings.debugTiming.desc",
-				control: { type: "toggle", key: "debugTiming" },
 			},
 		],
 	},
@@ -517,9 +543,15 @@ export class SettingsPanel {
 		this.renderShortcuts(containerEl);
 	}
 
-	/** One group, heading included. What the dialog wants, a page at a time. */
-	renderGroup(containerEl: HTMLElement, group: SettingGroup): void {
-		new Setting(containerEl).setName(t(group.heading)).setHeading();
+	/**
+	 * One group, heading included.
+	 *
+	 * The heading is optional because the dialog names the page in its own head:
+	 * a heading in the scrolling rows would be the same words twice, one of them
+	 * leaving with the first scroll.
+	 */
+	renderGroup(containerEl: HTMLElement, group: SettingGroup, heading = true): void {
+		if (heading) new Setting(containerEl).setName(t(group.heading)).setHeading();
 		for (const item of group.items) this.renderItem(containerEl, item);
 	}
 
@@ -537,8 +569,8 @@ export class SettingsPanel {
 	/** One page by index: a group, or the shortcut rows past the last one. */
 	renderPage(containerEl: HTMLElement, index: number): void {
 		const group = GROUPS[index];
-		if (group) this.renderGroup(containerEl, group);
-		else this.renderShortcuts(containerEl);
+		if (group) this.renderGroup(containerEl, group, false);
+		else this.renderShortcuts(containerEl, false);
 	}
 
 	/**
@@ -546,9 +578,10 @@ export class SettingsPanel {
 	 *
 	 * Not one of `GROUPS`: a row there is a live key capture rather than a
 	 * control with a value, so both renderers hand it to `renderShortcutRow`.
+	 * The heading is the dialog's to say, the same way it is for a group.
 	 */
-	renderShortcuts(containerEl: HTMLElement): void {
-		new Setting(containerEl).setName(t("settings.group.shortcuts")).setHeading();
+	renderShortcuts(containerEl: HTMLElement, heading = true): void {
+		if (heading) new Setting(containerEl).setName(t("settings.group.shortcuts")).setHeading();
 		for (const entry of SHORTCUTS) {
 			const setting = new Setting(containerEl)
 				.setName(t(entry.nameKey))
