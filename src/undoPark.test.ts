@@ -1,7 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { UNDO_LIMIT, parkUndo, pushRevision, recordExternalEdit, takeUndo } from "./undoPark.ts";
+import {
+	UNDO_LIMIT,
+	parkUndo,
+	pushRevision,
+	recordExternalEdit,
+	stepBack,
+	stepForward,
+	takeUndo,
+} from "./undoPark.ts";
 import type { ParkedUndo } from "./undoPark.ts";
 
 const NOTE = "note.md";
@@ -121,4 +129,56 @@ test("an external edit respects the budget too", () => {
 	slot = recordExternalEdit(slot, "v1");
 	assert.equal(slot.undo.length, UNDO_LIMIT);
 	assert.equal(slot.undo[slot.undo.length - 1], "v0");
+});
+
+// --- stepping, from the markdown editor ------------------------------------------
+
+test("a step back hands over the revision the history was holding", () => {
+	// What the editor does with this: the note comes back from the map with
+	// CodeMirror's own history gone, and the shared stack is all there is left
+	// to walk.
+	const step = stepBack(afterOneEdit(), V1);
+	assert.ok(step);
+	assert.equal(step.data, V0);
+	assert.deepEqual(step.slot.undo, []);
+	assert.deepEqual(step.slot.redo, [V1]);
+	// The slot already holds what is about to be written, so the write coming
+	// back as an external edit is not filed as a step of its own.
+	assert.equal(step.slot.data, V0);
+});
+
+test("a step back with nothing behind it gives nothing", () => {
+	assert.equal(stepBack(parkUndo(NOTE, V1, [], []), V1), null);
+});
+
+test("a step forward is the mirror of a step back", () => {
+	const back = stepBack(afterOneEdit(), V1);
+	assert.ok(back);
+	const forward = stepForward(back.slot, V0);
+	assert.ok(forward);
+	assert.equal(forward.data, V1);
+	assert.deepEqual(forward.slot.undo, [V0]);
+	assert.deepEqual(forward.slot.redo, []);
+});
+
+test("a step forward with nothing ahead of it gives nothing", () => {
+	assert.equal(stepForward(afterOneEdit(), V1), null);
+});
+
+test("the editor and the map step through one sequence", () => {
+	// The map made the first edit and the editor the second; stepping back from
+	// the editor walks over both, in the order they landed, and neither is
+	// filed twice on the way.
+	let slot = afterOneEdit();
+	slot = recordExternalEdit(slot, V2);
+
+	const first = stepBack(slot, V2);
+	assert.ok(first);
+	assert.equal(first.data, V1);
+
+	const second = stepBack(first.slot, first.data);
+	assert.ok(second);
+	assert.equal(second.data, V0);
+
+	assert.equal(stepBack(second.slot, second.data), null);
 });

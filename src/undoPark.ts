@@ -120,3 +120,42 @@ export function takeUndo(slot: ParkedUndo | null, path: string, data: string): U
 	pushRevision(undo, slot.data);
 	return { slot: null, stacks: { undo, redo: [] } };
 }
+
+/** A step through a note's history, and the history it leaves behind. */
+export interface UndoStep {
+	/** The document to write. */
+	data: string;
+	/** The slot as it stands after the step. */
+	slot: ParkedUndo;
+}
+
+/**
+ * One step back through a parked history.
+ *
+ * What the markdown editor needs and the map has always had. The map walks its
+ * own stacks, but the editor is a second view of the same note and has to be
+ * able to take the same steps -- and it has no stack of its own to take them
+ * from, because Obsidian rebuilds the editor on every swap and CodeMirror's
+ * history goes with it.
+ *
+ * Null when there is nothing left to step back over, which is the caller's cue
+ * to leave the key alone.
+ */
+export function stepBack(slot: ParkedUndo, current: string): UndoStep | null {
+	const undo = [...slot.undo];
+	const data = undo.pop();
+	if (data === undefined) return null;
+	const redo = [...slot.redo];
+	pushRevision(redo, current);
+	return { data, slot: { path: slot.path, data, undo, redo } };
+}
+
+/** One step forward again: the mirror of `stepBack`, out of the redo branch. */
+export function stepForward(slot: ParkedUndo, current: string): UndoStep | null {
+	const redo = [...slot.redo];
+	const data = redo.pop();
+	if (data === undefined) return null;
+	const undo = [...slot.undo];
+	pushRevision(undo, current);
+	return { data, slot: { path: slot.path, data, undo, redo } };
+}

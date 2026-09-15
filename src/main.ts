@@ -22,8 +22,17 @@ import {
 	updateNotice,
 	versionToRecord,
 } from "./updateNotice.ts";
-import { parkUndo, recordExternalEdit, takeUndo } from "./undoPark.ts";
+import { parkUndo, recordExternalEdit, stepBack, stepForward, takeUndo } from "./undoPark.ts";
 import type { ParkedUndo, UndoStacks } from "./undoPark.ts";
+
+/**
+ * How many notes keep a parked undo history at once.
+ *
+ * Each slot holds up to `UNDO_LIMIT` copies of a document, so this is a real
+ * budget: enough notes that ordinary jumping around never loses a history, few
+ * enough that a vault touched all day does not keep every note it ever opened.
+ */
+const PARKED_NOTES = 20;
 
 const HEADER_BUTTON_CLASS = "mindmap-mode-toggle";
 
@@ -66,8 +75,16 @@ export default class MindmapPlugin extends Plugin {
 	/** Whether `data.json` held no settings, which is a first install. */
 	private freshInstall = false;
 
-	/** The last map's undo history, for the next view that shows the same note. */
-	private parkedUndo: ParkedUndo | null = null;
+	/**
+	 * The undo history of every note that has one: for the next view that shows
+	 * the note, and for the markdown editor reaching the same stacks from its
+	 * own side.
+	 *
+	 * One slot per note rather than a single slot, because a single slot keeps
+	 * only the last -- a detour through another note that also had a map open
+	 * would throw the first note's history away.
+	 */
+	private parkedUndo = new Map<string, ParkedUndo>();
 
 	/** The note a read is in flight for, so two cannot land out of order. */
 	private readingFor: string | null = null;
@@ -239,6 +256,98 @@ export default class MindmapPlugin extends Plugin {
 				return true;
 			},
 		});
+
+		// In the markdown editor, Ctrl+Enter inserts a new line starting with
+		// ": " — the annotation prefix the map reads as a note under the node
+		// above. Registered as a plugin command (for the palette and for
+		// rebinding), and given a default Ctrl+Enter hotkey through a DOM-level
+		// listener on the editor element. Disabling the plugin removes both.
+		this.addCommand({
+			id: "insert-annotation-line",
+			name: t("command.insertAnnotation"),
+			editorCallback: (editor) => {
+				const cursor = editor.getCursor();
+				const line = editor.getLine(cursor.line);
+				const marker = /^([ \t]*)([-*+]|\d+[.)])([ \t]+)/.exec(line);
+				const prefix = marker ? `${marker[1]}${marker[2]}${marker[3] || " "}: ` : ": ";
+				editor.replaceRange(`\n${prefix}`, { line: cursor.line, ch: line.length });
+				const newLine = cursor.line + 1;
+				editor.setCursor({ line: newLine, ch: prefix.length });
+				editor.focus();
+			},
+		});
+
+		// Default Ctrl+Enter in the markdown editor, live while the plugin is
+		// on and gone when it is off. Registered on the document with capture so
+		// it fires before the editor's own keymap, and only acts when a
+		// MarkdownView is the active leaf.
+		this.registerDomEvent(document, "keydown", (ev: KeyboardEvent) => {
+			if (ev.key !== "Enter" || !(ev.ctrlKey || ev.metaKey) || ev.shiftKey || ev.altKey) return;
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (!view) return;
+			// Only in source mode; reading mode has no editor to insert into.
+			const editor = view.editor;
+			if (!editor) return;
+			ev.preventDefault();
+			ev.stopPropagation();
+			const cursor = editor.getCursor();
+			const line = editor.getLine(cursor.line);
+			const marker = /^([ \t]*)([-*+]|\d+[.)])([ \t]+)/.exec(line);
+			const prefix = marker ? `${marker[1]}${marker[2]}${marker[3] || " "}: ` : ": ";
+			editor.replaceRange(`\n${prefix}`, { line: cursor.line, ch: line.length });
+			const newLine = cursor.line + 1;
+			editor.setCursor({ line: newLine, ch: prefix.length });
+			editor.focus();
+		}, true);
+
+		// Ctrl/Cmd+Z in the markdown editor, reaching the history the map and
+		// the editor share.
+		//
+		// They are two views of one note and share one stack -- the map has
+		// always been able to undo what the editor did. This is the other
+		// direction, and it is the harder one, because the key belongs to the
+		// editor: CodeMirror's own undo comes first and unchanged. Stepping back
+		// word by word is what a person expects from Ctrl+Z in a text field, and
+		// taking that away to reach a map edit would be a worse deal than the
+		// gap it closes. Only once the editor has nothing of its own left does
+		// the key belong to the shared history.
+		//
+		// "Nothing left" is asked by taking a step and seeing whether the
+		// document moved, rather than by reading CodeMirror's own depth: that
+		// lives in `@codemirror/commands`, which is not part of the API this
+		// plugin is given, and a runtime that cannot resolve it would take the
+		// plugin down with it.
+		//
+		// A note with no parked history is left entirely alone -- which is every
+		// note never opened as a map, so the common case pays nothing for this.
+		this.registerDomEvent(document, "keydown", (ev: KeyboardEvent) => {
+			if (ev.key.toLowerCase() !== "z" || !(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			const editor = view?.editor;
+			const file = view?.file;
+			if (!view || !editor || !file) return;
+			if (!this.parkedUndo.has(file.path)) return;
+
+			const forward = ev.shiftKey;
+			const before = editor.getValue();
+			if (forward) editor.redo();
+			else editor.undo();
+			if (editor.getValue() !== before) {
+				// The editor had a step of its own and has just taken it. The key
+				// is stopped here too: letting it reach the editor's own keymap
+				// would take a second step on top of this one.
+				ev.preventDefault();
+				ev.stopPropagation();
+				return;
+			}
+
+			// Nothing left in the editor's own history, so whatever comes next
+			// is the map's -- and the key is taken from a keymap that would do
+			// nothing with it in any case.
+			ev.preventDefault();
+			ev.stopPropagation();
+			void this.stepNoteHistory(file, forward);
+		}, true);
 
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file, _source, leaf) => {
@@ -474,7 +583,16 @@ export default class MindmapPlugin extends Plugin {
 	 * is done -- so a hook on the way out can arrive with nothing left to record.
 	 */
 	parkUndo(path: string, data: string, undo: readonly string[], redo: readonly string[]): void {
-		this.parkedUndo = parkUndo(path, data, undo, redo);
+		// Deleted before it is set so the note counts as the most recent user of
+		// the map: a `Map` keeps insertion order, so the first key is the
+		// coldest, and that is the one to drop once the budget is spent.
+		this.parkedUndo.delete(path);
+		this.parkedUndo.set(path, parkUndo(path, data, undo, redo));
+		while (this.parkedUndo.size > PARKED_NOTES) {
+			const coldest = this.parkedUndo.keys().next().value;
+			if (coldest === undefined) break;
+			this.parkedUndo.delete(coldest);
+		}
 	}
 
 	/**
@@ -483,8 +601,9 @@ export default class MindmapPlugin extends Plugin {
 	 * `takeUndo` holds the rule and its reasoning; this only keeps the slot.
 	 */
 	adoptUndo(path: string, data: string): UndoStacks | null {
-		const take = takeUndo(this.parkedUndo, path, data);
-		this.parkedUndo = take.slot;
+		const take = takeUndo(this.parkedUndo.get(path) ?? null, path, data);
+		if (take.slot) this.parkedUndo.set(path, take.slot);
+		else this.parkedUndo.delete(path);
 		return take.stacks;
 	}
 
@@ -500,19 +619,47 @@ export default class MindmapPlugin extends Plugin {
 	 * a coherent sequence even when it is not an exhaustive one.
 	 */
 	private async trackExternalEdit(file: TFile): Promise<void> {
-		const slot = this.parkedUndo;
-		if (!slot || slot.path !== file.path || this.readingFor !== null) return;
+		if (!this.parkedUndo.has(file.path) || this.readingFor !== null) return;
 		this.readingFor = file.path;
 		try {
 			const data = await this.app.vault.read(file);
-			// The slot can be replaced or spent while the read is out, and the
-			// note it is holding is then not this one.
-			const current = this.parkedUndo;
-			if (!current || current.path !== file.path) return;
-			this.parkedUndo = recordExternalEdit(current, data);
+			// The slot can be spent while the read is out, and the note it is
+			// holding is then not this one.
+			const current = this.parkedUndo.get(file.path);
+			if (!current) return;
+			this.parkedUndo.set(file.path, recordExternalEdit(current, data));
 		} finally {
 			this.readingFor = null;
 		}
+	}
+
+	/**
+	 * Step the note's own history back or forward, from the markdown editor.
+	 *
+	 * The map walks these stacks itself. A markdown view has no stack to walk:
+	 * the editor's undo belongs to CodeMirror, and Obsidian rebuilds the editor
+	 * on every swap, so that history is gone the moment a note comes back from
+	 * the map. What is left is the parked one, and the key has to reach it.
+	 *
+	 * Written through the vault rather than through `Editor.setValue`: a write
+	 * through the editor is a step in CodeMirror's own history, and the *next*
+	 * Ctrl+Z would undo this undo instead of going further back. Writing the
+	 * file leaves the editor in the state a view swap leaves it in -- reloaded,
+	 * with nothing of its own to give back -- which is what the next press of
+	 * the key expects. False when the history had nothing to give.
+	 */
+	private async stepNoteHistory(file: TFile, forward: boolean): Promise<boolean> {
+		const slot = this.parkedUndo.get(file.path);
+		if (!slot) return false;
+		const current = await this.app.vault.read(file);
+		const step = forward ? stepForward(slot, current) : stepBack(slot, current);
+		if (!step) return false;
+		// Filed before the write, and not after: the write comes back as an
+		// external edit, and the slot has to already hold the document being
+		// written, or that edit files a step for a change the history made.
+		this.parkedUndo.set(file.path, step.slot);
+		await this.app.vault.modify(file, step.data);
+		return true;
 	}
 
 	refreshAllViews(): void {
