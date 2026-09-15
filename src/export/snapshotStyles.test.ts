@@ -39,6 +39,13 @@ const SIDES = ["top", "right", "bottom", "left"];
 const LONGHANDS: Record<string, string[]> = {
 	margin: SIDES.map((side) => `margin-${side}`),
 	padding: SIDES.map((side) => `padding-${side}`),
+	background: ["background-color", "background-image"],
+	"border-radius": [
+		"border-top-left-radius",
+		"border-top-right-radius",
+		"border-bottom-right-radius",
+		"border-bottom-left-radius",
+	],
 	"border-left": ["border-left-width", "border-left-style", "border-left-color"],
 	border: SIDES.flatMap((side) => [
 		`border-${side}-width`,
@@ -50,14 +57,24 @@ const LONGHANDS: Record<string, string[]> = {
 /**
  * Properties a static file has no use for: they describe how the map answers a
  * pointer, and the export answers none. `min-height` joins them because every
- * box is written out with the height it was measured at.
+ * box is written out with the height it was measured at, and `transition`
+ * because a file that does not move has nothing to animate between.
  */
-const NOT_EXPORTED = new Set(["user-select", "cursor", "min-height", "resize"]);
+const NOT_EXPORTED = new Set([
+	"user-select",
+	"cursor",
+	"min-height",
+	"resize",
+	"transition",
+]);
 
 function required(selector: string): string[] {
 	const out: string[] = [];
 	for (const [property] of declarations(selector)) {
 		if (NOT_EXPORTED.has(property)) continue;
+		// A variable carries a value to an element the export writes the value
+		// out on, so there is nothing here for it to say.
+		if (property.startsWith("--")) continue;
 		out.push(...(LONGHANDS[property] ?? [property]));
 	}
 	return out;
