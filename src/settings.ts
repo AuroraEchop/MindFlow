@@ -51,13 +51,14 @@ export type RememberViewMode = "off" | "session" | "always";
 export type ToolbarDock = "bottom-right" | "bottom-centre" | "right" | "free";
 
 /**
- * When a card's own buttons -- the fold toggle and the add button -- are shown.
+ * When the corner toolbar is shown.
  *
- * `selection` keeps the map clean until something is picked, which is what a
- * map is for; `hover` is what it did before and is there for anyone who misses
- * it; `always` makes every card's controls part of the picture.
+ * `selection` keeps the map bare until a card is picked, which is what a map is
+ * for; `always` leaves the controls where they have always been. The card's own
+ * add button is not part of this -- it is the card's, and it follows the
+ * pointer.
  */
-export type NodeToolsMode = "selection" | "hover" | "always";
+export type ToolbarVisibility = "selection" | "always";
 
 export interface MindmapSettings {
 	source: NodeSource;
@@ -80,8 +81,8 @@ export interface MindmapSettings {
 	addHeaderButton: boolean;
 	/** Where the corner toolbar sits. */
 	toolbarDock: ToolbarDock;
-	/** When a card's fold toggle and add button are shown. */
-	nodeTools: NodeToolsMode;
+	/** When the corner toolbar is shown. */
+	toolbarVisibility: ToolbarVisibility;
 	/** The toolbar's position once dragged. Read only while `toolbarDock` is `free`. */
 	toolbarX: number;
 	toolbarY: number;
@@ -121,7 +122,7 @@ export const DEFAULT_SETTINGS: MindmapSettings = {
 	verticalGap: 14,
 	addHeaderButton: true,
 	toolbarDock: "bottom-right",
-	nodeTools: "selection",
+	toolbarVisibility: "selection",
 	toolbarX: 12,
 	toolbarY: 12,
 	language: "auto",
@@ -362,15 +363,14 @@ const GROUPS: SettingGroup[] = [
 				control: { type: "toggle", key: "inlineAnnotations" },
 			},
 			{
-				name: "settings.nodeTools.name",
-				desc: "settings.nodeTools.desc",
+				name: "settings.toolbarVisibility.name",
+				desc: "settings.toolbarVisibility.desc",
 				control: {
 					type: "dropdown",
-					key: "nodeTools",
+					key: "toolbarVisibility",
 					options: {
-						selection: "settings.nodeTools.option.selection",
-						hover: "settings.nodeTools.option.hover",
-						always: "settings.nodeTools.option.always",
+						selection: "settings.toolbarVisibility.option.selection",
+						always: "settings.toolbarVisibility.option.always",
 					},
 				},
 			},

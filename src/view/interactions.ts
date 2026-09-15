@@ -23,6 +23,8 @@ export interface MapController {
 
 	addChildTo(id: string): void;
 	addSiblingTo(id: string): void;
+	/** Write an indented text block under the node, and open it to be written. */
+	addBlock(id: string): void;
 	removeNode(id: string): void;
 	indent(id: string): void;
 	outdent(id: string): void;
@@ -56,6 +58,9 @@ export interface MapController {
 }
 
 const DRAG_THRESHOLD = 5;
+
+/** Clearance between the dragged copy and the card it is previewing against. */
+const LANDING_GAP = 14;
 
 /** The four navigation actions, as the direction each one steps in. */
 const DIRECTIONS: Record<
@@ -270,6 +275,12 @@ export function attachInteractions(controller: MapController): () => void {
 			targetEl && targetId && targetId !== dragId
 				? dropModeFor(dragId, targetId, targetEl, dropAt.y)
 				: "child";
+
+		// Ahead of the early return below: with nothing to land on the copy
+		// follows the pointer, so it has to be placed on every frame even when
+		// the highlight has not changed.
+		settleGhost(targetEl && targetId && targetId !== dragId ? targetEl : null, mode, dropAt.x, dropAt.y);
+
 		// The zone can change without the card changing, and the highlight has to
 		// follow the pointer across that boundary.
 		if (targetEl === hovered && mode === hoveredMode) return;
@@ -297,17 +308,20 @@ export function attachInteractions(controller: MapController): () => void {
 	 * ever found under the pointer.
 	 */
 	let ghost: HTMLElement | null = null;
+	let ghostSize = { width: 0, height: 0 };
 
-	const moveGhost = (ev: PointerEvent): void => {
+	/** Put the copy's centre at a point in screen space. */
+	const moveGhost = (x: number, y: number): void => {
 		if (!ghost) return;
-		ghost.style.left = `${ev.clientX}px`;
-		ghost.style.top = `${ev.clientY}px`;
+		ghost.style.left = `${x}px`;
+		ghost.style.top = `${y}px`;
 	};
 
 	const startGhost = (node: HTMLElement, ev: PointerEvent): void => {
 		const card = node.querySelector<HTMLElement>(".mm-card");
 		if (!card) return;
 		const rect = card.getBoundingClientRect();
+		ghostSize = { width: rect.width, height: rect.height };
 
 		ghost = document.body.createDiv({ cls: "mm-drag-ghost" });
 		ghost.style.width = `${rect.width}px`;
@@ -317,7 +331,63 @@ export function attachInteractions(controller: MapController): () => void {
 		const branch = getComputedStyle(card).getPropertyValue("--mm-branch");
 		if (branch.trim() !== "") ghost.style.setProperty("--mm-branch", branch.trim());
 		ghost.appendChild(card.cloneNode(true));
-		moveGhost(ev);
+		moveGhost(ev.clientX, ev.clientY);
+	};
+
+	/**
+	 * Where the card would come to rest if it were let go here.
+	 *
+	 * Read off the target's own box rather than from the layout: the tree has
+	 * not been laid out with this node in its new place yet, and a preview that
+	 * waited for that would arrive after the drop. So this shows the place
+	 * rather than the exact pixels, which is what makes it a preview rather
+	 * than a promise.
+	 */
+	const restingSpot = (targetEl: HTMLElement, mode: DropMode): { x: number; y: number } => {
+		const card = targetEl.querySelector<HTMLElement>(".mm-card") ?? targetEl;
+		const rect = card.getBoundingClientRect();
+		const half = { x: ghostSize.width / 2, y: ghostSize.height / 2 };
+
+		if (mode === "before") {
+			return { x: rect.left + rect.width / 2, y: rect.top - half.y - LANDING_GAP };
+		}
+		if (mode === "after") {
+			return { x: rect.left + rect.width / 2, y: rect.bottom + half.y + LANDING_GAP };
+		}
+		// A child lands on the side the branch grows from, clear of the card and
+		// of the gap its connector is drawn across.
+		const side = targetEl.dataset.side === "left" ? -1 : 1;
+		const clear = half.x + LANDING_GAP * 3;
+		return {
+			x: side === 1 ? rect.right + clear : rect.left - clear,
+			y: rect.top + rect.height / 2,
+		};
+	};
+
+	/**
+	 * Snap the copy onto where it would land, or let it follow the pointer.
+	 *
+	 * The snap is what turns the drag from "something is following my pointer"
+	 * into "this is where it goes", and it is only offered for a drop the map
+	 * would actually accept -- a copy that settled onto a refused target would
+	 * be promising something that will not happen.
+	 */
+	const settleGhost = (
+		targetEl: HTMLElement | null,
+		mode: DropMode,
+		x: number,
+		y: number,
+	): void => {
+		if (!ghost) return;
+		const targetId = targetEl?.dataset.id;
+		const landing =
+			targetEl !== null &&
+			targetId !== undefined &&
+			dragId !== null &&
+			controller.canDrop(dragId, targetId, mode);
+		ghost.toggleClass("is-snapped", landing === true);
+		const spot = landing ? restingSpot(targetEl, mode) : { x, y };
+		moveGhost(spot.x, spot.y);
 	};
 
 	const endGhost = (): void => {
@@ -374,9 +444,11 @@ export function attachInteractions(controller: MapController): () => void {
 			// rather than the map being panned.
 			if (node) startGhost(node, ev);
 			viewport.setPointerCapture(ev.pointerId);
-		} else {
-			moveGhost(ev);
 		}
+
+		// The copy is not moved here. `resolveDrop` places it, on the same frame
+		// the highlight is decided on, so that it and the highlight can never
+		// disagree about where the drop would land.
 
 		dropAt = { x: ev.clientX, y: ev.clientY };
 		if (dropFrame !== 0) return;
@@ -523,6 +595,11 @@ export function attachInteractions(controller: MapController): () => void {
 				if (!id) return;
 				ev.preventDefault();
 				controller.editAnnotation(id);
+				return;
+			case "insert-block":
+				if (!id) return;
+				ev.preventDefault();
+				controller.addBlock(id);
 				return;
 			case "delete-node":
 				if (!id) return;

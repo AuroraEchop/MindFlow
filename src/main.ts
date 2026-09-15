@@ -587,6 +587,35 @@ export default class MindmapPlugin extends Plugin {
 		return pending.line;
 	}
 
+	/**
+	 * Put the caret on a line of the note a view is showing.
+	 *
+	 * Three things have to be true before a caret means anything, and not one of
+	 * them is true the instant a view is created: the note has to have been
+	 * read, the editor has to be in source mode -- reading view has no caret to
+	 * put anywhere -- and only then does the scroll land where it was asked to.
+	 *
+	 * Which is why the wait is explicit and bounded rather than a guess at a
+	 * delay: a caret set into an editor that has not read the note yet is
+	 * thrown away with the load, and the note opens at the top. The bound is
+	 * there so that a view which never loads is not something to hang on.
+	 */
+	async revealLine(view: MarkdownView, line: number): Promise<void> {
+		if (view.getMode() !== "source") {
+			await view.setState({ ...view.getState(), mode: "source" }, { history: false });
+		}
+		for (let attempt = 0; attempt < 30; attempt++) {
+			if (view.editor.lineCount() > line) {
+				const at = { line, ch: 0 };
+				view.editor.setCursor(at);
+				view.editor.scrollIntoView({ from: at, to: at }, true);
+				view.editor.focus();
+				return;
+			}
+			await new Promise((resolve) => window.setTimeout(resolve, 20));
+		}
+	}
+
 	private async openFileAsMindmap(file: TFile): Promise<void> {
 		const leaf = this.app.workspace.getLeaf(false);
 		await leaf.setViewState({

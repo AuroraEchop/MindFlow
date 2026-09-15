@@ -37,6 +37,9 @@ const EN = {
 	"shortcut.edit-annotation.name": "Add or edit the annotation",
 	"shortcut.edit-annotation.description":
 		"Open the note under the selected node for editing, or start one where there is none. The same as double-clicking an annotation.",
+	"shortcut.insert-block.name": "Add a text block",
+	"shortcut.insert-block.description":
+		"Write an indented block of prose under the selected node. It belongs to the node and folds with it, but carries no marker, so a long explanation does not read as a bullet.",
 	"shortcut.delete-node.name": "Delete the node",
 	"shortcut.delete-node.description":
 		"Delete the selected node and everything under it.",
@@ -144,14 +147,13 @@ const EN = {
 	"settings.inlineAnnotations.desc.5":
 		" is a blank line between them. Obsidian's own editing and reading views show such a line as an ordinary paragraph that starts with a colon. Double-click an annotation on the map, or pick Add annotation from a node's context menu, to edit one — the colon prefixes are written back to the note for you. Turn this off to read those lines as ordinary body cards again.",
 
-	"settings.nodeTools.name": "A card's own buttons",
-	"settings.nodeTools.desc":
-		"When the fold toggle and the add button appear. On selection keeps the map clean until a card is picked; on hover is what the map did before; always leaves them on every card.",
-	"settings.nodeTools.option.selection": "On the selected card only",
-	"settings.nodeTools.option.hover": "On the card under the pointer",
-	"settings.nodeTools.option.always": "Always",
+	"settings.toolbarVisibility.name": "Corner toolbar",
+	"settings.toolbarVisibility.desc":
+		"When the zoom, search and settings buttons are shown. On selection keeps them out of the way until a card is picked; always leaves them where they have always been.",
+	"settings.toolbarVisibility.option.selection": "Only while a card is selected",
+	"settings.toolbarVisibility.option.always": "Always",
 
-	"settings.toolbarDock.name": "Corner toolbar",
+	"settings.toolbarDock.name": "Corner toolbar position",
 	"settings.toolbarDock.desc":
 		"Where the buttons sit. Drag the toolbar itself to move it anywhere; the dock follows the drag and remembers where you left it.",
 	"settings.toolbarDock.option.bottom-right": "Bottom right",
@@ -217,6 +219,7 @@ const EN = {
 	"view.tool.shortcuts": "Keyboard shortcuts",
 	"view.tool.export": "Export",
 	"view.tool.settings": "Settings",
+	"view.block.placeholder": "Text block",
 
 	// --- the furniture on a card, read out by a screen reader ---------------
 	"view.node.expand": "Expand",
@@ -339,6 +342,9 @@ const ZH: Record<I18nKey, string> = {
 	"shortcut.edit-annotation.name": "添加或编辑注解",
 	"shortcut.edit-annotation.description":
 		"编辑选中节点下方的注解，没有则新建。等同于双击注解。",
+	"shortcut.insert-block.name": "添加文字块",
+	"shortcut.insert-block.description":
+		"在选中节点下写入一段缩进文字。它属于该节点、跟随折叠，但不带任何 Markdown 标记，所以长段说明不会看起来像一个列表项。",
 	"shortcut.delete-node.name": "删除节点",
 	"shortcut.delete-node.description": "删除选中节点及其下的全部内容。",
 	"shortcut.toggle-check.name": "勾选或取消勾选",
@@ -439,14 +445,13 @@ const ZH: Record<I18nKey, string> = {
 	"settings.inlineAnnotations.desc.5":
 		" 表示它们之间的空行。Obsidian 自身的编辑和阅读视图会把这样的行显示为以冒号开头的普通段落。在导图上双击注解，或从节点右键菜单选择「添加注解」即可编辑 —— 冒号前缀会替你写回笔记。关闭此项后，这些行会重新作为普通正文卡片显示。",
 
-	"settings.nodeTools.name": "卡片自带按钮",
-	"settings.nodeTools.desc":
-		"折叠开关和新建按钮何时出现。「仅选中时」让导图保持干净，直到选中某张卡片；「悬停时」是导图原本的行为；「始终」则每张卡片都常驻显示。",
-	"settings.nodeTools.option.selection": "仅选中的卡片",
-	"settings.nodeTools.option.hover": "指针悬停的卡片",
-	"settings.nodeTools.option.always": "始终显示",
+	"settings.toolbarVisibility.name": "角落工具栏",
+	"settings.toolbarVisibility.desc":
+		"缩放、搜索、设置这些按钮何时显示。「仅选中时」会让它们先让开，直到选中某张卡片；「始终」则一直留在原来的位置。",
+	"settings.toolbarVisibility.option.selection": "仅选中卡片时",
+	"settings.toolbarVisibility.option.always": "始终显示",
 
-	"settings.toolbarDock.name": "角落工具栏",
+	"settings.toolbarDock.name": "角落工具栏位置",
 	"settings.toolbarDock.desc":
 		"按钮停靠的位置。直接拖动工具栏本身即可移动；停靠方式会跟随拖动，并记住你放下的位置。",
 	"settings.toolbarDock.option.bottom-right": "右下角",
@@ -511,6 +516,7 @@ const ZH: Record<I18nKey, string> = {
 	"view.tool.shortcuts": "快捷键",
 	"view.tool.export": "导出",
 	"view.tool.settings": "设置",
+	"view.block.placeholder": "文字块",
 
 	// --- 卡片上的部件，供读屏软件朗读 -----------------------------------------
 	"view.node.expand": "展开",

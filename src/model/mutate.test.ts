@@ -5,6 +5,7 @@ import { parseMarkdown, serialize } from "./parse.ts";
 import { walk } from "./types.ts";
 import type { MindNode, ParsedDoc } from "./types.ts";
 import {
+	addBlock,
 	addChild,
 	addSibling,
 	addSiblingBefore,
@@ -208,6 +209,66 @@ test("delete removes the whole subtree and tidies the seam", () => {
 test("delete is rejected on the root", () => {
 	const p = parse();
 	assert.equal(deleteNode(p, p.root).ok, false);
+});
+
+// --- the indented text block ---------------------------------------------------
+
+/** Every line of the block a node owns, as written. */
+function bodyLines(parsed: ParsedDoc, node: MindNode): string[] {
+	const lines = serialize(parsed).split("\n");
+	return node.bodyRanges.flatMap(([from, to]) => lines.slice(from, to + 1));
+}
+
+test("a block lands under its node, indented, with no marker in front of it", () => {
+	const p = parse("# R\n\n- Parent\n- Other\n");
+	const out = addBlock(p, find(p, "Parent"), "A long explanation.").text;
+	const after = parseMarkdown(out, { title: "Fixture" });
+
+	// The block's range reaches back over the blank line that separates it from
+	// the title, which is how this parser files every paragraph after a node.
+	assert.deepEqual(
+		bodyLines(after, find(after, "Parent")).filter((line) => line !== ""),
+		["  A long explanation."],
+	);
+	// Not a node of its own: the block belongs to the item above it.
+	assert.throws(() => find(after, "A long explanation."));
+	// And the item after it is untouched.
+	assert.equal(find(after, "Other").text, "Other");
+});
+
+test("the block is separated from the title by a blank line", () => {
+	// A paragraph on the line right after a list item is a lazy continuation of
+	// it in CommonMark, so the title would swallow the block in any other tool
+	// that opens the note. This parser is lenient enough to tell them apart
+	// without the blank line -- which is exactly why the blank line is written
+	// rather than left out on the strength of that.
+	const p = parse("# R\n\n- Parent\n- Other\n");
+	const out = addBlock(p, find(p, "Parent"), "Explanation.").text;
+	assert.ok(out.includes("- Parent\n\n  Explanation."));
+});
+
+test("the block folds and deletes with the node it belongs to", () => {
+	const p = parse("# R\n\n- Parent\n- Other\n");
+	const out = addBlock(p, find(p, "Parent"), "Explanation.").text;
+	const after = parseMarkdown(out, { title: "Fixture" });
+	const parent = find(after, "Parent");
+	// The node's block now reaches past its own line, which is what a delete or
+	// a fold walks.
+	assert.ok(parent.blockEnd > parent.lineStart);
+	const removed = deleteNode(after, parent).text;
+	assert.ok(!removed.includes("Explanation."));
+});
+
+test("a block under a heading is prose, not a code block", () => {
+	// Four spaces under a heading is an indented code block, which is a
+	// different thing entirely.
+	const p = parse("# R\n\n## Section\n");
+	const out = addBlock(p, find(p, "Section"), "Prose.").text;
+	const after = parseMarkdown(out, { title: "Fixture" });
+	assert.deepEqual(
+		bodyLines(after, find(after, "Section")).filter((line) => line !== ""),
+		["Prose."],
+	);
 });
 
 /** Toggle `title` on a freshly parsed copy of `text`, the way the view does. */

@@ -27,6 +27,7 @@ import {
 	addChild,
 	addSibling,
 	addSiblingBefore,
+	addBlock,
 	bodyRangeText,
 	canMove,
 	canRename,
@@ -388,6 +389,8 @@ export class MindmapView extends TextFileView implements MapController {
 	private scopeHandlers: KeymapEventHandler[] = [];
 
 	private detachInteractions: (() => void) | null = null;
+	/** The corner, kept so its visibility can follow the selection. */
+	private toolbars: HTMLElement | null = null;
 	private popover: HTMLElement | null = null;
 	private dialog: BlockDialog | AnnotationDialog | null = null;
 	private needsFit = true;
@@ -613,7 +616,7 @@ export class MindmapView extends TextFileView implements MapController {
 		// should not pay for it at Obsidian startup.
 		void ensureMath();
 		this.detachInteractions = attachInteractions(this);
-		this.applyNodeTools();
+		this.applyToolbarVisibility();
 		this.addAction("file-text", t("view.action.editMarkdown"), () => {
 			void this.plugin.toggleLeaf(this.leaf);
 		});
@@ -708,21 +711,21 @@ export class MindmapView extends TextFileView implements MapController {
 		clearMathCache();
 		if (this.scope) this.bindScope(this.scope);
 		this.canvas.setOptions({ wheel: this.plugin.settings.wheel });
-		this.applyNodeTools();
+		this.applyToolbarVisibility();
 		this.render("settings");
 	}
 
 	/**
-	 * Which cards show their add button.
+	 * Whether the corner is showing.
 	 *
-	 * A class on the viewport rather than on every card: cards are rebuilt on
-	 * every paint, and this is a property of the map rather than of a card.
+	 * The setting says when and the selection says whether: on `selection` it is
+	 * the presence of a picked card that brings the toolbar out, which is why
+	 * this is called from `applySelection` as well as on the way in.
 	 */
-	private applyNodeTools(): void {
-		const mode = this.plugin.settings.nodeTools;
-		const viewport = this.canvas.viewport;
-		viewport.toggleClass("mm-tools-on-selection", mode === "selection");
-		viewport.toggleClass("mm-tools-always", mode === "always");
+	private applyToolbarVisibility(): void {
+		const hidden =
+			this.plugin.settings.toolbarVisibility === "selection" && this.selectedId() === null;
+		this.toolbars?.toggleClass("is-hidden", hidden);
 	}
 
 	bindings(): ShortcutBindings {
@@ -744,6 +747,7 @@ export class MindmapView extends TextFileView implements MapController {
 	 */
 	private buildToolbar(): void {
 		const bars = this.contentEl.createDiv({ cls: "mm-toolbars" });
+		this.toolbars = bars;
 		this.applyToolbarDock(bars);
 		this.attachToolbarDrag(bars);
 		const exports = bars.createDiv({ cls: ["mm-toolbar", "mm-toolbar-export"] });
@@ -784,6 +788,7 @@ export class MindmapView extends TextFileView implements MapController {
 		button(camera, "search", t("shortcut.search.name"), () => this.openSearch());
 		button(camera, "help-circle", t("view.tool.shortcuts"), () => this.showShortcuts());
 		button(camera, "settings", t("view.tool.settings"), () => this.openSettings());
+		this.applyToolbarVisibility();
 	}
 
 	/**
@@ -1904,8 +1909,9 @@ export class MindmapView extends TextFileView implements MapController {
 	private applySelection(): void {
 		for (const element of this.elements.values()) element.el.removeClass("is-selected");
 		const node = this.selectedNode();
-		if (!node) return;
-		this.elements.get(node.id)?.el.addClass("is-selected");
+		if (node) this.elements.get(node.id)?.el.addClass("is-selected");
+		// The corner follows the selection when the setting asks it to.
+		this.applyToolbarVisibility();
 	}
 
 	private selectedNode(): MindNode | null {
@@ -2023,10 +2029,7 @@ export class MindmapView extends TextFileView implements MapController {
 		// Read off the leaf rather than `this`: the view that was here is gone.
 		const view = this.leaf.view;
 		if (!(view instanceof MarkdownView)) return;
-		const at = { line, ch: 0 };
-		view.editor.setCursor(at);
-		view.editor.scrollIntoView({ from: at, to: at }, true);
-		view.editor.focus();
+		await this.plugin.revealLine(view, line);
 	}
 
 	selectedId(): string | null {
@@ -2178,6 +2181,26 @@ export class MindmapView extends TextFileView implements MapController {
 				return;
 			}
 			this.apply(addSibling(parsed, node, ""), true);
+		});
+	}
+
+	/**
+	 * Write an indented text block under the node, and open it to be written.
+	 *
+	 * Straight into the editor, the way double-clicking the card would: the
+	 * whole point of the key is to write something, and a block the user cannot
+	 * see yet is not something to leave them staring at.
+	 *
+	 * The placeholder is real text rather than an empty line, because an empty
+	 * one is dropped by the parser -- there would be no block to open, and the
+	 * line would sit in the note invisible to the map.
+	 */
+	addBlock(id: string): void {
+		this.withNode(id, (parsed, node) => {
+			const mutation = addBlock(parsed, node, t("view.block.placeholder"));
+			if (!mutation.ok) return;
+			this.apply(mutation);
+			this.openBody(id);
 		});
 	}
 

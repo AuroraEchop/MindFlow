@@ -211,8 +211,11 @@ const TABLE = [
 	{ action: "add-sibling", defaults: ["Enter"] },
 	{ action: "edit-title", defaults: ["F2"] },
 	{ action: "edit-annotation", defaults: ["Shift+Enter"] },
+	{ action: "insert-block", defaults: ["Mod+Enter"] },
 	{ action: "delete-node", defaults: ["Delete", "Backspace"] },
-	{ action: "toggle-check", defaults: ["Mod+Enter"] },
+	// Moved off Mod+Enter, which the text block now has: that one was asked for
+	// by name, and this is the same Enter family rather than a key of its own.
+	{ action: "toggle-check", defaults: ["Mod+Shift+Enter"] },
 	{ action: "expand-body", defaults: [] },
 	{ action: "indent", defaults: ["]"] },
 	{ action: "outdent", defaults: ["Shift+Tab"] },

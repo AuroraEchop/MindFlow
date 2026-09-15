@@ -728,19 +728,13 @@
 	pointer-events: auto;
 }
 
-/* Which cards show their add button. The rule above is the `hover` mode -- what
-   the map did before -- and these two narrow or widen it.
-   The fold toggle is deliberately in neither: it carries the count of what is
-   hidden, which is information rather than chrome, and hiding it would take the
-   count away with it. */
-.mm-tools-on-selection .mm-node:not(.is-selected):hover .mm-add {
+/* The corner keeps out of the way until a card is picked. Faded rather than
+   removed: it holds its place in the stack, so nothing shifts when it comes
+   back, and the transition is what makes it read as arriving rather than
+   appearing. */
+.mm-toolbars.is-hidden {
 	opacity: 0;
 	pointer-events: none;
-}
-
-.mm-tools-always .mm-add {
-	opacity: 1;
-	pointer-events: auto;
 }
 
 /* The copy of a card that follows the pointer while one is being dragged. On
@@ -753,12 +747,26 @@
 	pointer-events: none;
 	opacity: 0.6;
 	transform: translate(-50%, -50%);
+	transition: left 90ms ease, top 90ms ease, opacity 120ms ease;
 }
 
 .mm-drag-ghost .mm-card {
 	width: 100%;
 	height: 100%;
 	box-sizing: border-box;
+}
+
+/* Settled onto a drop the map will accept: the copy stops following the
+   pointer and stands where the card would land, in the same dashed outline
+   the drop zones are drawn with. */
+.mm-drag-ghost.is-snapped {
+	opacity: 0.85;
+}
+
+.mm-drag-ghost.is-snapped .mm-card {
+	border-style: dashed;
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
 }
 
 /* The settings window. Groups down the side, one page of rows beside them --
@@ -830,6 +838,7 @@
 	top: var(--mm-toolbar-y, 12px);
 	right: auto;
 	bottom: auto;
+	transition: opacity 160ms ease;
 }
 
 /* Where the corner has always been, and the default. */

@@ -132,8 +132,38 @@ export function setAnnotation(parsed: ParsedDoc, node: MindNode, text: string): 
 	return done(doc, node.lineStart);
 }
 
-export function addChild(
-	parsed: ParsedDoc,
+/**
+ * Add an indented text block under a node.
+ *
+ * The block is a child in everything that matters -- it belongs to the node, it
+ * is written under it, and it folds and moves with it -- but it is written as
+ * plain indented text rather than as a list item, so what lands in the note is
+ * the prose itself rather than a bullet in front of it. A long explanation or a
+ * snippet does not want a marker.
+ *
+ * The blank line is what makes it a block instead of more of the node's own
+ * sentence. A paragraph on the very next line is a lazy continuation of the
+ * item above it and would be read as part of the title, which is the one
+ * outcome that would silently eat what the user typed.
+ */
+export function addBlock(parsed: ParsedDoc, node: MindNode, text: string): Mutation {
+	if (node.virtual || node.lineStart < 0 || parsed.byId.get(node.id) !== node) {
+		return unchanged(parsed);
+	}
+	// A list item's continuation is indented to its content column; a heading
+	// owns what follows it at the margin. Four spaces under a heading would be a
+	// code block, which is a different thing entirely.
+	const indent =
+		node.kind === "listitem" ? node.indent + " ".repeat(node.marker.length) + node.spacing : "";
+	const insert = ["", ...text.split("\n").map((line) => (line === "" ? "" : indent + line))];
+	const doc = spliceLines(parsed.doc, node.lineStart + 1, 0, insert);
+	if (parsed.doc.eols.at(-1) === "" && doc !== parsed.doc) {
+		doc.eols[doc.eols.length - 1] = "";
+	}
+	return done(doc, node.lineStart + 2);
+}
+
+export function addChild(	parsed: ParsedDoc,
 	parent: MindNode,
 	text = "",
 ): Mutation {
