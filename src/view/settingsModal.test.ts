@@ -131,11 +131,13 @@ test("the rail has no height of its own to stop the rule short", () => {
 	);
 });
 
-test("the scrollbar keeps its distance from the window's own edge", () => {
-	// A bar flush against the edge sits where a hand lands to move the window:
-	// one grip of travel between them is what separates scrolling from dragging
-	// the window by accident.
+test("the scrollbar sits flush against the window's own edge", () => {
+	// Out where the hand expects a scrollbar, and away from the rows: a margin
+	// on the pane's right would drag the bar inward, over the settings.
 	const pane = properties(rule(PAGE).body);
-	const right = Number.parseFloat(pane.get("margin-right") ?? "");
-	assert.ok(!Number.isNaN(right) && right > 0, `the pane's right edge is flush (${right})`);
+	const right = pane.get("margin-right");
+	assert.ok(
+		right === undefined || right === "0",
+		`the pane keeps the scrollbar off the edge (margin-right: ${right})`,
+	);
 });

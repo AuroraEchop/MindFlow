@@ -1190,14 +1190,12 @@
 	border-right: 1px solid var(--background-modifier-border);
 }
 
-/* The one thing in the window that scrolls. Its right margin is what keeps the
-   scrollbar off the window's own edge -- a bar flush against it sits where a
-   hand lands to grab the window, and one page-width of travel apart is the
-   difference between scrolling and moving the window by accident. */
+/* The one thing in the window that scrolls, and its scrollbar sits flush
+   against the window's own edge: out where the hand expects a scrollbar, and
+   away from the rows, where a stray click lands on a setting instead. */
 .mm-settings-pane {
 	flex: 1 1 auto;
 	min-width: 0;
-	margin-right: 12px;
 	overflow-y: auto;
 	padding-right: 4px;
 }
