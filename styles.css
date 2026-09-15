@@ -1175,7 +1175,9 @@
 
 .mm-settings {
 	display: flex;
-	gap: 16px;
+	/* Wider than the default gutters would suggest: the rail's rule and the
+	   rows were reading as one block of text. */
+	gap: 24px;
 	/* Fill the fixed-height window, with the pane scrolling on its own. */
 	flex: 1 1 auto;
 	min-height: 0;
@@ -1198,11 +1200,16 @@
    against the window's own edge: out where the hand expects a scrollbar, and
    away from the rows, where a stray click lands on a setting instead. The
    padding is the gap between the rows and that bar -- the rows keep an inset
-   from the edge even though the bar does not. */
+   from the edge even though the bar does not.
+ *
+ * `scrollbar-gutter` reserves the bar's width on the pages that do not scroll,
+   so a short page's rows end at the same distance from the edge as a long
+   page's -- without it the two pages disagree by the width of the bar. */
 .mm-settings-pane {
 	flex: 1 1 auto;
 	min-width: 0;
 	overflow-y: auto;
+	scrollbar-gutter: stable;
 	padding-right: var(--size-4-4);
 }
 

@@ -156,4 +156,11 @@ test("the scrollbar sits flush against the window's own edge", () => {
 		inset !== "" && inset !== "0",
 		`the rows touch the scrollbar (padding-right: ${inset || "none"})`,
 	);
+	// And the bar's width is reserved on the pages that never scroll, so a
+	// short page's rows end as far from the edge as a long page's.
+	assert.equal(
+		pane.get("scrollbar-gutter"),
+		"stable",
+		"short pages end a scrollbar-width further right than long ones",
+	);
 });
