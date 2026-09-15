@@ -142,6 +142,76 @@ function translate(n: LayoutNode, dx: number, dy: number): void {
 	for (const c of n.children) translate(c, dx, dy);
 }
 
+/**
+ * How much vertical run a right-angled connector needs before its turn reads
+ * as a turn. A branch that landed nearer its parent's row than this gets moved
+ * onto the row outright: the run is residue of stacking, not a placement
+ * anybody asked for, and a step a few pixels tall is a kink in a line that
+ * ought to be straight.
+ */
+const ROW_SNAP = 12;
+
+/** The vertical extent of a subtree: node boxes, annotation strips included. */
+function subtreeExtent(n: LayoutNode): { top: number; bottom: number } {
+	let top = n.y;
+	let bottom = n.y + n.height;
+	for (const c of n.children) {
+		const e = subtreeExtent(c);
+		if (e.top < top) top = e.top;
+		if (e.bottom > bottom) bottom = e.bottom;
+	}
+	return { top, bottom };
+}
+
+/**
+ * Whether shifting one child's subtree vertically keeps it clear of its
+ * siblings. The gap between siblings is spacing the layout placed them with,
+ * so the shift may spend part of it, but it may not spend a sibling's box.
+ *
+ * Siblings are stacked vertically per side: in balanced mode the root's two
+ * groups sit beside each other and overlap vertically on purpose, so only the
+ * nearest sibling on the *same side* bounds the move.
+ */
+function canAlignWithSiblings(group: LayoutNode[], index: number, dy: number): boolean {
+	const child = group[index];
+	const extent = subtreeExtent(child);
+	const top = extent.top - dy;
+	const bottom = extent.bottom - dy;
+	let prev = index - 1;
+	while (prev >= 0 && group[prev].side !== child.side) prev--;
+	if (prev >= 0 && top < subtreeExtent(group[prev]).bottom) return false;
+	let next = index + 1;
+	while (next < group.length && group[next].side !== child.side) next++;
+	if (next < group.length && bottom > subtreeExtent(group[next]).top) return false;
+	return true;
+}
+
+/**
+ * Snap every branch that landed within a step's length of its parent's row
+ * onto that row, then recurse down the tree.
+ *
+ * Most of the vertical spread a parent sees is structure: children above and
+ * below it, joined by elbows as tall as the spread asks for. The residue is the
+ * branch a few pixels off the row for no reason stronger than where the
+ * stacking left it -- a group centred on a range whose first and last cards
+ * differ in height, a sibling's middle landing where it lands. The connector to
+ * that branch is a step shorter than the line is wide, which is the kink the
+ * map keeps being asked not to draw. Moving the branch's whole subtree onto the
+ * row is what the connector already assumes -- a parent and a child on one row
+ * -- so that is what this does, and where a sibling's box would not pay for the
+ * move, the elbow stays: an honest elbow beats a squeezed layout.
+ */
+function alignNearRows(n: LayoutNode): void {
+	for (let i = 0; i < n.children.length; i++) {
+		const child = n.children[i];
+		const dy = child.y + child.cardHeight / 2 - (n.y + n.cardHeight / 2);
+		if (dy === 0 || Math.abs(dy) >= ROW_SNAP) continue;
+		if (!canAlignWithSiblings(n.children, i, dy)) continue;
+		translate(child, 0, -dy);
+	}
+	for (const child of n.children) alignNearRows(child);
+}
+
 function mirror(n: LayoutNode, axis: number): void {
 	n.x = 2 * axis - n.x - n.cardWidth;
 	n.side = -1;
@@ -257,6 +327,8 @@ export function layoutTree(root: LayoutNode, opts: LayoutOptions): LayoutResult 
 		const axis = root.x + root.cardWidth / 2;
 		for (const child of left) mirror(child, axis);
 	}
+
+	alignNearRows(root);
 
 	return normalize(root, opts.padding);
 }

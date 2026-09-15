@@ -230,6 +230,49 @@ test("the root shares the single branch's row, whatever the subtree looks like",
 	assertNoOverlaps(root.children);
 });
 
+test("a balanced branch that lands a step away from the root's row is snapped onto it", () => {
+	// The same 9-pixel residue survives in balanced mode: the left group is
+	// centred on the range it covers, and a branch whose last leaf carries an
+	// annotation sits (first height - last height) / 4 below that range's
+	// middle. When the branch lands near enough to the root's row that its
+	// connector would be a step rather than a turn, the whole subtree moves onto
+	// the row -- the user's own reading of the bug: "move the left tree down a
+	// little". The subtree moves as one, so nothing inside it changes shape.
+	const heights = [36];
+	while (heights.length < 11) heights.push(36);
+	heights.push(72);
+	const root = build({
+		// One light branch on the right, the annotated one on the left.
+		children: [leaf(), { children: heights.map((h) => ({ ...leaf(260, h) })) }],
+	});
+	layoutTree(root, OPTS);
+
+	const branch = root.children.find((n) => n.children.length > 0)!;
+	assert.equal(branch.side, -1, "the fixture did not mirror the branch to the left");
+	const rootMiddle = root.y + root.cardHeight / 2;
+	const branchMiddle = branch.y + branch.cardHeight / 2;
+	const offRow = Math.abs(branchMiddle - rootMiddle);
+	assert.ok(offRow === 0 || offRow >= 12, `the branch sits ${offRow}px off the root's row`);
+	assertNoOverlaps(root.children);
+});
+
+test("a branch that cannot reach the row without hitting a sibling keeps its place", () => {
+	// Snapping spends the gap between siblings, and may not spend a sibling's
+	// box. With the gaps spent to nothing, a middle branch within a step of the
+	// row has nowhere to go -- the guard refuses the move, and the honest elbow
+	// stays. What may never happen is a snap that lands on a sibling: whatever
+	// the guard allows, the result still does not overlap.
+	const root = build({
+		children: [
+			{ ...leaf(120, 40), ann: 6 },
+			{ ...leaf(120, 30), ann: 2 },
+			{ ...leaf(120, 40), ann: 8 },
+		],
+	});
+	layoutTree(root, { ...OPTS, mode: "right", verticalGap: 0 });
+	assertNoOverlaps(root.children);
+});
+
 test("branch indices propagate to every descendant for colouring", () => {
 	const root = build({
 		children: [{ children: [{ children: [leaf()] }] }, { children: [leaf()] }],
