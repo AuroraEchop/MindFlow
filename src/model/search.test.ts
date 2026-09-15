@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { parseMarkdown } from "./parse.ts";
-import { hiddenAncestorKeys, refoldKeys, searchTree } from "./search.ts";
+import { foldedToFirstLevel, hiddenAncestorKeys, refoldKeys, searchTree } from "./search.ts";
 import { walk } from "./types.ts";
 import type { MindNode, ParsedDoc } from "./types.ts";
 
@@ -171,4 +171,51 @@ test("refoldKeys hands back every branch except the one holding the match", () =
 
 	// A match nothing was opened for still costs nothing.
 	assert.deepEqual(refoldKeys(new Set(), target), []);
+});
+
+// --- the fold shape, as a question a control can ask -----------------------------
+
+/** `foldedToFirstLevel` with the child test the view hands it. */
+function folded(parsed: ParsedDoc, collapsed: MindNode[]): boolean {
+	return foldedToFirstLevel(
+		parsed.root,
+		new Set(collapsed.map((node) => node.key)),
+		(node) => node.children.length > 0,
+	);
+}
+
+test("the fold shape says whether anything below the first level is open", () => {
+	const heading = nodeNamed(doc, "**bold** text");
+	const deep = nodeNamed(doc, "Deep");
+
+	// Nothing folded: both first-level sections are showing what is under them.
+	assert.equal(folded(doc, []), false);
+
+	// What `collapseAll` leaves behind: the first level itself, folded.
+	assert.equal(folded(doc, [heading, deep]), true);
+
+	// One of them open is enough to have something to collapse again.
+	assert.equal(folded(doc, [heading]), false);
+
+	// A fold deeper down does not answer the question: the first level is what
+	// decides whether the second level is on screen, and it is open.
+	assert.equal(folded(doc, [nodeNamed(doc, "two")]), false);
+
+	// A root folded by hand hides everything below it, first level included.
+	assert.equal(folded(doc, [doc.root]), true);
+});
+
+test("a first-level section with nothing to hide is not an open one", () => {
+	// `hasChildren` is why this is a parameter: a section whose only content is a
+	// paragraph has no second level to show, and counting it as open would leave
+	// a folded map offering "collapse all" for ever.
+	const parsed = parseMarkdown("# R\n\n## Empty\n\n## Full\n\n- under it\n", {
+		title: "Untitled",
+	});
+	assert.equal(folded(parsed, [nodeNamed(parsed, "Full")]), true);
+	assert.equal(folded(parsed, []), false);
+
+	// And a note with no second level anywhere is folded as far as it goes.
+	const flat = parseMarkdown("# R\n\njust a paragraph\n", { title: "Untitled" });
+	assert.equal(folded(flat, []), true);
 });

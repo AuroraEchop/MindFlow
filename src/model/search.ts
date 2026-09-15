@@ -98,3 +98,29 @@ export function refoldKeys(revealed: ReadonlySet<string>, keep: MindNode | null)
 	for (let p: MindNode | null = keep?.parent ?? null; p; p = p.parent) spared.add(p.key);
 	return [...revealed].filter((key) => !spared.has(key));
 }
+
+/**
+ * Whether nothing below the first level is open.
+ *
+ * The question a fold control asks when it has to say what pressing it will do:
+ * collapsing folds *from* the first level, so a map already at its first level
+ * is one where collapsing again would change nothing. The root is not one of the
+ * levels being asked about -- that fold leaves it open, and counting it would
+ * leave a map of a single branch with no way to ask for the whole thing -- but a
+ * root folded by hand hides everything below it, and that reads as folded.
+ *
+ * `hasChildren` is passed in rather than read off the node: whether a section has
+ * anything to hide depends on settings this layer does not know.
+ */
+export function foldedToFirstLevel(
+	root: MindNode,
+	collapsed: ReadonlySet<string>,
+	hasChildren: (node: MindNode) => boolean,
+): boolean {
+	if (collapsed.has(root.key)) return true;
+	for (const child of root.children) {
+		if (!hasChildren(child)) continue;
+		if (!collapsed.has(child.key)) return false;
+	}
+	return true;
+}
