@@ -556,6 +556,9 @@
 	font-weight: 550;
 }
 
+/* Every card but the pill gets the flattened style's radius: the pill keeps
+   the full one from the depth rule above -- the pill is the one thing that has
+   to read as the same anchor at every style. */
 .mm-card-minimal .mm-row,
 .mm-card-minimal .mm-node[data-depth="0"] .mm-row,
 .mm-card-minimal .mm-node[data-depth="1"] .mm-row,
@@ -563,18 +566,30 @@
 	border-radius: var(--mm-card-radius);
 }
 
-/* The padding is the flattened card's, on every depth: the pill and the blocks
-   are narrower than the default style's, and the field a card is edited in is
-   widened by exactly this pair, so they cannot disagree per depth.
+/* The pill keeps its full radius at every style: the flattening above would
+   otherwise out-specify the depth rule that draws it, and a pill is the one
+   shape that says "the centre" however the rest of the map is drawn. */
+.mm-card-minimal .mm-node[data-depth="0"] .mm-row {
+	border-radius: 999px;
+}
 
-   The type is not. A card that is drawn -- the pill, the blocks -- has to keep
-   the type that goes with its drawing, so this rule names only the depths that
-   are text. The two exceptions above are out of the list, not merely earlier in
-   it: this selector list carries a higher score than theirs, so leaving them in
-   would take the white-on-accent title away again. */
+/* The pill and the block keep the default style's padding. They are drawn here
+   at all because they have to read as the same two anchors the default style
+   shows, and a tighter pill or block is the one place the two styles would
+   visibly disagree. Only the depths that are text are flattened to the tighter
+   pair; the bare `.mm-card` is in the list for the copy a drag carries, which
+   has no `.mm-node` above it. */
+.mm-card-minimal .mm-node[data-depth="0"] .mm-card {
+	--mm-card-pad-y: 10px;
+	--mm-card-pad-x: 20px;
+}
+
+.mm-card-minimal .mm-node[data-depth="1"] .mm-card {
+	--mm-card-pad-y: 6px;
+	--mm-card-pad-x: 12px;
+}
+
 .mm-card-minimal .mm-card,
-.mm-card-minimal .mm-node[data-depth="0"] .mm-card,
-.mm-card-minimal .mm-node[data-depth="1"] .mm-card,
 .mm-card-minimal .mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-card {
 	--mm-card-pad-y: 4px;
 	--mm-card-pad-x: 10px;
