@@ -1196,12 +1196,14 @@
 
 /* The one thing in the window that scrolls, and its scrollbar sits flush
    against the window's own edge: out where the hand expects a scrollbar, and
-   away from the rows, where a stray click lands on a setting instead. */
+   away from the rows, where a stray click lands on a setting instead. The
+   padding is the gap between the rows and that bar -- the rows keep an inset
+   from the edge even though the bar does not. */
 .mm-settings-pane {
 	flex: 1 1 auto;
 	min-width: 0;
 	overflow-y: auto;
-	padding-right: 4px;
+	padding-right: var(--size-4-4);
 }
 
 .mm-settings-tab {

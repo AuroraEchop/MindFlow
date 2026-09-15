@@ -148,4 +148,12 @@ test("the scrollbar sits flush against the window's own edge", () => {
 		"0",
 		"the window's own inset keeps the scrollbar off the edge",
 	);
+	// The inset the window gave up comes back on the pane as the gap between
+	// the rows and the bar: the bar is at the edge, the text is not. The value
+	// is an Obsidian variable, so it is checked for presence, not size.
+	const inset = pane.get("padding-right") ?? "";
+	assert.ok(
+		inset !== "" && inset !== "0",
+		`the rows touch the scrollbar (padding-right: ${inset || "none"})`,
+	);
 });
