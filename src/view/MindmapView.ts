@@ -2198,7 +2198,13 @@ export class MindmapView extends TextFileView implements MapController {
 	addBlock(id: string): void {
 		this.withNode(id, (parsed, node) => {
 			const mutation = addBlock(parsed, node, t("view.block.placeholder"));
-			if (!mutation.ok) return;
+			if (!mutation.ok) {
+				// Loud rather than silent: the only reason this can fail is a node
+				// the note does not actually hold, and a key that does nothing at
+				// all reads as a broken key rather than as a refused one.
+				new Notice(t("view.notice.blockRefused"));
+				return;
+			}
 			// A folded node hides everything under it, its blocks included, and
 			// a block nobody can see is not an answer to "write one here". The
 			// same unfold `addChildTo` does, for the same reason.

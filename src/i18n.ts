@@ -266,6 +266,8 @@ const EN = {
 	// --- what the map says when it will not do something --------------------
 	"view.notice.rootRename": "This node is the file name. Rename the note to change it.",
 	"view.notice.rootDelete": "The root node cannot be deleted from the map.",
+	"view.notice.blockRefused":
+		"This node is not one the note holds, so there is nowhere to write a block under it.",
 	"view.notice.nothingToUndo": "Nothing to undo on the map.",
 	"view.notice.annotationChanged":
 		"This annotation changed while the editor was open. Copy your draft and reopen it before saving.",
@@ -301,6 +303,7 @@ const EN = {
 	"command.moveDown": "Move the selected node down among its siblings",
 	"command.openAsMindmap": "Open current note as a mind map",
 	"command.revealLineOnMap": "Reveal the line at the cursor on the map",
+	"command.settings": "Open the mind map settings",
 
 	// --- what the plugin says at load ---------------------------------------
 	"main.notice.onlyMarkdown": "Only markdown notes can be shown as a mind map.",
@@ -563,6 +566,7 @@ const ZH: Record<I18nKey, string> = {
 	// --- 导图拒绝执行某件事时的提示 ------------------------------------------
 	"view.notice.rootRename": "该节点就是文件名。要改名请重命名这篇笔记。",
 	"view.notice.rootDelete": "根节点无法从导图中删除。",
+	"view.notice.blockRefused": "这个节点不在笔记中，没有地方可以在它下面写入文字块。",
 	"view.notice.nothingToUndo": "导图上没有可撤销的操作。",
 	"view.notice.annotationChanged":
 		"编辑器打开期间该注解已被修改。请先复制你的草稿，重新打开后再保存。",
@@ -597,6 +601,7 @@ const ZH: Record<I18nKey, string> = {
 	"command.moveDown": "把选中节点在同级中下移",
 	"command.openAsMindmap": "以思维导图打开当前笔记",
 	"command.revealLineOnMap": "在导图中定位光标所在的行",
+	"command.settings": "打开思维导图设置",
 
 	// --- 加载时的提示 --------------------------------------------------------
 	"main.notice.onlyMarkdown": "只有 Markdown 笔记可以显示为思维导图。",

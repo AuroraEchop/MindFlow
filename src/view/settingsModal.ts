@@ -18,6 +18,7 @@ import type MindmapPlugin from "../main.ts";
  */
 export class SettingsModal extends Modal {
 	private readonly panel: SettingsPanel;
+	private readonly version: string;
 
 	/** Both are built in `onOpen`, and neither exists before it runs. */
 	private navEl!: HTMLElement;
@@ -28,6 +29,9 @@ export class SettingsModal extends Modal {
 	constructor(app: App, plugin: MindmapPlugin) {
 		super(app);
 		this.panel = new SettingsPanel(plugin);
+		// On the title so that "which build am I running" is answerable at a
+		// glance, without a console and without guessing at a file's timestamp.
+		this.version = plugin.manifest.version;
 		// A change of language has to redraw the page on screen, and this is the
 		// only thing that knows which page that is.
 		this.panel.repaint = () => this.show(this.page);
@@ -35,7 +39,7 @@ export class SettingsModal extends Modal {
 
 	override onOpen(): void {
 		this.modalEl.addClass("mm-settings-dialog");
-		this.setTitle(t("dialog.settings.title"));
+		this.setTitle(`${t("dialog.settings.title")} · ${this.version}`);
 
 		const body = this.contentEl.createDiv({ cls: "mm-settings" });
 		this.navEl = body.createDiv({ cls: "mm-settings-nav" });

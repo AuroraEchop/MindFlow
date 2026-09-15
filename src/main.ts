@@ -2,6 +2,7 @@ import { MarkdownView, Notice, Plugin, TFile, TFolder, debounce, setIcon } from 
 import type { ViewState, WorkspaceLeaf } from "obsidian";
 
 import { MINDMAP_VIEW_TYPE, MindmapView } from "./view/MindmapView.ts";
+import { SettingsModal } from "./view/settingsModal.ts";
 import { EXPORT_COMMANDS } from "./export/run.ts";
 import { resolveLanguage, setLanguage, t } from "./i18n.ts";
 import { DEFAULT_SETTINGS, MindmapSettingTab } from "./settings.ts";
@@ -200,6 +201,16 @@ export default class MindmapPlugin extends Plugin {
 				if (!checking) void this.setMindmapView(leaf);
 				return true;
 			},
+		});
+
+		// The dialog the map opens from its toolbar, reachable without the map --
+		// which matters more than it sounds: the toolbar hides itself until a card
+		// is picked, so this is the only way in from a palette, and the only way
+		// to answer "is the build I just installed the one running".
+		this.addCommand({
+			id: "open-settings",
+			name: t("command.settings"),
+			callback: () => new SettingsModal(this.app, this).open(),
 		});
 
 		// The note's half of the round trip Ctrl/Cmd+click starts from the map:
