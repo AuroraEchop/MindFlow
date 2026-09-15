@@ -127,7 +127,7 @@ function renderRange(el: HTMLElement, text: string, ctx: InlineContext): void {
 export function renderInline(el: HTMLElement, text: string): boolean {
 	el.empty();
 	if (text.trim() === "") {
-		el.createSpan({ cls: "mm-placeholder", text: "Empty" });
+		el.createSpan({ cls: "mm-placeholder", text: t("view.node.placeholder") });
 		return false;
 	}
 	const ctx: InlineContext = { sawMath: false };
@@ -145,17 +145,24 @@ export interface NodeElementOptions {
 	preformatted: boolean;
 	/** Draw the button that opens the block whole, in its own dialog. */
 	expandable: boolean;
-	/** Draw the hover button that adds a child. Off for note content. */
+	/** Draw the branch-side button at all. Off for note content. */
 	addable: boolean;
 	collapsed: boolean;
 	/** True when the node has anything to unfold, body cards included. */
 	hasChildren: boolean;
-	/** Shown on the toggle while collapsed. */
+	/** Shown on the count while collapsed. */
 	hiddenCount: number;
 }
 
 export interface NodeElement {
 	el: HTMLElement;
+	/**
+	 * The box the card is drawn with: the title's box and, under it, the
+	 * annotation strip. It is what carries the fill, the border and the ring, so
+	 * a card with an annotation is one card and not two.
+	 */
+	row: HTMLElement;
+	/** The title's own box: where the layout points, and where a drag starts. */
 	card: HTMLElement;
 	text: HTMLElement;
 	toggle: HTMLElement | null;
@@ -197,12 +204,12 @@ export function buildNodeElement(
 	if (node.virtual) el.addClass("is-virtual");
 	el.style.maxWidth = `${opts.maxWidth.node}px`;
 
-	// Two boxes, not one: `.mm-row` is the card's own row -- the card and the
-	// furniture positioned against it -- and the annotation strip hangs below
-	// it. Everything geometric refers to the row; the strip adds height beneath
-	// it, and may widen the node -- and with it the card, which fills the node
-	// box -- no further than the cap above. See the card-vs-node note in
-	// CLAUDE.md.
+	// Three boxes, two of them nested. `.mm-row` is the card the user sees: the
+	// title and, under it, the annotation strip, inside one drawn box. `.mm-card`
+	// is the title alone -- the drag handle, and the box the layout measures,
+	// centres on and anchors connectors at. The strip may widen the node, and
+	// with it the row, no further than the cap above; it is inside the row, so it
+	// never moves the card's own box. See the row-vs-card note in styles.css.
 	const row = el.createDiv({ cls: "mm-row" });
 	const card = row.createDiv({ cls: "mm-card" });
 
@@ -244,25 +251,34 @@ export function buildNodeElement(
 		if (!expand.firstElementChild) expand.setText("⤢");
 	}
 
-	// The furniture on the branch side of the card: the fold toggle, then the
-	// button that grows a child. One row, absolutely positioned against
-	// `.mm-row` rather than against `.mm-node`, so it stays centred on the card
-	// and flush against it however far the annotation reaches below.
+	// The furniture on the branch side of the card, in one row absolutely
+	// positioned against `.mm-row` rather than against `.mm-node`, so it stays
+	// centred on the card and flush against it however far the annotation
+	// reaches below.
+	//
+	// At most two circles, and at most one of them is the button. A closed
+	// branch shows the count of what is down there; the button is always the
+	// plus that grows a child -- hover is how the user says "work on this one",
+	// and the thing you do to the card you are working on is add to it. Closing
+	// an open branch is the toolbar's fold-all or a shortcut, not this button:
+	// a circle that switched between growing and closing made the same press
+	// mean opposite things depending on state the pointer cannot see.
 	let toggle: HTMLElement | null = null;
 	let add: HTMLElement | null = null;
 	if (opts.hasChildren || opts.addable) {
 		const tools = row.createDiv({ cls: "mm-tools" });
 
-		if (opts.hasChildren) {
+		// The count, and only while the branch is closed. It stays out of the
+		// button on purpose: the card's furniture is there before the pointer
+		// arrives, and the button is not, so a count kept on it would be a
+		// number the user can only read by hovering the thing they are about to
+		// press. It stays a control all the same -- reopening a branch without
+		// hovering to find the button again is the same gesture it always was.
+		if (opts.hasChildren && opts.collapsed) {
 			toggle = tools.createDiv({ cls: "mm-toggle" });
 			toggle.setAttribute("role", "button");
-			if (opts.collapsed) {
-				toggle.setText(String(opts.hiddenCount));
-				toggle.setAttribute("aria-label", t("view.node.expand"));
-			} else {
-				toggle.addClass("is-open");
-				toggle.setAttribute("aria-label", t("view.node.collapse"));
-			}
+			toggle.setAttribute("aria-label", t("view.node.expand"));
+			toggle.setText(String(opts.hiddenCount));
 		}
 
 		if (opts.addable) {
@@ -270,17 +286,25 @@ export function buildNodeElement(
 			add.setAttribute("role", "button");
 			add.setAttribute("aria-label", t("view.menu.addChild"));
 			setIcon(add, "plus");
+			// `setIcon` is silent when the id is not in the bundled set, which
+			// would leave an invisible but clickable circle on the card.
 			if (!add.firstElementChild) add.setText("+");
 		}
 	}
 
-	// Below the row, and a sibling of it: the strip is subordinate furniture,
-	// not part of the card. It is an ordinary block, so its width counts
-	// towards the node's `max-content`: a strip wider than the title widens
-	// the node, and the card with it, up to the cap the node carries.
+	// Inside the row, below the card: the strip is part of the card the user
+	// sees, so it is inside the box that is drawn, and the fill, the border and
+	// the ring all cover it. It is an ordinary block, so its width counts
+	// towards the node's `max-content`: a strip wider than the title widens the
+	// node, and the card with it, up to the cap the node carries.
+	//
+	// The title keeps its own box -- `.mm-card` -- and the layout is measured
+	// off that, not off the row: a connector still meets a card at the title,
+	// and a sibling is still spaced by the whole node. See the row-vs-card note
+	// in styles.css.
 	if (opts.annotation !== null) {
 		el.addClass("has-annotation");
-		const annotation = el.createDiv({ cls: "mm-text mm-annotation" });
+		const annotation = row.createDiv({ cls: "mm-text mm-annotation" });
 		annotation.setAttribute("aria-label", t("view.node.annotationAria"));
 		if (opts.annotation.trim() !== "") {
 			hasMath = renderInline(annotation, opts.annotation) || hasMath;
@@ -292,6 +316,7 @@ export function buildNodeElement(
 
 	return {
 		el,
+		row,
 		card,
 		text,
 		toggle,

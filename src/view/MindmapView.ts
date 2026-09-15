@@ -49,8 +49,14 @@ import {
 	toggleCheckbox,
 } from "../model/mutate.ts";
 import type { Mutation } from "../model/mutate.ts";
+import { toText, spliceLines } from "../model/lines.ts";
 
-import { hiddenAncestorKeys, refoldKeys, searchTree } from "../model/search.ts";
+import {
+	foldedToFirstLevel,
+	hiddenAncestorKeys,
+	refoldKeys,
+	searchTree,
+} from "../model/search.ts";
 import type { SearchQuery } from "../model/search.ts";
 
 import { createLayoutNode, layoutTree } from "../layout/tidyTree.ts";
@@ -66,7 +72,8 @@ import { clampedMargin, covers, emptyPlan, overlaps, planCull, viewBoxFrom } fro
 import type { CullPlan, ViewBox } from "./culling.ts";
 import { Perf } from "./perf.ts";
 import { createEdgeLayer, renderEdges } from "./edges.ts";
-import { buildNodeElement } from "./nodes.ts";
+import type { EdgeStyle } from "./edges.ts";
+import { buildNodeElement, renderInline } from "./nodes.ts";
 import type { NodeElement } from "./nodes.ts";
 import { nodeMaxWidth } from "./nodeWidth.ts";
 import { attachInteractions } from "./interactions.ts";
@@ -83,7 +90,6 @@ import { SearchBar } from "./searchBar.ts";
 import { SettingsModal } from "./settingsModal.ts";
 import { BlockDialog } from "./blockDialog.ts";
 import { AnnotationDialog } from "./annotationDialog.ts";
-import type { BlockDialogMode, DialogBlock } from "./blockDialog.ts";
 import {
 	clearMathCache,
 	ensureMath,
@@ -95,6 +101,7 @@ import {
 } from "./math.ts";
 import type { Direction, DropMode, MapController } from "./interactions.ts";
 import { resolveIndentUnit } from "../settings.ts";
+import { CARD_STYLE_CLASSES, cardStyleClass } from "./cardStyle.ts";
 import { pushRevision } from "../undoPark.ts";
 import type { UndoStacks } from "../undoPark.ts";
 import type MindmapPlugin from "../main.ts";
@@ -228,6 +235,20 @@ function previewOf(text: string): string {
 		clipped = true;
 	}
 	return clipped ? `${out.replace(/\s+$/, "")}…` : out;
+}
+
+/**
+ * A text block's preview, with blank lines and leading indentation stripped:
+ * the indent is structural metadata (it tells the parser this line belongs to
+ * the list item above), not something to read on the card.
+ */
+function blockPreviewOf(text: string): string {
+	const stripped = text
+		.split("\n")
+		.map((line) => line.replace(/^[ \t]+/, ""))
+		.filter((line) => line.trim() !== "")
+		.join("\n");
+	return previewOf(stripped);
 }
 
 /** Somewhere a keystroke means a character rather than a command. */
@@ -391,6 +412,8 @@ export class MindmapView extends TextFileView implements MapController {
 	private detachInteractions: (() => void) | null = null;
 	/** The corner, kept so its visibility can follow the selection. */
 	private toolbars: HTMLElement | null = null;
+	/** The fold button, kept because what it says depends on the map. */
+	private foldButton: HTMLElement | null = null;
 	private popover: HTMLElement | null = null;
 	private dialog: BlockDialog | AnnotationDialog | null = null;
 	private needsFit = true;
@@ -442,10 +465,16 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	/**
-	 * Puts the two scoped actions on the keys they are bound to now, replacing
+	 * Puts the scoped actions on the keys they are bound to now, replacing
 	 * whatever they were on before, so rebinding "Find in the map" moves this
 	 * path along with the viewport handler rather than leaving the old key half
 	 * working.
+	 *
+	 * `edit-annotation` is registered here rather than only in the viewport's
+	 * keydown handler because Ctrl+Enter is swallowed by Obsidian's keymap
+	 * pipeline before it reaches a DOM-level addEventListener. Scope registration
+	 * hooks into that pipeline directly, which is the only path the combination
+	 * survives on.
 	 */
 	private bindScope(scope: Scope): void {
 		for (const handler of this.scopeHandlers) scope.unregister(handler);
@@ -464,6 +493,18 @@ export class MindmapView extends TextFileView implements MapController {
 		// alone.
 		for (const combo of bindings["close-search"]) {
 			this.registerScoped(scope, combo, () => !this.closeSearch());
+		}
+		// edit-annotation is registered through scope because Ctrl+Enter does
+		// not reach the viewport's DOM keydown listener — Obsidian's keymap
+		// pipeline claims it first. Scope is the only way in.
+		for (const combo of bindings["edit-annotation"]) {
+			this.registerScoped(scope, combo, (evt) => {
+				const id = this.selectedId();
+				if (!id || this.isEditing()) return true;
+				evt.preventDefault();
+				this.editAnnotation(id);
+				return false;
+			});
 		}
 	}
 
@@ -728,6 +769,28 @@ export class MindmapView extends TextFileView implements MapController {
 		this.toolbars?.toggleClass("is-hidden", hidden);
 	}
 
+	/**
+	 * What the fold button says, which is what pressing it would do.
+	 *
+	 * Follows the map rather than the click, so it is written on every paint
+	 * instead of once when the bar was built -- but only when the answer changed,
+	 * because a paint is not the place to rebuild an icon.
+	 */
+	private applyFoldButton(): void {
+		const el = this.foldButton;
+		if (!el) return;
+		const folded = this.isFoldedToFirstLevel();
+		const state = folded ? "folded" : "open";
+		if (el.dataset.foldState === state) return;
+		el.dataset.foldState = state;
+		el.empty();
+		setIcon(el, folded ? "chevrons-up-down" : "chevrons-down-up");
+		el.setAttribute(
+			"aria-label",
+			t(folded ? "view.tool.expandAll" : "view.tool.collapseAll"),
+		);
+	}
+
 	bindings(): ShortcutBindings {
 		this.shortcutBindings ??= resolveBindings(this.plugin.settings.shortcuts);
 		return this.shortcutBindings;
@@ -736,59 +799,63 @@ export class MindmapView extends TextFileView implements MapController {
 	// --- toolbar --------------------------------------------------------------
 
 	/**
-	 * The corner of the map: the exports in a panel of their own, above the
-	 * panel holding the camera and the map.
+	 * The corner of the map: one bar, holding everything the map can be asked to
+	 * do.
 	 *
-	 * Two blocks rather than one crowded one, and the exports are the block that
-	 * sits on top: underneath is where the pointer has always found the zoom, so
-	 * the camera panel keeps the bottom edge. The column sits on `contentEl`,
-	 * outside `.mm-viewport` and so outside `.mm-content` -- which is what the
-	 * export clones, and the reason none of these buttons can end up in a file.
+	 * It was two bars -- the export on its own, in a panel above the rest -- left
+	 * over from when the export was four buttons and needed the width. One button
+	 * alone in a panel of its own spends a whole row of the corner on nothing,
+	 * and the formats are behind it either way.
+	 *
+	 * The bar sits on `contentEl`, outside `.mm-viewport` and so outside
+	 * `.mm-content` -- which is what the export clones, and the reason none of
+	 * these buttons can end up in a file.
 	 */
 	private buildToolbar(): void {
 		const bars = this.contentEl.createDiv({ cls: "mm-toolbars" });
 		this.toolbars = bars;
 		this.applyToolbarDock(bars);
 		this.attachToolbarDrag(bars);
-		const exports = bars.createDiv({ cls: ["mm-toolbar", "mm-toolbar-export"] });
-		const camera = bars.createDiv({ cls: ["mm-toolbar", "mm-toolbar-camera"] });
+		const bar = bars.createDiv({ cls: "mm-toolbar" });
 
 		const button = (
-			bar: HTMLElement,
 			icon: string,
 			label: string,
-			onClick: (ev: MouseEvent) => void,
+			onClick: (ev: MouseEvent, el: HTMLElement) => void,
 		): HTMLElement => {
 			const el = bar.createDiv({ cls: "mm-tool", attr: { "aria-label": label } });
 			setIcon(el, icon);
 			el.addEventListener("click", (ev) => {
 				ev.preventDefault();
-				onClick(ev);
+				onClick(ev, el);
 			});
 			return el;
 		};
 
-		// One button rather than four. The export is one thing the user wants to
-		// do, and which file it lands in is the second question -- so the second
-		// question is a menu, and the corner keeps its width for the camera. The
-		// palette still lists all four by name, which is where a format becomes
-		// something worth binding a key to.
-		button(exports, "share", t("view.tool.export"), (ev) => this.showExportMenu(ev));
+		// The export leads the bar. Every other button here has a place the
+		// pointer already knows, and a button added at the far end would push all
+		// of them along. The palette still lists the four formats by name, which
+		// is where a format becomes something worth binding a key to.
+		button("share", t("view.tool.export"), (_ev, el) => this.showExportMenu(el));
 
-		// The camera buttons borrow the shortcut table's own wording, so a
-		// tooltip and the settings row that rebinds the same action agree.
-		button(camera, "zoom-in", t("shortcut.zoom-in.name"), () => this.canvas.zoomBy(1.2));
-		button(camera, "zoom-out", t("shortcut.zoom-out.name"), () => this.canvas.zoomBy(1 / 1.2));
-		button(camera, "maximize", t("shortcut.fit.name"), () => this.fit());
-		button(camera, "crosshair", t("shortcut.centre-selection.name"), () =>
+		// The rest borrow the shortcut table's own wording, so a tooltip and the
+		// settings row that rebinds the same action agree.
+		button("zoom-in", t("shortcut.zoom-in.name"), () => this.canvas.zoomBy(1.2));
+		button("zoom-out", t("shortcut.zoom-out.name"), () => this.canvas.zoomBy(1 / 1.2));
+		button("maximize", t("shortcut.fit.name"), () => this.fit());
+		button("crosshair", t("shortcut.centre-selection.name"), () =>
 			this.centreOnSelection(),
 		);
-		button(camera, "chevrons-up-down", t("view.tool.expandAll"), () => this.expandAll());
-		button(camera, "chevrons-down-up", t("view.tool.collapseAll"), () => this.collapseAll());
-		button(camera, "search", t("shortcut.search.name"), () => this.openSearch());
-		button(camera, "help-circle", t("view.tool.shortcuts"), () => this.showShortcuts());
-		button(camera, "settings", t("view.tool.settings"), () => this.openSettings());
+		// One button for the fold shape rather than two. See `toggleFoldAll`: of
+		// the pair it replaces, one does nothing in either state.
+		this.foldButton = button("chevrons-up-down", t("view.tool.expandAll"), () =>
+			this.toggleFoldAll(),
+		);
+		button("search", t("shortcut.search.name"), () => this.openSearch());
+		button("help-circle", t("view.tool.shortcuts"), () => this.showShortcuts());
+		button("settings", t("view.tool.settings"), () => this.openSettings());
 		this.applyToolbarVisibility();
+		this.applyFoldButton();
 	}
 
 	/**
@@ -898,12 +965,22 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	/**
-	 * The formats, under the button that offers them.
+	 * The export formats, as a menu hanging off the button that offers them.
 	 *
 	 * Built from the same list the palette registers its commands from, so the
 	 * two cannot drift and neither is the source of truth on its own.
+	 *
+	 * Anchored to the button rather than to the pointer. The bar is docked at the
+	 * bottom of the map by default, where a menu dropped at the pointer's own
+	 * coordinates runs off the bottom of the window; `showAtPosition` moves a
+	 * menu up over the point it is given when it does not fit below, and over to
+	 * the left when it does not fit on the right. Which edge of the button that
+	 * point is depends on which way the menu opens -- see below -- so the menu
+	 * lands clear of the bar either way, and `overlap` is what lines it up with
+	 * the button instead of beside it. The button's own document is passed on:
+	 * the map can be open in a popout, and a menu belongs to its window.
 	 */
-	private showExportMenu(ev: MouseEvent): void {
+	private showExportMenu(el: HTMLElement): void {
 		const menu = new Menu();
 		for (const entry of EXPORT_COMMANDS) {
 			menu.addItem((item) =>
@@ -913,7 +990,18 @@ export class MindmapView extends TextFileView implements MapController {
 					.onClick(() => this.exportAs(entry.format)),
 			);
 		}
-		menu.showAtMouseEvent(ev);
+		const rect = el.getBoundingClientRect();
+		// Which way the menu opens decides which edge it hangs from, because
+		// `showAtPosition` lifts a menu that does not fit below so that it *ends*
+		// at the point it was given. Anchored to the button's bottom edge, that
+		// point is inside the bar and the menu lands on top of it -- which is
+		// exactly what it was doing. The top edge puts the same lift clear above.
+		// With room below, the bottom edge is the right anchor and the menu hangs
+		// under the bar, so the direction is measured rather than assumed.
+		const MENU_HEIGHT = 160;
+		const room = (el.doc.defaultView?.innerHeight ?? 0) - rect.bottom;
+		const y = room >= MENU_HEIGHT ? rect.bottom : rect.top;
+		menu.showAtPosition({ x: rect.left, y, width: rect.width, overlap: true }, el.doc);
 	}
 
 	/**
@@ -1160,6 +1248,39 @@ export class MindmapView extends TextFileView implements MapController {
 		this.markAnchor(this.selectedNode()?.key ?? this.parsed?.root.key);
 	}
 
+	/**
+	 * Whether the map is showing no more than its first level -- the rule itself
+	 * is `foldedToFirstLevel`, in the model, where it can be tested.
+	 *
+	 * Asked of the fold keys rather than of what is on screen: the cull decides
+	 * what is drawn, and a map scrolled away from its second level has not been
+	 * folded.
+	 */
+	private isFoldedToFirstLevel(): boolean {
+		const parsed = this.parsed;
+		if (!parsed) return true;
+		const showBody = this.plugin.settings.showBodyNodes;
+		return foldedToFirstLevel(
+			parsed.root,
+			this.collapsedKeys,
+			(node) => this.childCount(node, showBody) > 0,
+		);
+	}
+
+	/**
+	 * The fold button, as one control rather than two.
+	 *
+	 * Two buttons asked the user to know the shape of their own map before
+	 * choosing one of them, and one of the two does nothing in either state: "expand
+	 * all" on an open map, "collapse all" on one already at its first level. So
+	 * the button is the shape that is not the current one, and which that is
+	 * follows from the map.
+	 */
+	toggleFoldAll(): void {
+		if (this.isFoldedToFirstLevel()) this.expandAll();
+		else this.collapseAll();
+	}
+
 	expandAll(): void {
 		this.markGlobalAnchor();
 		this.foldFrom(Infinity);
@@ -1222,12 +1343,17 @@ export class MindmapView extends TextFileView implements MapController {
 		index: number,
 	): MindNode {
 		const id = `${owner.id}${BODY_ID_MARK}${index}`;
+		const raw = bodyRangeText(parsed, range);
+		// A text block (indented prose under a list item) carries its indent as
+		// structural metadata; strip it from the preview so the card reads as
+		// the text itself. Fenced code keeps its indent, which carries meaning.
+		const isCode = /^\s*(```|~~~)/.test(raw);
 		const body: MindNode = {
 			id,
 			key: `${owner.key}${BODY_ID_MARK}${index}`,
 			kind: "body",
 			virtual: true,
-			text: previewOf(bodyRangeText(parsed, range)),
+			text: isCode ? previewOf(raw) : blockPreviewOf(raw),
 			level: owner.level,
 			indentWidth: 0,
 			indent: "",
@@ -1369,7 +1495,7 @@ export class MindmapView extends TextFileView implements MapController {
 				maxWidth: nodeMaxWidth(node.kind, hasAnnotation, s.maxNodeWidth),
 				branchColors: s.branchColors,
 				preformatted: isBody && looksPreformatted(node.text),
-				expandable: isBody,
+				expandable: false,
 				addable: !isBody,
 				collapsed,
 				hasChildren: this.childCount(node, showBody) > 0,
@@ -1410,6 +1536,15 @@ export class MindmapView extends TextFileView implements MapController {
 		// Obsidian's workspace observes for resizes, and nothing a paint does may
 		// give that observer a reason to fire.
 		this.canvas.content.toggleClass("mm-dense", visible.length > DENSE_NODE_COUNT);
+
+		// One class per drawn style, and none at all for the default: `bordered`
+		// is what the stylesheet draws with no style class, so it is the absence
+		// of one rather than a class of its own. On the content layer so that a
+		// drag can carry the same class onto its copy.
+		const drawn = cardStyleClass(this.plugin.settings.cardStyle);
+		for (const cls of CARD_STYLE_CLASSES) {
+			this.canvas.content.toggleClass(cls, cls === drawn);
+		}
 
 		// Attached only now that every card exists: one mutation of the live
 		// tree per paint, and the measuring pass below is the first thing that
@@ -1583,9 +1718,9 @@ export class MindmapView extends TextFileView implements MapController {
 			if (!element || element.offscreen) continue;
 			layout.width = element.el.offsetWidth;
 			layout.height = element.el.offsetHeight;
-			// The card apart from the node: an annotation strip is inside
-			// `.mm-node` and below `.mm-card`, and the layout centres, anchors
-			// and offsets on the card while spacing siblings by the node.
+			// The card apart from the node: the annotation strip is inside `.mm-row`
+			// under `.mm-card`, so the layout centres, anchors and offsets on the
+			// title's box while spacing siblings by the whole node.
 			layout.cardWidth = element.card.offsetWidth;
 			layout.cardHeight = element.card.offsetHeight;
 			element.measured = true;
@@ -1598,6 +1733,12 @@ export class MindmapView extends TextFileView implements MapController {
 
 		this.applySelection();
 		this.applySearchState();
+		// A card this paint rebuilt came out of `buildNodeElement` without the
+		// markers the live one was carrying, and the card being written in is the
+		// one that may not lose them.
+		this.markEditing();
+		// The fold shape is settled by now, and the fold button says what it is.
+		this.applyFoldButton();
 		this.place(rootLayout, anchor, reason, true);
 	}
 
@@ -1916,7 +2057,17 @@ export class MindmapView extends TextFileView implements MapController {
 
 	private selectedNode(): MindNode | null {
 		if (!this.parsed || this.selectionKey === null) return null;
-		return this.parsed.byKey.get(this.selectionKey) ?? null;
+		// A body card's key is `ownerKey + BODY_ID_MARK + index`. It is not
+		// in `parsed.byKey` because the node is virtual, so look it up in
+		// `this.layoutNodes` instead — the layout has the synthesised node.
+		const fromParsed = this.parsed.byKey.get(this.selectionKey);
+		if (fromParsed) return fromParsed;
+		// Body card: find it in the layout by id, which was derived from
+		// the key during `childrenOf`.
+		for (const layout of this.layoutNodes) {
+			if (layout.node.key === this.selectionKey) return layout.node;
+		}
+		return null;
 	}
 
 	private layoutFor(id: string): LayoutNode | null {
@@ -1924,6 +2075,36 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	// --- mutation plumbing ----------------------------------------------------
+
+	/**
+	 * What an inline editor wrote, with one case the writes alone do not cover.
+	 *
+	 * An editor that ends on an empty field takes the card's placeholder out with
+	 * the text and leaves nothing behind it -- and both editors that can end that
+	 * way leave something else too: the title's has emptied the card's text, and
+	 * the annotation's may have had to synthesise a strip to type into. When the
+	 * field was already empty there is nothing to write, and `renameNode` and
+	 * `setAnnotation` both say so.
+	 *
+	 * `apply` is right to do nothing with that: a note that did not change must
+	 * not be saved again, and must not earn an undo step. But the card on screen
+	 * is not the note, and it is the card the editor has left wrong -- bare, with
+	 * no way to tell it is a card, sized to nothing; or a line taller than it was,
+	 * under a strip that is not there any more. So an edit that ended empty is
+	 * repainted whatever the mutation says, and a write that did happen goes the
+	 * usual way, where the repaint comes with it.
+	 *
+	 * Blank is the only ending that shows this: an editor that ends on the text
+	 * it started with leaves that text in place, and the card looks untouched.
+	 *
+	 * The title's editor also puts its own field back on the way out, and does
+	 * not wait for this: it is the one thing that knows what it emptied, and the
+	 * repaint is the second half of the story rather than the first.
+	 */
+	private applyEdit(mutation: Mutation, endedEmpty: boolean): void {
+		if (endedEmpty && !mutation.ok) this.render("edit");
+		else this.apply(mutation);
+	}
 
 	private apply(mutation: Mutation, edit = false): void {
 		if (!mutation.ok) return;
@@ -2010,6 +2191,35 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	/**
+	 * Mark the card that is being written in, and unmark the one that was.
+	 *
+	 * The marker is derived from `editingId` rather than added and removed in
+	 * pairs because the order a new editor and a closing one take in is not
+	 * fixed: `discardIdleEdit` closes the old field after the new one has already
+	 * recorded itself, and an unmark that ran late would come off the field the
+	 * user is typing in.
+	 */
+	private markEditing(): void {
+		for (const [id, element] of this.elements) {
+			element.el.toggleClass("is-editing", id === this.editingId);
+		}
+	}
+
+	/**
+	 * Done with a card: it is no longer being written in.
+	 *
+	 * The id is passed rather than read off `editingId` because of the same
+	 * ordering: by the time an idle editor is closed, `editingId` may be the card
+	 * the user has just opened, and an unconditional clear there would leave the
+	 * map thinking nothing is being edited at all.
+	 */
+	private endEditing(id: string): void {
+		if (this.editingId !== id) return;
+		this.editingId = null;
+		this.markEditing();
+	}
+
+	/**
 	 * Take the user to where this card is written.
 	 *
 	 * The map and the note share one leaf, so this is a change of view type and
@@ -2038,14 +2248,18 @@ export class MindmapView extends TextFileView implements MapController {
 
 	select(id: string | null): void {
 		const before = this.selectionKey;
-		// A body card is not something the map can act on, so picking one drops
-		// the selection rather than leaving the previous card looking active.
-		if (id === null || this.bodyNodes.has(id)) {
+		if (id === null) {
 			this.selectionKey = null;
 		} else {
-			const node = this.parsed?.byId.get(id);
+			// A body card is a virtual node not in `parsed.byId`, so it has
+			// no key there. Its key is stored in `bodyNodes` so selection
+			// can still point at it and the keyboard can still act on it.
+			const ref = this.bodyNodes.get(id);
+			const node = ref ? this.parsed?.byKey.get(ref.ownerKey) : this.parsed?.byId.get(id);
 			if (!node) return;
-			this.selectionKey = node.key;
+			this.selectionKey = ref
+				? `${ref.ownerKey}${BODY_ID_MARK}${ref.index}`
+				: node.key;
 		}
 		this.applySelection();
 		// Moving the selection is the one change that never repaints, so it is
@@ -2054,10 +2268,13 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	beginEdit(id: string): void {
-		// Body cards hold lines the note owns, not a node title. Editing one means
-		// the block editor, which rewrites exactly those lines and nothing else.
+		// Body cards are edited in place, not through a dialog.
 		if (this.bodyNodes.has(id)) {
-			this.openBody(id);
+			const ref = this.bodyNodes.get(id)!;
+			const node = this.parsed?.byKey.get(ref.ownerKey);
+			if (node && node.bodyRanges[ref.index]) {
+				this.beginBodyEdit(node.id, node.bodyRanges[ref.index][0]);
+			}
 			return;
 		}
 
@@ -2078,6 +2295,7 @@ export class MindmapView extends TextFileView implements MapController {
 			element.offscreen = false;
 			element.el.removeClass("is-offscreen");
 		}
+		this.markEditing();
 
 		const el = element.text;
 		// Recorded before the first keystroke can arrive, so "has anything been
@@ -2108,13 +2326,21 @@ export class MindmapView extends TextFileView implements MapController {
 			const value = el.textContent ?? "";
 			el.contentEditable = "false";
 			el.removeClass("is-editing");
-			this.editingId = null;
+			// The field is the card's own text box, and it was emptied to hold
+			// what the user was writing. An edit that ends on nothing has to hand
+			// it back the way a paint would draw it -- the placeholder that says
+			// there is something to write here -- rather than leaving a box with
+			// nothing in it. A write repaints this element away a moment later;
+			// this is for the endings that write nothing, and it does not depend
+			// on that repaint arriving. See `applyEdit`.
+			if (value.trim() === "") renderInline(el, "");
+			this.endEditing(id);
 			this.editTextEl = null;
 			this.editStartText = null;
 			this.endEdit = null;
 			if (save) {
 				this.withNode(id, (parsed, current) => {
-					this.apply(renameNode(parsed, current, value));
+					this.applyEdit(renameNode(parsed, current, value), value.trim() === "");
 				});
 			} else {
 				this.render("edit");
@@ -2195,22 +2421,25 @@ export class MindmapView extends TextFileView implements MapController {
 	 * one is dropped by the parser -- there would be no block to open, and the
 	 * line would sit in the note invisible to the map.
 	 */
+	/**
+	 * Write an indented text block under the node, and focus it for editing
+	 * in place — no dialog. The block lands on the map as a body card, and
+	 * that card's text element is turned into a contentEditable field, the
+	 * same way a node title is edited. Enter saves, Escape cancels.
+	 */
 	addBlock(id: string): void {
 		this.withNode(id, (parsed, node) => {
 			const mutation = addBlock(parsed, node, t("view.block.placeholder"));
 			if (!mutation.ok) {
-				// Loud rather than silent: the only reason this can fail is a node
-				// the note does not actually hold, and a key that does nothing at
-				// all reads as a broken key rather than as a refused one.
 				new Notice(t("view.notice.blockRefused"));
 				return;
 			}
-			// A folded node hides everything under it, its blocks included, and
-			// a block nobody can see is not an answer to "write one here". The
-			// same unfold `addChildTo` does, for the same reason.
 			this.collapsedKeys.delete(node.key);
-			this.apply(mutation);
-			this.openBody(id);
+			this.apply(mutation, true);
+			// After the repaint, the new body card exists on the map. Find it
+			// by locating the body range whose first line is the one the
+			// mutation focused, and start editing it in place.
+			this.beginBodyEdit(id, mutation.focusLine);
 		});
 	}
 
@@ -2224,7 +2453,175 @@ export class MindmapView extends TextFileView implements MapController {
 		});
 	}
 
+	/**
+	 * Find the body card that contains `focusLine` and start editing it in
+	 * place, the same way a node title is edited. Enter saves with
+	 * `replaceBodyRange`, Escape cancels.
+	 */
+	private beginBodyEdit(ownerId: string, focusLine: number): void {
+		const parsed = this.parsed;
+		if (!parsed) return;
+		const owner = parsed.byId.get(ownerId);
+		if (!owner) return;
+
+		// Find which body range contains the focused line.
+		let rangeIndex = -1;
+		for (let i = 0; i < owner.bodyRanges.length; i++) {
+			const [s, e] = owner.bodyRanges[i];
+			if (focusLine >= s && focusLine <= e) {
+				rangeIndex = i;
+				break;
+			}
+		}
+		if (rangeIndex < 0) return;
+
+		// The body card's id is `ownerId${BODY_ID_MARK}${rangeIndex}`.
+		const bodyId = `${ownerId}${BODY_ID_MARK}${rangeIndex}`;
+		const element = this.elements.get(bodyId);
+		if (!element) return;
+
+		const range = owner.bodyRanges[rangeIndex];
+		const rawText = bodyRangeText(parsed, range);
+		const isCode = /^\s*(```|~~~)/.test(rawText);
+		// The indent the block carries in the source: a list item's body is
+		// indented to its content column. Shown to the user without it, and
+		// put back on save so the note stays the same to the parser.
+		const indent =
+			owner.kind === "listitem"
+				? owner.indent + " ".repeat(owner.marker.length) + owner.spacing
+				: "";
+		// Display text: strip blank lines and leading indent so the user edits
+		// the prose itself, not the structural whitespace around it.
+		const displayText = isCode
+			? rawText
+			: rawText
+					.split("\n")
+					.map((line) => line.replace(/^[ \t]+/, ""))
+					.filter((line) => line.trim() !== "")
+					.join("\n");
+		const key = owner.key;
+
+		if (element.offscreen) {
+			element.offscreen = false;
+			element.el.removeClass("is-offscreen");
+		}
+
+		this.editingId = bodyId;
+		// Picked before the field is focused, so that "being edited" always comes
+		// with "picked": the frame round the card and the fill it is drawn with
+		// belong to the picked state, and a block opened from the keyboard is
+		// picked by nothing else. `select` only writes classes -- it does not
+		// touch the focus -- so the field still gets it.
+		this.select(bodyId);
+		this.markEditing();
+		this.discardIdleEdit();
+
+		const el = element.text;
+		this.editTextEl = el;
+		this.editStartText = displayText;
+		el.empty();
+		el.setText(displayText);
+		el.addClass("is-editing");
+		try {
+			el.contentEditable = "plaintext-only";
+		} catch {
+			el.contentEditable = "true";
+		}
+		if (el.contentEditable !== "plaintext-only") el.contentEditable = "true";
+		el.focus();
+
+		const r = document.createRange();
+		r.selectNodeContents(el);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(r);
+
+		let settled = false;
+		const finish = (save: boolean): void => {
+			if (settled) return;
+			settled = true;
+			const value = el.textContent ?? "";
+			el.contentEditable = "false";
+			el.removeClass("is-editing");
+			this.endEditing(bodyId);
+			this.editTextEl = null;
+			this.editStartText = null;
+			this.endEdit = null;
+			if (save && value !== displayText) {
+				// Re-indent the edited text before writing it back: each line
+				// gets the owner's indent prefix so the parser still sees the
+				// block as belonging to the node above.
+				const toWrite = isCode
+					? value
+					: value
+							.split("\n")
+							.map((line) => (line === "" ? "" : indent + line))
+							.join("\n");
+				const snapshot = parseMarkdown(this.data, this.parseOptions());
+				const current = snapshot.byKey.get(key);
+				if (current && current.bodyRanges[rangeIndex]) {
+					this.apply(replaceBodyRange(snapshot, current, rangeIndex, toWrite));
+				} else {
+					this.render("edit");
+				}
+			} else {
+				this.render("edit");
+			}
+			this.canvas.viewport.focus({ preventScroll: true });
+		};
+
+		this.endEdit = finish;
+
+		el.addEventListener("keydown", (ev) => {
+			const action = resolveAction(this.bindings(), comboFromEvent(ev));
+			if (action !== null && survivesEditing(action, this.editingHasTyped())) {
+				ev.preventDefault();
+				ev.stopPropagation();
+				if (action === "undo") this.undo();
+				else this.redo();
+				return;
+			}
+			ev.stopPropagation();
+			if (ev.key === "Enter") {
+				ev.preventDefault();
+				finish(true);
+			} else if (ev.key === "Escape") {
+				ev.preventDefault();
+				finish(false);
+			}
+		});
+		el.addEventListener("blur", () => finish(true), { once: true });
+	}
+
 	removeNode(id: string): void {
+		// A body card stands for a range of lines in the note; deleting it
+		// means removing those lines. The body node is virtual (not in
+		// `parsed.byId`), so it is resolved through `bodyNodes` instead.
+		const ref = this.bodyNodes.get(id);
+		if (ref) {
+			const parsed = this.parsed;
+			const owner = parsed?.byKey.get(ref.ownerKey);
+			if (!parsed || !owner || !owner.bodyRanges[ref.index]) return;
+			const range = owner.bodyRanges[ref.index];
+			const text = bodyRangeText(parsed, range).trim();
+			// An annotation (lines starting with ": ") is deleted entirely
+			// when its content is empty — no leftover ":" line. A code block
+			// or other note content is kept even when empty, because an
+			// empty code block is still a block the user may fill in.
+			const isAnnotation = owner.annotationIndices.includes(ref.index);
+			if (isAnnotation && text.replace(/^:\s*/, "").trim() === "") {
+				// Clear the annotation text; `setAnnotation` with "" removes
+				// the annotation lines entirely.
+				this.apply(setAnnotation(parsed, owner, ""));
+				return;
+			}
+			// Non-annotation body: replace the range with a single empty line
+			// (keeps the block, just clears it) or delete it entirely. The
+			// user asked for deletion, so splice the range out.
+			const doc = spliceLines(parsed.doc, range[0], range[1] - range[0] + 1, []);
+			this.apply({ text: toText(doc), focusLine: owner.lineStart, ok: true });
+			return;
+		}
 		this.withNode(id, (parsed, node) => {
 			if (!node.parent) {
 				new Notice(t("view.notice.rootDelete"));
@@ -2323,6 +2720,27 @@ export class MindmapView extends TextFileView implements MapController {
 		);
 	}
 
+	/** How the map draws its connectors now, so a drag's guide can match them. */
+	edgeStyle(): EdgeStyle {
+		return this.plugin.settings.edgeStyle;
+	}
+
+	dropParent(targetId: string, mode: DropMode): string | null {
+		const target = this.parsed?.byId.get(targetId);
+		if (!target) return null;
+		// Beside the target means among its siblings, so the parent is the one
+		// they share; inside it means the target itself.
+		const parent = mode === "child" ? target : target.parent;
+		return parent?.id ?? null;
+	}
+
+	bodyOwner(id: string): string | null {
+		// A body card's id is its owner's with the body mark and an index on the
+		// end, so the owner is everything ahead of the mark.
+		const mark = id.indexOf(BODY_ID_MARK);
+		return mark <= 0 ? null : id.slice(0, mark);
+	}
+
 	/**
 	 * Follow a link written in a note-content card.
 	 *
@@ -2353,19 +2771,13 @@ export class MindmapView extends TextFileView implements MapController {
 		const menu = new Menu();
 
 		// A content card stands for lines the note owns: it can be read and
-		// edited, but never renamed, moved or given children.
+		// edited in place, but never renamed, moved or given children.
 		if (this.bodyNodes.has(id)) {
-			menu.addItem((item) =>
-				item
-					.setTitle(t("view.menu.showBlock"))
-					.setIcon("maximize-2")
-					.onClick(() => this.expandBody(id)),
-			);
 			menu.addItem((item) =>
 				item
 					.setTitle(t("view.menu.editBlock"))
 					.setIcon("pencil")
-					.onClick(() => this.openBody(id, "edit")),
+					.onClick(() => this.beginEdit(id)),
 			);
 			menu.showAtMouseEvent(ev);
 			return;
@@ -2812,110 +3224,121 @@ export class MindmapView extends TextFileView implements MapController {
 
 	// --- the block dialog -----------------------------------------------------
 
+	/** Open the block for in-place editing, the same as double-clicking it. */
 	expandBody(id: string): void {
-		this.openBody(id, "read");
+		this.beginEdit(id);
 	}
 
-	/** Edit the annotation independently of the title and other body content. */
+	/**
+	 * Edit the annotation in place on the card, no dialog. The annotation
+	 * strip (`.mm-annotation`) becomes a contentEditable field; Enter saves
+	 * with `setAnnotation`, Escape cancels. If the node has no annotation
+	 * yet, a temporary strip is created on the fly so there is something to
+	 * type into — saving writes it into the note, cancelling removes it.
+	 */
 	editAnnotation(id: string): void {
 		const parsed = this.parsed;
 		const node = parsed?.byId.get(id);
 		if (!parsed || !node || node.virtual || !this.plugin.settings.inlineAnnotations) return;
-		this.closePopover();
-		this.closeDialog();
+
+		const element = this.elements.get(id);
+		if (!element) return;
+
 		const original = annotationText(parsed, node);
 		const key = node.key;
-		this.dialog = new AnnotationDialog(this.app, node.text, original, (text) => {
-			const snapshot = parseMarkdown(this.data, this.parseOptions());
-			const current = snapshot.byKey.get(key);
-			if (!this.plugin.settings.inlineAnnotations || !current || annotationText(snapshot, current) !== original) {
-				new Notice(t("view.notice.annotationChanged"));
-				return false;
+
+		// Find the existing annotation strip, or create a temporary one so
+		// there is something to focus. The strip is the last child of `.mm-row`,
+		// inside the box the card is drawn with; `buildNodeElement` only draws
+		// it when the node already has an annotation, so one that does not has
+		// to be synthesised here -- and into the same row, or it would land
+		// outside the card.
+		let annotationEl = element.el.querySelector<HTMLElement>(".mm-annotation");
+		if (!annotationEl) {
+			annotationEl = element.row.createDiv({ cls: "mm-text mm-annotation" });
+			element.el.addClass("has-annotation");
+		}
+
+		this.editingId = id;
+		this.select(id);
+		this.markEditing();
+		this.discardIdleEdit();
+
+		annotationEl.empty();
+		annotationEl.setText(original);
+		annotationEl.addClass("is-editing");
+		try {
+			annotationEl.contentEditable = "plaintext-only";
+		} catch {
+			annotationEl.contentEditable = "true";
+		}
+		if (annotationEl.contentEditable !== "plaintext-only") annotationEl.contentEditable = "true";
+		annotationEl.focus();
+
+		const range = document.createRange();
+		range.selectNodeContents(annotationEl);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+
+		this.editTextEl = annotationEl;
+		this.editStartText = original;
+
+		let settled = false;
+		const finish = (save: boolean): void => {
+			if (settled) return;
+			settled = true;
+			const value = annotationEl!.textContent ?? "";
+			annotationEl!.contentEditable = "false";
+			annotationEl!.removeClass("is-editing");
+			this.endEditing(id);
+			this.editTextEl = null;
+			this.editStartText = null;
+			this.endEdit = null;
+			if (save) {
+				const snapshot = parseMarkdown(this.data, this.parseOptions());
+				const current = snapshot.byKey.get(key);
+				if (current && this.plugin.settings.inlineAnnotations && annotationText(snapshot, current) === original) {
+					this.applyEdit(setAnnotation(snapshot, current, value), value.trim() === "");
+				} else {
+					new Notice(t("view.notice.annotationChanged"));
+					this.render("edit");
+				}
+			} else {
+				// Cancel: if the strip was temporary and nothing was saved,
+				// repaint to take it back off the card.
+				this.render("edit");
 			}
-			this.apply(setAnnotation(snapshot, current, text));
-			return true;
-		}, () => { this.dialog = null; });
-		this.dialog.open();
-	}
+			this.canvas.viewport.focus({ preventScroll: true });
+		};
 
-	/** Show the original, untruncated source of a note-content block. */
-	openBody(id: string, mode: BlockDialogMode = "edit"): void {
-		const parsed = this.parsed;
-		if (!parsed) return;
+		this.endEdit = finish;
 
-		// A body card shows its own block; anything else shows all of its blocks.
-		const ref = this.bodyNodes.get(id);
-		const node = ref ? parsed.byKey.get(ref.ownerKey) : parsed.byId.get(id);
-		if (!node || node.bodyRanges.length === 0) return;
-		const only = ref?.index;
-		if (only !== undefined && !node.bodyRanges[only]) return;
-
-		const blocks: DialogBlock[] = [];
-		node.bodyRanges.forEach((range, index) => {
-			// One block when a body card asked; otherwise every block the node
-			// owns -- except its annotation, which is not note content the way a
-			// paragraph is. It has its own editor, and `childrenOf` has already
-			// kept it from becoming a card of its own.
-			if (only === undefined ? node.annotationIndices.includes(index) : index !== only) {
+		annotationEl.addEventListener("keydown", (ev) => {
+			const action = resolveAction(this.bindings(), comboFromEvent(ev));
+			if (action !== null && survivesEditing(action, this.editingHasTyped())) {
+				ev.preventDefault();
+				ev.stopPropagation();
+				if (action === "undo") this.undo();
+				else this.redo();
 				return;
 			}
-			blocks.push({ index, range, text: bodyRangeText(parsed, range) });
+			ev.stopPropagation();
+			if (ev.key === "Enter") {
+				ev.preventDefault();
+				finish(true);
+			} else if (ev.key === "Escape") {
+				ev.preventDefault();
+				finish(false);
+			}
 		});
-		// Nothing left to show: a node whose only body ranges are annotations has
-		// no note content, exactly like one with no body ranges at all.
-		if (blocks.length === 0) return;
-
-		// Only one panel at a time: a dialog opened over the shortcuts popover
-		// would leave it stranded behind the modal's own backdrop.
-		this.closePopover();
-		this.closeDialog();
-
-		const key = node.key;
-		this.dialog = new BlockDialog(this.app, {
-			title: node.text || t("dialog.block.title"),
-			sourcePath: this.file?.path ?? "",
-			blocks,
-			mode,
-			onSave: (edits) => this.saveBody(key, edits),
-			onClosed: () => {
-				this.dialog = null;
-				this.canvas.viewport.focus({ preventScroll: true });
-			},
-		});
-		this.dialog.open();
+		annotationEl.addEventListener("blur", () => finish(true), { once: true });
 	}
 
 	private closeDialog(): void {
 		const dialog = this.dialog;
 		this.dialog = null;
 		dialog?.close();
-	}
-
-	/**
-	 * Write edited blocks back, one splice each.
-	 *
-	 * Re-parsing between edits is what keeps this correct: every splice can move
-	 * the lines under the ranges that follow it, and the node is re-found by key
-	 * rather than held across the change.
-	 */
-	private saveBody(key: string, edits: Array<{ index: number; text: string }>): void {
-		const before = this.data;
-		let text = this.data;
-
-		// Highest index first so the earlier ranges' line numbers stay valid.
-		for (const edit of [...edits].sort((a, b) => b.index - a.index)) {
-			const snapshot = parseMarkdown(text, this.parseOptions());
-			const current = snapshot.byKey.get(key);
-			if (!current) break;
-			const result = replaceBodyRange(snapshot, current, edit.index, edit.text);
-			if (!result.ok) break;
-			text = result.text;
-		}
-		if (text === before) return;
-
-		pushRevision(this.undoStack, before);
-		this.redoStack = [];
-		this.commit(text, -1, false);
 	}
 
 	// --- export ---------------------------------------------------------------

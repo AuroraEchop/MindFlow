@@ -1,4 +1,7 @@
 import type { Canvas } from "./canvas.ts";
+import { CARD_STYLE_CLASSES } from "./cardStyle.ts";
+import { edgePath } from "./edges.ts";
+import type { EdgeStyle } from "./edges.ts";
 import { comboFromEvent, resolveAction } from "./shortcuts.ts";
 import type { ShortcutBindings } from "./shortcuts.ts";
 
@@ -9,6 +12,42 @@ export type Direction = "up" | "down" | "left" | "right";
  * as a child, or beside it as a sibling above or below.
  */
 export type DropMode = "child" | "before" | "after";
+
+/**
+ * A place the dragged card could land.
+ *
+ * A place in the tree, never a pixel: where the card comes to rest is the
+ * layout's business, worked out from the tree once the move is applied, and the
+ * map stays regularly spaced whatever the pointer did.
+ */
+interface DropSlot {
+	targetId: string;
+	mode: DropMode;
+}
+
+/** A card's box in screen space, as a drag measures it. */
+interface CardBox {
+	id: string;
+	left: number;
+	right: number;
+	top: number;
+	bottom: number;
+}
+
+/**
+ * The area a note-content card covers, and the card that owns it.
+ *
+ * Not a `CardBox`, because it is never a target in its own right: it is the area
+ * of some other card, kept apart so that a pointer landing on prose can be
+ * handed to the card the prose belongs to.
+ */
+interface BodyArea {
+	owner: string;
+	left: number;
+	right: number;
+	top: number;
+	bottom: number;
+}
 
 /** Everything the interaction layer needs from the view. */
 export interface MapController {
@@ -47,6 +86,26 @@ export interface MapController {
 
 	canDrop(id: string, targetId: string, mode: DropMode): boolean;
 	move(id: string, targetId: string, mode: DropMode): void;
+	/** How the map draws its connectors now, so a drag's guide can match them. */
+	edgeStyle(): EdgeStyle;
+	/**
+	 * The card a slot would make the parent of the dragged node.
+	 *
+	 * Landing inside a card makes that card the parent. Landing beside one makes
+	 * the parent the card's own parent, because beside means among its siblings
+	 * -- and the parent is the card the new connector would actually be drawn
+	 * from. Null when the slot has no parent at all, which is the root's level.
+	 */
+	dropParent(targetId: string, mode: DropMode): string | null;
+	/**
+	 * The card a note-content card belongs to, given a body node's id.
+	 *
+	 * A body card is the note's own prose drawn as a card. There is no node
+	 * behind one, so nothing can be moved *to* it -- but it covers a large part
+	 * of any map with prose in it, and a drag over that area is aiming at the
+	 * card the prose hangs under. Null for an id that is not a body card's.
+	 */
+	bodyOwner(id: string): string | null;
 
 	undo(): void;
 	redo(): void;
@@ -59,8 +118,31 @@ export interface MapController {
 
 const DRAG_THRESHOLD = 5;
 
-/** Clearance between the dragged copy and the card it is previewing against. */
-const LANDING_GAP = 14;
+/**
+ * How far the pointer may sit from the nearest card and still land on it.
+ *
+ * Measured to the card's box rather than to a point on it -- see `boxDistance`
+ * -- and wide on purpose. A map's cards are stacked vertically and are much
+ * wider than they are tall, so the pointer is routinely most of a card's width
+ * to the side of the card it means; a radius tight enough to call that a miss
+ * is the radius that makes the target hard to hit. Past this the drag has no
+ * target at all, so a card carried well clear of the map lands nowhere rather
+ * than being claimed by whichever card happens to be least far away.
+ */
+const DROP_RADIUS = 320;
+
+/**
+ * How much a pixel of vertical gap counts against a pixel of horizontal gap
+ * when a drag picks the card it is aiming at.
+ *
+ * Cards are wide and short and their siblings are stacked vertically, so a map
+ * has far more horizontal room than vertical. Weighed flat, a card two hundred
+ * pixels above the pointer but only a hundred to its left beats the card the
+ * pointer is level with -- and that is the wrong answer, because the row a
+ * pointer means is the row it is level with. Weighing the vertical gap heavier
+ * restores the reading a user has of their own gesture.
+ */
+const VERTICAL_PRIORITY = 3;
 
 /** The four navigation actions, as the direction each one steps in. */
 const DIRECTIONS: Record<
@@ -134,14 +216,6 @@ export function attachInteractions(controller: MapController): () => void {
 			}
 		}
 
-		// Ahead of the fallback below: the expand button sits inside the card,
-		// so letting the click through would also drop the selection.
-		const expand = target.closest<HTMLElement>(".mm-expand");		if (expand) {
-			const id = nodeIdFrom(expand);
-			if (id) controller.expandBody(id);
-			ev.stopPropagation();
-			return;
-		}
 		const add = target.closest<HTMLElement>(".mm-add");
 		if (add) {
 			const id = nodeIdFrom(add);
@@ -180,7 +254,6 @@ export function attachInteractions(controller: MapController): () => void {
 
 	on(viewport, "dblclick", (ev) => {
 		const target = ev.target as HTMLElement;
-		if (target.closest(".mm-expand")) return;
 		const id = nodeIdFrom(target);
 		if (!id) return;
 		ev.preventDefault();
@@ -197,55 +270,247 @@ export function attachInteractions(controller: MapController): () => void {
 	let origin = { x: 0, y: 0 };
 	let dragging = false;
 	let hovered: HTMLElement | null = null;
-	let hoveredMode: DropMode = "child";
-
-	const DROP_CLASSES = [
-		"is-drop-target",
-		"is-drop-before",
-		"is-drop-after",
-		"is-drop-invalid",
-	];
+	const DROP_CLASSES = ["is-drop-target", "is-drop-before", "is-drop-after"];
 
 	const clearHover = (): void => {
 		hovered?.removeClasses(DROP_CLASSES);
 		hovered = null;
 	};
 
+	/** The element a node id is drawn in, or null once it has left the map. */
+	const nodeElement = (id: string): HTMLElement | null =>
+		viewport.querySelector<HTMLElement>(`.mm-node[data-id="${CSS.escape(id)}"]`);
+
+	// Every card in the map, the areas its note content covers, and the slot the
+	// last frame settled on. All of it is read once, when the drag starts.
+	let cards: CardBox[] = [];
+	let bodies: BodyArea[] = [];
+	let activeSlot: DropSlot | null = null;
+
 	/**
-	 * Which third of the card the pointer is over.
+	 * Measure every card the dragged node could land beside or inside.
 	 *
-	 * A rect is the right tool here -- this is hit-testing in screen space, where
-	 * the pointer already lives, not measuring a card for layout.
+	 * Once per drag, not once per frame. Taking a rect off every card forces a
+	 * layout, and a card in the air moves nothing: the camera is still and the
+	 * tree is unchanged, so the only thing that differs between two frames is
+	 * where the pointer is. Measuring up front also pins the cards to the moment
+	 * one was picked up, so a target cannot drift under the pointer mid-drag.
 	 *
-	 * The card's rect, not the node's: the highlight these zones choose is drawn
-	 * on `.mm-card`, and an annotation strip stretches `.mm-node` below it. Read
-	 * off the node, the "after" band would sit at the bottom of the strip while
-	 * the line marking it was drawn along the bottom of the card.
+	 * Boxes and not slot points, because the pointer's distance to the *card* is
+	 * what decides the target -- see `boxDistance`. Which of the card's three
+	 * slots it means is settled afterwards, from the pointer's height.
 	 */
-	const zoneOf = (node: HTMLElement, clientY: number): DropMode => {
-		const el = node.querySelector<HTMLElement>(".mm-card") ?? node;
-		const rect = el.getBoundingClientRect();
-		const edge = Math.min(rect.height * 0.3, 14);
-		if (clientY < rect.top + edge) return "before";
-		if (clientY > rect.bottom - edge) return "after";
-		return "child";
+	const measureCards = (): void => {
+		cards = [];
+		bodies = [];
+		for (const node of viewport.querySelectorAll<HTMLElement>(".mm-node")) {
+			const id = node.dataset.id;
+			if (!id || id === dragId) continue;
+			// The card, not the row. `.mm-row` is the drawn box the annotation
+			// sits inside, so a title narrower or shorter than its annotation
+			// would put the row's box somewhere the card's is not. `.mm-card` is
+			// the box the layout measures and every anchor in the map is taken
+			// from, so it is the one that answers "where is this card".
+			const card = node.querySelector<HTMLElement>(".mm-card") ?? node;
+			const rect = card.getBoundingClientRect();
+			// A body card holds the note's own prose. Nothing can be moved to one
+			// -- there is no node behind it -- but it is the largest thing on a
+			// map that has prose in it, and refusing it outright left the whole
+			// area it covers as a place a drag found nothing at all. So the area
+			// is handed to the card that owns the prose: a pointer over it is a
+			// pointer over that card.
+			if (node.dataset.kind === "body") {
+				const owner = controller.bodyOwner(id);
+				if (owner) {
+					bodies.push({
+						owner,
+						left: rect.left,
+						right: rect.right,
+						top: rect.top,
+						bottom: rect.bottom,
+					});
+				}
+				continue;
+			}
+			cards.push({
+				id,
+				left: rect.left,
+				right: rect.right,
+				top: rect.top,
+				bottom: rect.bottom,
+			});
+		}
 	};
 
 	/**
-	 * The zone under the pointer, falling back to "child" where reordering is
-	 * refused. That fallback is what keeps a first-level card behaving exactly as
-	 * it always has over its whole surface, rather than growing a silent dead
-	 * band along each edge.
+	 * How far the pointer is from a card, measured to its box.
+	 *
+	 * To the box and not to a point on it, because of the shape a map has: cards
+	 * are much wider than they are tall and their siblings are stacked
+	 * vertically, so the gap between the pointer and the card it means is mostly
+	 * horizontal. Measured to the card's middle that gap reads as enormous -- the
+	 * pointer has to be brought most of the way home before anything lights up,
+	 * which was the complaint. Measured to the box, pointing anywhere level with
+	 * a card is pointing at that card, however far along it.
 	 */
-	const dropModeFor = (
-		id: string,
-		targetId: string,
-		el: HTMLElement,
-		clientY: number,
-	): DropMode => {
-		const zone = zoneOf(el, clientY);
-		if (zone !== "child" && !controller.canDrop(id, targetId, zone)) return "child";
-		return zone;
+	const boxDistance = (card: CardBox, x: number, y: number): number => {
+		const dx = Math.max(card.left - x, 0, x - card.right);
+		const dy = Math.max(card.top - y, 0, y - card.bottom);
+		return Math.hypot(dx, dy * VERTICAL_PRIORITY);
+	};
+
+	/**
+	 * Which of a card's slots the pointer means.
+	 *
+	 * The card is cut in two down its middle, and which half the pointer is in
+	 * decides between "beside it" and "inside it".
+	 *
+	 * The right half is where a card's own children are drawn, so a pointer
+	 * level with the card and past its middle is asking the card to open up and
+	 * take the node. The left half is the card's own column, shared with the
+	 * rest of its row, so a pointer there means the row -- and then the height
+	 * says which way along it: above the middle is before the card, below it is
+	 * after.
+	 *
+	 * Cut horizontally, because a map runs left to right. The vertical position
+	 * cannot separate "inside" from "beside" for the same reason: a card's
+	 * children are drawn level with it, not below it.
+	 */
+	const modeFor = (card: CardBox, x: number, y: number): DropMode => {
+		const midX = card.left + (card.right - card.left) / 2;
+		const midY = card.top + (card.bottom - card.top) / 2;
+		if (y >= card.top && y <= card.bottom && x >= midX) return "child";
+		return y < midY ? "before" : "after";
+	};
+
+	/**
+	 * The slot the pointer is over, or null when no card is within reach.
+	 *
+	 * The card picks the target and the pointer's height picks the slot.
+	 *
+	 * A card that refuses the slot keeps its place in the running, taken as
+	 * "inside it" instead. That fallback is what stops a card growing a dead
+	 * band along its edges: reordering is refused on a first-level branch -- the
+	 * layout splits those between the root's two sides by weight, so their order
+	 * is not the user's to set -- and without the fallback, aiming just below
+	 * one of those cards found nothing at all and the card would not stick.
+	 *
+	 * `canDrop` is asked before the distance is compared rather than after: a
+	 * slot that would be refused must not win the comparison and leave the guide
+	 * pointing somewhere the node cannot go.
+	 */
+	const nearestSlot = (x: number, y: number): DropSlot | null => {
+		const id = dragId;
+		if (id === null) return null;
+
+		// Over a note's prose the answer is the card the prose belongs to, and
+		// the only thing a drop there can mean is "inside it".
+		for (const body of bodies) {
+			if (x < body.left || x > body.right || y < body.top || y > body.bottom) continue;
+			if (controller.canDrop(id, body.owner, "child")) {
+				return { targetId: body.owner, mode: "child" };
+			}
+		}
+
+		let best: DropSlot | null = null;
+		let nearest = DROP_RADIUS;
+		for (const card of cards) {
+			const mode = modeFor(card, x, y);
+			const usable = controller.canDrop(id, card.id, mode)
+				? mode
+				: controller.canDrop(id, card.id, "child")
+					? "child"
+					: null;
+			if (usable === null) continue;
+			const distance = boxDistance(card, x, y);
+			if (distance >= nearest) continue;
+			best = { targetId: card.id, mode: usable };
+			nearest = distance;
+		}
+		return best;
+	};
+
+	/**
+	 * The line a drag draws: the connector the move would make.
+	 *
+	 * One end is on the card being carried, the other on the card that would
+	 * become its parent -- so what is drawn is the connection itself, in the
+	 * map's own terms, rather than a pointer at a spot on the canvas. Both ends
+	 * sit on the middle of a left or right face, which is where `edges.ts`
+	 * anchors every other connector in the map, and the path comes from the same
+	 * `edgePath` in the user's chosen style.
+	 *
+	 * On the viewport and not in the map: the endpoints are screen points, and
+	 * the viewport is the one element outside the camera's transform. The map's
+	 * own connector layer is rewritten whole on every redraw, so a path added
+	 * there would survive precisely one frame.
+	 */
+	let guide: SVGSVGElement | null = null;
+	let guideLine: SVGPathElement | null = null;
+	let guideOrigin = { x: 0, y: 0 };
+
+	/**
+	 * The card being carried, as a box around the pointer the copy is centred on.
+	 *
+	 * The copy is a clone of `.mm-row` and the card inside it can be smaller --
+	 * an annotation widens the row without widening the card -- so the card's
+	 * offset from the pointer is kept here. Measured once, when the drag starts:
+	 * the copy hangs on `document.body`, and reading it back every frame would
+	 * cost a layout for a box that only ever moves with the pointer.
+	 */
+	let carried = { width: 0, height: 0, dx: 0, dy: 0 };
+
+	const startGuide = (): void => {
+		const box = viewport.getBoundingClientRect();
+		guideOrigin = { x: box.left, y: box.top };
+		guide = createSvg("svg");
+		guide.addClass("mm-drag-guide");
+		guide.setAttribute("width", String(box.width));
+		guide.setAttribute("height", String(box.height));
+		guideLine = createSvg("path");
+		guideLine.addClass("mm-drag-guide-line");
+		guideLine.setAttribute("fill", "none");
+		guide.appendChild(guideLine);
+		viewport.appendChild(guide);
+	};
+
+	/** Draw the connector the slot under the pointer would create, if any. */
+	const drawGuide = (slot: DropSlot | null): void => {
+		if (!guideLine) return;
+
+		const parentId = slot ? controller.dropParent(slot.targetId, slot.mode) : null;
+		const parentCard = parentId
+			? nodeElement(parentId)?.querySelector<HTMLElement>(".mm-card")
+			: null;
+		if (!parentCard) {
+			// Nothing to connect to: either the drag has no slot, or the slot's
+			// parent is a card the map is not drawing. A line here would be a
+			// claim about a connector that is not going to exist.
+			guideLine.setAttribute("d", "");
+			return;
+		}
+
+		const parent = parentCard.getBoundingClientRect();
+		// Which face each end leaves from is read off where the two cards are,
+		// not off the slot: a child is drawn on one side of its parent, and the
+		// two faces turn to meet across that gap.
+		const childOnRight = dropAt.x + carried.dx >= parent.left + parent.width / 2;
+		const half = carried.width / 2;
+		const from: [number, number] = [
+			(childOnRight ? parent.right : parent.left) - guideOrigin.x,
+			parent.top + parent.height / 2 - guideOrigin.y,
+		];
+		const to: [number, number] = [
+			dropAt.x + carried.dx + (childOnRight ? -half : half) - guideOrigin.x,
+			dropAt.y + carried.dy - guideOrigin.y,
+		];
+		guideLine.setAttribute("d", edgePath(from, to, controller.edgeStyle()));
+	};
+
+	const endGuide = (): void => {
+		guide?.remove();
+		guide = null;
+		guideLine = null;
 	};
 
 	// Where the pointer was when this frame was asked for, and the handle that
@@ -262,36 +527,32 @@ export function attachInteractions(controller: MapController): () => void {
 		dropFrame = 0;
 	};
 
-	/** Resolve what is under the last pointer position and highlight it. */
+	/**
+	 * Resolve the slot under the pointer, and draw the whole frame from it.
+	 *
+	 * The copy, the guide and the highlight are all decided here, from one
+	 * reading of one pointer position. Three answers to the same question must
+	 * not be able to disagree about it -- which is also why the copy is not
+	 * moved by the pointermove handler that asked for this frame.
+	 */
 	const resolveDrop = (): void => {
 		if (dragId === null || !dragging) return;
-		// Pointer capture makes ev.target useless, so hit-test by coordinates.
-		const under = document.elementFromPoint(dropAt.x, dropAt.y);
-		const targetEl =
-			under instanceof HTMLElement ? under.closest<HTMLElement>(".mm-node") : null;
 
-		const targetId = targetEl?.dataset.id;
-		const mode =
-			targetEl && targetId && targetId !== dragId
-				? dropModeFor(dragId, targetId, targetEl, dropAt.y)
-				: "child";
+		activeSlot = nearestSlot(dropAt.x, dropAt.y);
+		moveGhost(dropAt.x, dropAt.y);
+		drawGuide(activeSlot);
 
-		// Ahead of the early return below: with nothing to land on the copy
-		// follows the pointer, so it has to be placed on every frame even when
-		// the highlight has not changed.
-		settleGhost(targetEl && targetId && targetId !== dragId ? targetEl : null, mode, dropAt.x, dropAt.y);
-
-		// The zone can change without the card changing, and the highlight has to
-		// follow the pointer across that boundary.
-		if (targetEl === hovered && mode === hoveredMode) return;
+		// The slot can change without the card under it changing, so the
+		// highlight is compared by card and the branch below re-runs only when
+		// there is a different one to draw.
+		const targetEl = activeSlot ? nodeElement(activeSlot.targetId) : null;
+		if (targetEl === hovered) return;
 		clearHover();
-		if (!targetEl || !targetId || targetId === dragId) return;
+		if (!targetEl || !activeSlot) return;
 
 		hovered = targetEl;
-		hoveredMode = mode;
-		if (!controller.canDrop(dragId, targetId, mode)) targetEl.addClass("is-drop-invalid");
-		else if (mode === "child") targetEl.addClass("is-drop-target");
-		else targetEl.addClass(mode === "before" ? "is-drop-before" : "is-drop-after");
+		if (activeSlot.mode === "child") targetEl.addClass("is-drop-target");
+		else targetEl.addClass(activeSlot.mode === "before" ? "is-drop-before" : "is-drop-after");
 	};
 
 	/**
@@ -308,7 +569,6 @@ export function attachInteractions(controller: MapController): () => void {
 	 * ever found under the pointer.
 	 */
 	let ghost: HTMLElement | null = null;
-	let ghostSize = { width: 0, height: 0 };
 
 	/** Put the copy's centre at a point in screen space. */
 	const moveGhost = (x: number, y: number): void => {
@@ -318,76 +578,39 @@ export function attachInteractions(controller: MapController): () => void {
 	};
 
 	const startGhost = (node: HTMLElement, ev: PointerEvent): void => {
-		const card = node.querySelector<HTMLElement>(".mm-card");
-		if (!card) return;
-		const rect = card.getBoundingClientRect();
-		ghostSize = { width: rect.width, height: rect.height };
+		const row = node.querySelector<HTMLElement>(".mm-row");
+		if (!row) return;
+		const rect = row.getBoundingClientRect();
+
+		// Where the card sits inside the row the copy is made of. They are the
+		// same box on a plain card and part company as soon as there is an
+		// annotation, and the guide has to end on the card's face -- not the
+		// row's, which is not the thing the user picked up.
+		const cardEl = node.querySelector<HTMLElement>(".mm-card");
+		const card = cardEl ? cardEl.getBoundingClientRect() : rect;
+		carried = {
+			width: card.width,
+			height: card.height,
+			dx: card.left + card.width / 2 - (rect.left + rect.width / 2),
+			dy: card.top + card.height / 2 - (rect.top + rect.height / 2),
+		};
 
 		ghost = document.body.createDiv({ cls: "mm-drag-ghost" });
 		ghost.style.width = `${rect.width}px`;
 		ghost.style.height = `${rect.height}px`;
 		// The branch colour is set by a rule on the node the copy has left
 		// behind, so it is read off the original and carried over by hand.
-		const branch = getComputedStyle(card).getPropertyValue("--mm-branch");
+		const branch = getComputedStyle(row).getPropertyValue("--mm-branch");
 		if (branch.trim() !== "") ghost.style.setProperty("--mm-branch", branch.trim());
-		ghost.appendChild(card.cloneNode(true));
+		// A card style is a class on the map, and the copy is on `document.body`
+		// -- outside it. The class is what carries the fill, the border and the
+		// shadow to the copy; without it the copy of a flat card would arrive as
+		// a boxed one.
+		for (const cls of CARD_STYLE_CLASSES) {
+			if (row.closest(`.${cls}`)) ghost.addClass(cls);
+		}
+		ghost.appendChild(row.cloneNode(true));
 		moveGhost(ev.clientX, ev.clientY);
-	};
-
-	/**
-	 * Where the card would come to rest if it were let go here.
-	 *
-	 * Read off the target's own box rather than from the layout: the tree has
-	 * not been laid out with this node in its new place yet, and a preview that
-	 * waited for that would arrive after the drop. So this shows the place
-	 * rather than the exact pixels, which is what makes it a preview rather
-	 * than a promise.
-	 */
-	const restingSpot = (targetEl: HTMLElement, mode: DropMode): { x: number; y: number } => {
-		const card = targetEl.querySelector<HTMLElement>(".mm-card") ?? targetEl;
-		const rect = card.getBoundingClientRect();
-		const half = { x: ghostSize.width / 2, y: ghostSize.height / 2 };
-
-		if (mode === "before") {
-			return { x: rect.left + rect.width / 2, y: rect.top - half.y - LANDING_GAP };
-		}
-		if (mode === "after") {
-			return { x: rect.left + rect.width / 2, y: rect.bottom + half.y + LANDING_GAP };
-		}
-		// A child lands on the side the branch grows from, clear of the card and
-		// of the gap its connector is drawn across.
-		const side = targetEl.dataset.side === "left" ? -1 : 1;
-		const clear = half.x + LANDING_GAP * 3;
-		return {
-			x: side === 1 ? rect.right + clear : rect.left - clear,
-			y: rect.top + rect.height / 2,
-		};
-	};
-
-	/**
-	 * Snap the copy onto where it would land, or let it follow the pointer.
-	 *
-	 * The snap is what turns the drag from "something is following my pointer"
-	 * into "this is where it goes", and it is only offered for a drop the map
-	 * would actually accept -- a copy that settled onto a refused target would
-	 * be promising something that will not happen.
-	 */
-	const settleGhost = (
-		targetEl: HTMLElement | null,
-		mode: DropMode,
-		x: number,
-		y: number,
-	): void => {
-		if (!ghost) return;
-		const targetId = targetEl?.dataset.id;
-		const landing =
-			targetEl !== null &&
-			targetId !== undefined &&
-			dragId !== null &&
-			controller.canDrop(dragId, targetId, mode);
-		ghost.toggleClass("is-snapped", landing === true);
-		const spot = landing ? restingSpot(targetEl, mode) : { x, y };
-		moveGhost(spot.x, spot.y);
 	};
 
 	const endGhost = (): void => {
@@ -398,16 +621,16 @@ export function attachInteractions(controller: MapController): () => void {
 	const endDrag = (): void => {
 		cancelDropFrame();
 		endGhost();
-		if (dragId) {
-			viewport
-				.querySelector<HTMLElement>(`.mm-node[data-id="${CSS.escape(dragId)}"]`)
-				?.removeClass("is-dragging");
-		}
+		endGuide();
+		if (dragId) nodeElement(dragId)?.removeClass("is-dragging");
 		viewport.removeClass("is-dragging-node");
 		clearHover();
 		dragId = null;
 		dragPointer = -1;
 		dragging = false;
+		cards = [];
+		bodies = [];
+		activeSlot = null;
 	};
 
 	on(viewport, "pointerdown", (ev) => {
@@ -439,15 +662,21 @@ export function attachInteractions(controller: MapController): () => void {
 				`.mm-node[data-id="${CSS.escape(dragId)}"]`,
 			);
 			node?.addClass("is-dragging");
-			// The card the drag left behind goes faint, and a copy of it goes
-			// with the pointer -- which is what says the card is being carried
-			// rather than the map being panned.
-			if (node) startGhost(node, ev);
+			// The card the drag left behind becomes an empty slot, and a copy of
+			// it goes with the pointer -- which is what says the card is being
+			// carried rather than the map being panned.
+			if (node) {
+				startGhost(node, ev);
+				// Every card it could land on, measured once, before the pointer
+				// has gone anywhere.
+				measureCards();
+				startGuide();
+			}
 			viewport.setPointerCapture(ev.pointerId);
 		}
 
 		// The copy is not moved here. `resolveDrop` places it, on the same frame
-		// the highlight is decided on, so that it and the highlight can never
+		// the guide and the highlight are decided on, so the three cannot
 		// disagree about where the drop would land.
 
 		dropAt = { x: ev.clientX, y: ev.clientY };
@@ -462,18 +691,16 @@ export function attachInteractions(controller: MapController): () => void {
 		if (dragId === null || ev.pointerId !== dragPointer) return;
 		if (dragging) {
 			suppressClick = true;
-			const under = document.elementFromPoint(ev.clientX, ev.clientY);
-			const targetEl =
-				under instanceof HTMLElement ? under.closest<HTMLElement>(".mm-node") : null;
-			const targetId = targetEl?.dataset.id;
-			if (targetEl && targetId && targetId !== dragId) {
-				const mode = dropModeFor(dragId, targetId, targetEl, ev.clientY);
-				if (controller.canDrop(dragId, targetId, mode)) {
-					const source = dragId;
-					endDrag();
-					controller.move(source, targetId, mode);
-					return;
-				}
+			// The slot the last frame drew, never a fresh reading of the pointer:
+			// the card has to land where the guide said it would, and a second
+			// guess would let the two differ by whatever the pointer did between
+			// that frame and the release.
+			const slot = activeSlot;
+			if (slot) {
+				const source = dragId;
+				endDrag();
+				controller.move(source, slot.targetId, slot.mode);
+				return;
 			}
 		}
 		endDrag();
@@ -502,7 +729,8 @@ export function attachInteractions(controller: MapController): () => void {
 		// settings tab shows and what happens here cannot drift. A press with a
 		// modifier the binding does not name is not that binding: Alt+Enter is
 		// not Enter.
-		const action = resolveAction(controller.bindings(), comboFromEvent(ev));
+		const combo = comboFromEvent(ev);
+		const action = resolveAction(controller.bindings(), combo);
 		if (!action) return;
 		const id = controller.selectedId();
 
