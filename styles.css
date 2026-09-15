@@ -110,11 +110,25 @@
  * Only the animation goes. The hover colours stay exactly as they are; they
  * simply arrive at once.
  */
-.mm-viewport.is-dragging-node .mm-card,
+.mm-viewport.is-dragging-node .mm-row,
 .mm-viewport.is-dragging-node .mm-add,
-.mm-content.mm-dense .mm-card,
+.mm-content.mm-dense .mm-row,
 .mm-content.mm-dense .mm-add {
 	transition: none;
+}
+
+/*
+ * And no hover ring while a card is being dragged. A drag cannot give up
+ * hit-testing the way a pan does, so the card under the pointer is hovered
+ * however briefly the pointer is there -- and that card is the one the drag
+ * is already answering for, with the drop highlight. Two rings of different
+ * weights on one card is two answers to where the drop would land.
+ *
+ * The card that is being dragged keeps its dashed outline: that rule is below
+ * this one and scores the same, so it is the one that holds.
+ */
+.mm-viewport.is-dragging-node .mm-row:hover {
+	outline: none;
 }
 
 .mm-content {
@@ -247,56 +261,122 @@
 .mm-node[data-branch="9"] { --mm-branch: var(--mm-b9); }
 
 /*
- * The card's own row, and the containing block for everything positioned
- * against the card rather than against the node: `.mm-tools` hangs off this.
+ * The card's own row: the box that is drawn, and the containing block for the
+ * furniture positioned against it -- `.mm-tools` hangs off this.
  *
- * A node is two boxes -- this row, and the annotation strip under it -- and
- * only the row is the card. Nothing may be put in this element's flow: its
- * height is the card's height, which is what the layout centres children and
- * anchors connectors on.
+ * The box used to be `.mm-card`, and the annotation strip hung off the node
+ * below it. So a card with an annotation was drawn as two boxes, one round the
+ * title and one round the note, and the frame that appears while a card is
+ * being worked on only ever enclosed the title. The strip is a child of this
+ * element now, so the fill, the border and the ring cover the card and its
+ * annotation as one thing.
+ *
+ * What is measured for layout has not moved: `cardWidth`/`cardHeight` are still
+ * taken off `.mm-card`, which is the title's own box, because that is where a
+ * connector has always met a card and where a sibling is still centred. Nothing
+ * may be put in `.mm-card`'s flow for the same reason.
+ *
+ * The fill, the border and the rule under the text are variables so that a card
+ * style can restate them by name. Spelling them out again per style would mean
+ * out-specifying the depth rules below -- and out-specifying them would take
+ * the ring off a picked card and the tint off a drop target, which are the only
+ * two things those states have.
  */
 .mm-row {
 	position: relative;
+	border-radius: var(--mm-card-radius);
+	background: var(--mm-card-bg, var(--background-primary));
+	border: var(--mm-card-border, 1px solid var(--background-modifier-border));
+	/*
+	 * The hover ring, drawn before it is needed and left transparent.
+	 *
+	 * `outline` rather than the `box-shadow` the picked card uses: a card at any
+	 * depth may already carry a shadow -- the root card's drop does, and it is
+	 * written by a rule that scores three classes -- so a second shadow here
+	 * would have to take that drop away to be seen. An outline is painted
+	 * outside the box and takes nothing from it, so the root keeps its drop
+	 * while it is hovered, and a card that is picked keeps the solid ring
+	 * underneath the light one.
+	 *
+	 * It is declared here and only its colour changes on hover, so that the
+	 * ring fades in over the same 120ms as the rest of the card. An outline
+	 * that appeared whole -- width, style and colour at once -- would arrive
+	 * with no transition at all.
+	 */
+	outline: 2px solid transparent;
+	transition:
+		box-shadow 120ms ease,
+		border-color 120ms ease,
+		outline-color 120ms ease;
 }
 
+/*
+ * A card under the pointer: the picked card's own cue at a fraction of the
+ * ink. Same ring, same colour, a third of it -- enough to say which card a
+ * click would land on, not enough to be mistaken for the card that is picked.
+ *
+ * The border takes the branch colour with it, which is the cue the deeper
+ * cards had before this one and the reason the ring alone reads as flat on a
+ * card drawn with no border of its own.
+ */
+.mm-row:hover {
+	border-color: var(--mm-branch);
+	outline-color: color-mix(in srgb, var(--interactive-accent) 34%, transparent);
+}
+
+/*
+ * The title's own box: the layout target, the drag handle, and the line the
+ * text sits on. It draws nothing -- `.mm-row` does that.
+ *
+ * The padding is a pair of variables because the field a card is edited in has
+ * to be exactly this box: it is widened out to these edges by a negative margin,
+ * and a margin that does not match the padding puts the field over the card's
+ * border and the ring that says the card is picked.
+ */
 .mm-card {
 	display: flex;
 	align-items: baseline;
 	gap: 6px;
-	padding: 6px 12px;
-	border-radius: var(--mm-card-radius);
-	background: var(--background-primary);
-	border: 1px solid var(--background-modifier-border);
+	padding: var(--mm-card-pad-y, 6px) var(--mm-card-pad-x, 12px);
 	color: var(--text-normal);
 	font-size: var(--font-ui-small);
 	line-height: 1.45;
 	cursor: grab;
 	user-select: none;
-	transition:
-		box-shadow 120ms ease,
-		border-color 120ms ease;
-}
-
-.mm-card:hover {
-	border-color: var(--mm-branch);
 }
 
 /* The root reads as the anchor of the whole map. */
-.mm-node[data-depth="0"] .mm-card {
-	padding: 10px 20px;
+.mm-node[data-depth="0"] .mm-row {
 	border-radius: 999px;
-	border: none;
-	background: var(--interactive-accent);
+	border: var(--mm-card-border, none);
+	background: var(--mm-card-bg, var(--interactive-accent));
+	/* Also a variable: a style that flattens the cards has no use for the one
+	   shadow on the map, and a rule that spelled out `none` here would beat
+	   the ring that marks the card as selected. */
+	box-shadow: var(--mm-card-shadow, 0 2px 10px rgb(0 0 0 / 18%));
+}
+
+/* A pill is the right shape for one line and the wrong one for two: with an
+   annotation under the title the ends would bow out. */
+.mm-node[data-depth="0"].has-annotation .mm-row {
+	border-radius: var(--mm-card-radius);
+}
+
+.mm-node[data-depth="0"] .mm-card {
+	--mm-card-pad-y: 10px;
+	--mm-card-pad-x: 20px;
 	color: var(--text-on-accent);
 	font-size: var(--font-ui-medium);
 	font-weight: 600;
-	box-shadow: 0 2px 10px rgb(0 0 0 / 18%);
 }
 
 /* First-level branches carry their branch colour. */
+.mm-node[data-depth="1"] .mm-row {
+	border: var(--mm-card-border, 1.5px solid var(--mm-branch));
+	background: var(--mm-card-bg, color-mix(in srgb, var(--mm-branch) 12%, var(--background-primary)));
+}
+
 .mm-node[data-depth="1"] .mm-card {
-	border: 1.5px solid var(--mm-branch);
-	background: color-mix(in srgb, var(--mm-branch) 12%, var(--background-primary));
 	font-weight: 550;
 }
 
@@ -304,20 +384,231 @@
    Body cards are excluded by name rather than by specificity: this selector
    scores higher than the one that styles them, so a :not() is what keeps note
    content from being drawn as a topic. */
-.mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-card {
-	background: transparent;
-	border: none;
-	border-bottom: 2px solid color-mix(in srgb, var(--mm-branch) 55%, transparent);
+.mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-row {
+	background: var(--mm-card-bg, transparent);
+	border: var(--mm-card-border, none);
+	border-bottom: var(--mm-card-rule, 2px solid color-mix(in srgb, var(--mm-branch) 55%, transparent));
 	border-radius: 4px 4px 0 0;
-	padding: 3px 8px;
 }
 
-.mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-card:hover {
-	background: var(--background-modifier-hover);
+.mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-row:hover {
+	background: var(--mm-card-bg-hover, var(--background-modifier-hover));
 	border-bottom-color: var(--mm-branch);
 }
 
-.mm-node.is-selected .mm-card {
+.mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-card {
+	--mm-card-pad-y: 3px;
+	--mm-card-pad-x: 8px;
+}
+
+/*
+ * The card styles (`cardStyle`).
+ *
+ * `bordered` is the absence of both blocks below -- it is what the depth rules
+ * above already draw.
+ *
+ * Every depth rule up there names its own background, border and rule, and
+ * those selectors score three to five classes. A rule keyed on the style alone
+ * scores two and loses to all of them, which is why this setting once changed
+ * the DOM and nothing else. So the fill, the border and the rule under the text
+ * are carried in variables the depth rules read, and the shape and the
+ * typography are answered by name, the container class adding the one step of
+ * specificity that wins.
+ *
+ * What may NOT be written in either block is `background` or `box-shadow`. The
+ * selectors here out-rank `.mm-node.is-selected .mm-row` and
+ * `.is-drop-target` as well, and those two own the ring on a picked card and
+ * the tint on a drop target -- the only things those states have.
+ */
+
+/*
+ * Rounded: one slab for the whole map, at every depth, so the hierarchy is left
+ * to the placement and the connectors. Body cards are not in these lists --
+ * they are note content rather than topics, and their accent bar and their
+ * quieter type are what say so.
+ */
+.mm-card-rounded {
+	--mm-card-bg: var(--background-secondary);
+	--mm-card-border: none;
+	--mm-card-rule: 0 solid transparent;
+	--mm-card-shadow: none;
+}
+
+/* The bare `.mm-row` is in these lists for the copy a drag carries: it is
+   cloned as a row, so it has no `.mm-node` for a depth rule to match and only
+   the container class travels with it. */
+.mm-card-rounded .mm-row,
+.mm-card-rounded .mm-node[data-depth="0"] .mm-row,
+.mm-card-rounded .mm-node[data-depth="1"] .mm-row,
+.mm-card-rounded .mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-row {
+	border-radius: var(--mm-card-radius);
+}
+
+.mm-card-rounded .mm-card,
+.mm-card-rounded .mm-node[data-depth="0"] .mm-card,
+.mm-card-rounded .mm-node[data-depth="1"] .mm-card,
+.mm-card-rounded .mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-card {
+	--mm-card-pad-y: 4px;
+	--mm-card-pad-x: 10px;
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: 400;
+}
+
+/* The rule under the text was the only hover cue the deeper cards had and it is
+   gone here, so the slab darkens instead. Depths 0 and 1 had no cue to lose;
+   they get the same one for consistency. */
+.mm-card-rounded .mm-node[data-depth="0"] .mm-row:hover,
+.mm-card-rounded .mm-node[data-depth="1"] .mm-row:hover {
+	background: var(--mm-card-bg-hover, var(--background-modifier-hover));
+}
+
+/*
+ * Minimal: nothing at rest. A card is its text on the canvas until it is picked
+ * up, and picking one -- clicking it, or opening it to edit -- draws a single
+ * frame around the card, title and annotation together.
+ *
+ * The fill and the border are set on the node rather than in a rule, because
+ * the picked state has to turn them on and a rule that did it would have to
+ * out-score the depth rules above. A variable on the node does not: it wins by
+ * being closer to the card, which is also why nothing else has to know about
+ * it.
+ *
+ * The root and the first level keep the two cards the default style gives them
+ * -- the accent pill and the branch-coloured block -- because those two are not
+ * decoration, they are what says "this is the centre" and "these are the
+ * branches off it". Everything below them is text on the canvas, so the map
+ * still reads as text and the hierarchy is carried by those two anchors. The
+ * flattening rule comes first and carries no `[data-depth]` guard, so on its
+ * own it would take the pill and the blocks away with everything else; the two
+ * `data-depth` rules below carve them back out, and they come later on purpose
+ * -- a selector of one class scores the same as one of class-plus-attribute,
+ * so the later rule is the one a node matching both ends up with.
+ *
+ * Hover is the one place this style does not opt out: the map is text until
+ * something is picked, but which card a click would land on is still worth
+ * saying, and it is said by the ring alone. The tint the deeper cards put on
+ * the card is turned off -- the card is meant to stay the canvas it sits on --
+ * so what is left is the outline going from transparent to a third of the
+ * accent, with nothing under it.
+ */
+.mm-card-minimal .mm-node {
+	--mm-card-bg: transparent;
+	--mm-card-border: 1px solid transparent;
+	--mm-card-rule: 0 solid transparent;
+	--mm-card-shadow: none;
+	--mm-card-bg-hover: transparent;
+}
+
+.mm-card-minimal .mm-node[data-depth="0"] {
+	--mm-card-bg: var(--interactive-accent);
+	--mm-card-border: none;
+	--mm-card-rule: 0 solid transparent;
+	--mm-card-shadow: 0 2px 10px rgb(0 0 0 / 18%);
+	--mm-card-bg-hover: transparent;
+}
+
+.mm-card-minimal .mm-node[data-depth="1"] {
+	--mm-card-bg: color-mix(in srgb, var(--mm-branch) 12%, var(--background-primary));
+	--mm-card-border: 1.5px solid var(--mm-branch);
+	--mm-card-rule: 0 solid transparent;
+	--mm-card-shadow: none;
+	--mm-card-bg-hover: transparent;
+}
+
+/* The pill and the blocks stay drawn when they are picked: turning a picked
+   card into a white box is the behaviour the deeper cards want -- it is the
+   only frame they have -- but for these two the colour is the identity, and
+   losing it to a click would take away the one thing saying which card is the
+   centre. The ring still arrives, from the rule every style shares; these
+   rules just put the fill back, one `data-depth` further along the same
+   element. */
+.mm-card-minimal .mm-node.is-selected {
+	--mm-card-bg: var(--background-primary);
+	--mm-card-border: 1px solid var(--background-modifier-border);
+}
+
+.mm-card-minimal .mm-node.is-selected[data-depth="0"] {
+	--mm-card-bg: var(--interactive-accent);
+	--mm-card-border: none;
+}
+
+.mm-card-minimal .mm-node.is-selected[data-depth="1"] {
+	--mm-card-bg: color-mix(in srgb, var(--mm-branch) 12%, var(--background-primary));
+	--mm-card-border: 1.5px solid var(--mm-branch);
+}
+
+/*
+ * The root reads as the anchor of the whole map, at every style: the pill's
+ * white-on-accent type is what makes it one, so the flattening below has to
+ * leave it alone. Written as its own rule for the same reason as the variables
+ * above -- `data-depth` on the node beats the style class alone.
+ */
+.mm-card-minimal .mm-node[data-depth="0"] .mm-card {
+	color: var(--text-on-accent);
+	font-size: var(--font-ui-medium);
+	font-weight: 600;
+}
+
+.mm-card-minimal .mm-node[data-depth="1"] .mm-card {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: 550;
+}
+
+.mm-card-minimal .mm-row,
+.mm-card-minimal .mm-node[data-depth="0"] .mm-row,
+.mm-card-minimal .mm-node[data-depth="1"] .mm-row,
+.mm-card-minimal .mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-row {
+	border-radius: var(--mm-card-radius);
+}
+
+/* The padding is the flattened card's, on every depth: the pill and the blocks
+   are narrower than the default style's, and the field a card is edited in is
+   widened by exactly this pair, so they cannot disagree per depth.
+
+   The type is not. A card that is drawn -- the pill, the blocks -- has to keep
+   the type that goes with its drawing, so this rule names only the depths that
+   are text. The two exceptions above are out of the list, not merely earlier in
+   it: this selector list carries a higher score than theirs, so leaving them in
+   would take the white-on-accent title away again. */
+.mm-card-minimal .mm-card,
+.mm-card-minimal .mm-node[data-depth="0"] .mm-card,
+.mm-card-minimal .mm-node[data-depth="1"] .mm-card,
+.mm-card-minimal .mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-card {
+	--mm-card-pad-y: 4px;
+	--mm-card-pad-x: 10px;
+}
+
+.mm-card-minimal .mm-node:not([data-depth="0"]):not([data-depth="1"]):not([data-kind="body"]) .mm-card {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: 400;
+}
+
+/* The annotation is note text rather than a topic, so it keeps its muted colour
+   -- except on a card that is drawn in its branch colour, where muted grey on a
+   fill is not readable. */
+.mm-node[data-depth="0"] .mm-annotation {
+	color: color-mix(in srgb, var(--text-on-accent) 78%, transparent);
+	border-left-color: color-mix(in srgb, var(--text-on-accent) 45%, transparent);
+}
+
+/*
+ * The card being written in goes on top, whatever depth it sits at.
+ *
+ * Nodes are stacked in the order they were drawn, so a card at any depth can be
+ * covered by a neighbour -- and the annotation under its title is the first
+ * thing to go behind one, which is the very line being read while it is typed.
+ * One step is all it takes: no other node carries a `z-index` of its own, so
+ * anything above `auto` is above every one of them. The field inside the card
+ * is raised again on its own, over the furniture the card carries.
+ */
+.mm-node.is-editing {
+	z-index: 1;
+}
+
+.mm-node.is-selected .mm-row {
 	border-color: var(--interactive-accent);
 	box-shadow: 0 0 0 2px var(--interactive-accent);
 }
@@ -326,41 +617,80 @@
    Border colour and box-shadow only: the view measures cards with offsetWidth,
    and anything that changed their box would move the layout under the jump that
    just brought one on screen. */
-.mm-node.is-search-match .mm-card {
+.mm-node.is-search-match .mm-row {
 	border-color: var(--text-accent);
 	box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-accent) 40%, transparent);
 }
 
-.mm-node.is-search-current .mm-card {
+.mm-node.is-search-current .mm-row {
 	border-color: var(--text-accent);
 	box-shadow:
 		0 0 0 3px var(--text-accent),
 		0 2px 10px rgb(0 0 0 / 18%);
 }
 
+/*
+ * What the drag left behind: an empty slot rather than a faded card. A dashed
+ * outline reads as "the card came from here", which dimming cannot say -- a
+ * dimmed card only says "this matters less for a moment".
+ *
+ * The fill goes through the variables and not a plain `background`. The depth
+ * rules write `background` on `.mm-row` themselves, one of them at five
+ * classes, so a `background: transparent` here would lose to it in silence.
+ * Variables cascade rather than compete, so these hold at any depth.
+ *
+ * `outline` rather than `border` for the dashed box: the card's border is
+ * `--mm-card-border`, which some styles set to `none`, and drawing one where
+ * there was none would resize the slot the pointer left behind.
+ */
+.mm-node.is-dragging .mm-row {
+	--mm-card-bg: transparent;
+	--mm-card-shadow: none;
+	outline: 2px dashed var(--interactive-accent);
+}
+
 .mm-node.is-dragging {
-	opacity: 0.45;
+	opacity: 0.4;
 	pointer-events: none;
 }
 
-.mm-node.is-drop-target .mm-card {
+/*
+ * The line a drag draws from the card's old place to the slot it would land
+ * in. It lives on the viewport rather than in the map: its endpoints are screen
+ * points, and the camera's transform is on `.mm-content`, one level in. The
+ * map's own connector layer is also rewritten whole on every redraw, so a path
+ * drawn into it would last exactly one frame.
+ */
+.mm-drag-guide {
+	position: absolute;
+	inset: 0;
+	overflow: visible;
+	pointer-events: none;
+	z-index: 5;
+}
+
+.mm-drag-guide-line {
+	fill: none;
+	stroke: var(--interactive-accent);
+	stroke-width: 2;
+	stroke-dasharray: 6 5;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.mm-node.is-drop-target .mm-row {
 	box-shadow: 0 0 0 2px var(--interactive-accent);
 	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));
 }
 
 /* Dropped beside a card rather than into it: a line marks where it lands. The
    whole-box highlight above means "inside this one", these mean "next to it". */
-.mm-node.is-drop-before .mm-card {
+.mm-node.is-drop-before .mm-row {
 	box-shadow: 0 -3px 0 var(--interactive-accent);
 }
 
-.mm-node.is-drop-after .mm-card {
+.mm-node.is-drop-after .mm-row {
 	box-shadow: 0 3px 0 var(--interactive-accent);
-}
-
-.mm-node.is-drop-invalid .mm-card {
-	box-shadow: 0 0 0 2px var(--text-error);
-	cursor: not-allowed;
 }
 
 .mm-text {
@@ -377,20 +707,45 @@
 	cursor: text;
 	user-select: text;
 	min-width: 4ch;
-	box-shadow: 0 1px 0 0 var(--interactive-accent);
+	/* The card's own fill, so a card being edited is filled the way it is drawn
+	   rather than turning into a white box. It is opaque wherever a card is
+	   drawn, which is the point: the text must not be read through the cards
+	   behind it. A card drawn with no fill at all still gets one here. */
+	background: var(--mm-card-bg, var(--background-primary));
+	border-radius: var(--mm-card-radius);
 }
 
 /*
- * The strip under the card: part of the node box, never a branch of its own and
- * never part of the card.
+ * The field is widened out to the card's own edges by a negative margin of
+ * exactly the card's padding, so that a click on the padding lands in the
+ * field. Both are read off the card's padding variables rather than written
+ * out: that padding differs per depth and per card style, and while the two
+ * were written out by hand they drifted -- the field ended up over the card's
+ * border and over the ring that says the card is picked, in the default style,
+ * on every card past the second level.
  *
- * An ordinary block in `.mm-node`'s flow, so its max-content width counts
- * towards the node's: the node is as wide as the wider of the card's title and
- * this strip, up to the inline max-width `nodeMaxWidth` gives it -- the
- * note-content cap wherever there is a strip at all. The card fills the node
- * box, so card and strip are always exactly as wide as each other. The inset is
- * padding rather than margin, which keeps the rule on the card's own left edge:
- * 3px of rule plus 10px puts the text at 13px, under the card's own text.
+ * An ordinary block in `.mm-row`'s flow, so its max-content width counts
+ * towards the card's.
+ */
+.mm-card .mm-text.is-editing {
+	padding: var(--mm-card-pad-y, 6px) var(--mm-card-pad-x, 12px);
+	margin: calc(-1 * var(--mm-card-pad-y, 6px)) calc(-1 * var(--mm-card-pad-x, 12px));
+}
+
+/*
+ * The strip under the title: a line of the card, not a card of its own and never
+ * a branch.
+ *
+ * An ordinary block in `.mm-row`'s flow, so its max-content width counts towards
+ * the node's: the node is as wide as the wider of the title and this strip, up
+ * to the inline max-width `nodeMaxWidth` gives it -- the note-content cap
+ * wherever there is a strip at all. The card fills the row, so title and strip
+ * are always exactly as wide as each other. The inset is padding rather than
+ * margin, which keeps the rule against the card's own left edge: 3px of rule
+ * plus 10px puts the text at 13px, under the title's own text.
+ *
+ * Its margins are what keep it off the box's edges: 7px above, 3px below, and
+ * the row's border stops the lower one collapsing out of the box.
  */
 .mm-annotation {
 	box-sizing: border-box;
@@ -548,29 +903,39 @@
 
 /* Paragraphs, code blocks and tables, drawn as their own leaf cards so they
    fold with the branch they belong to. Quieter than a topic card, and shaped
-   like a quote rather than a node, so the difference is legible at a glance. */
-.mm-node[data-kind="body"] .mm-card {
-	align-items: flex-start;
+   like a quote rather than a node, so the difference is legible at a glance.
+   They carry no annotation, so their row and their card are the same box --
+   the split above costs them nothing -- and they name their own fill and their
+   own accent bar rather than reading the variables, so no card style reaches
+   them. */
+.mm-node[data-kind="body"] .mm-row {
 	background: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
 	border-left: 3px solid color-mix(in srgb, var(--mm-branch) 60%, transparent);
 	border-radius: 4px;
-	/* The right side reserves the corner the expand button sits in, so the
-	   button never lands on top of the first line of content. */
-	padding: 6px 26px 6px 10px;
+}
+
+.mm-node[data-kind="body"] .mm-row:hover {
+	background: var(--background-modifier-hover);
+	border-left-color: var(--mm-branch);
+}
+
+/* Body cards need their own selection radius: the 3px left border
+   otherwise makes the box-shadow read as square on the bottom. */
+.mm-node[data-kind="body"].is-selected .mm-row {
+	border-radius: 4px;
+}
+
+.mm-node[data-kind="body"] .mm-card {
+	--mm-card-pad-y: 6px;
+	--mm-card-pad-x: 10px;
+	align-items: flex-start;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	line-height: 1.5;
 	cursor: text;
 	/* Note content is there to be read and copied, unlike a topic card. */
 	user-select: text;
-	/* Containing block for `.mm-expand`. */
-	position: relative;
-}
-
-.mm-node[data-kind="body"] .mm-card:hover {
-	background: var(--background-modifier-hover);
-	border-left-color: var(--mm-branch);
 }
 
 /* Opens the block whole, in the dialog. Absolutely positioned so it stays out
@@ -597,7 +962,7 @@
 	height: 12px;
 }
 
-.mm-card:hover .mm-expand {
+.mm-row:hover .mm-expand {
 	opacity: 1;
 }
 
@@ -750,35 +1115,57 @@
 	transition: left 90ms ease, top 90ms ease, opacity 120ms ease;
 }
 
-.mm-drag-ghost .mm-card {
+/* The copy a drag carries is a clone of the row, so it is drawn as a card
+   wherever it lands -- the row is the box, and the box does not need the node
+   above it to know what a card looks like. */
+.mm-drag-ghost .mm-row {
 	width: 100%;
 	height: 100%;
 	box-sizing: border-box;
 }
 
-/* Settled onto a drop the map will accept: the copy stops following the
-   pointer and stands where the card would land, in the same dashed outline
-   the drop zones are drawn with. */
-.mm-drag-ghost.is-snapped {
-	opacity: 0.85;
-}
-
-.mm-drag-ghost.is-snapped .mm-card {
-	border-style: dashed;
-	border-color: var(--interactive-accent);
-	box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
-}
-
 /* The settings window. Groups down the side, one page of rows beside them --
    the settings are past a screenful, and a scroll with no map of it is what
-   this is meant to save the user from. */
+   this is meant to save the user from.
+ *
+ * One scroller in here, and it is `.mm-settings-pane`: the window clips, and
+ * the pair inside it is told to fill what the height leaves. Doing it any other
+ * way does not look broken -- Obsidian's `.modal` is `overflow: auto` -- it
+ * just scrolls the whole window instead, which takes the group names with it,
+ * puts a second scrollbar beside the page's own, and leaves the rule down the
+ * side of the groups stopping short of the bottom. */
+.mm-settings-dialog {
+	width: 820px;
+	max-width: 92vw;
+	/* Fixed height so the window does not jump as pages change; tall enough
+	   for the shortcuts page, which is the longest. */
+	height: 560px;
+	max-height: 85vh;
+	overflow: hidden;
+}
+
+/* A column, so `.mm-settings` can be told to fill the height the window fixed.
+   `overflow` is what lets this shrink to it: an automatic minimum size does not
+   apply to a scroll container, and without one its own content would push the
+   window back open. */
+.mm-settings-dialog .modal-content {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
 .mm-settings {
 	display: flex;
 	gap: 16px;
-	min-height: 320px;
-	max-height: 60vh;
+	/* Fill the fixed-height window, with the pane scrolling on its own. */
+	flex: 1 1 auto;
+	min-height: 0;
 }
 
+/* A rail of group names rather than a column of its own: the flex line above
+   stretches it to the window's height, which is what makes the rule down its
+   side run the whole way. No height of its own -- the moment it has one, the
+   rule stops at the last group. */
 .mm-settings-nav {
 	flex: 0 0 150px;
 	display: flex;
@@ -786,6 +1173,21 @@
 	gap: 2px;
 	padding-right: 12px;
 	border-right: 1px solid var(--background-modifier-border);
+}
+
+/* The page's name, beside the window's title rather than at the top of the
+   rows: small, muted, and out of the scroller, so it is there to read however
+   far down the rows have been taken. */
+.mm-settings-caption {
+	margin-left: 10px;
+	font-size: var(--font-ui-smaller);
+	font-weight: 400;
+	color: var(--text-muted);
+}
+
+.mm-settings-caption::before {
+	content: "·";
+	margin-right: 6px;
 }
 
 .mm-settings-tab {
@@ -807,8 +1209,10 @@
 	font-weight: 500;
 }
 
+/* The one thing in the window that scrolls. */
 .mm-settings-pane {
 	flex: 1 1 auto;
+	min-width: 0;
 	overflow-y: auto;
 	padding-right: 4px;
 }
