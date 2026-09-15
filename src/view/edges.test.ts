@@ -77,10 +77,40 @@ test("the right-angled connector is an elbow, turning halfway", () => {
 
 test("a connector to a card on the same row is a straight line either way", () => {
 	assert.equal(edgePath([220, 240], [340, 240], "curve"), "M 220 240 C 280 240, 280 240, 340 240");
+	assert.equal(edgePath([220, 240], [340, 240], "orthogonal"), "M 220 240 L 340 240");
+});
+
+test("the elbow is not drawn for a run too short to read as a turn", () => {
+	// A parent is centred on its children, so a parent and its only child anchor
+	// at the same y and the connector is a straight line. That centring is done
+	// on measured card heights, and a measurement that lands a few pixels out
+	// leaves a run of a few pixels -- an elbow there is a step a few pixels tall,
+	// which reads as a kink in a straight line rather than as a turn. The whole
+	// bug: one branch, and a corner that should not be there.
+	assert.equal(edgePath([220, 240], [340, 249], "orthogonal"), "M 220 240 L 340 249");
+	assert.equal(edgePath([220, 240], [340, 231], "orthogonal"), "M 220 240 L 340 231");
+	// A run long enough to be the turn it was meant to be keeps its right angle.
 	assert.equal(
-		edgePath([220, 240], [340, 240], "orthogonal"),
-		"M 220 240 L 280 240 L 280 240 L 340 240",
+		edgePath([220, 240], [340, 260], "orthogonal"),
+		"M 220 240 L 280 240 L 280 260 L 340 260",
 	);
+});
+
+test("a short run on either side of the threshold stays in its anchors' box", () => {
+	// The straight form is the elbow with the stub shrunk to nothing, so it
+	// cannot leave the box through the two anchors the way a curve with wrong
+	// control points would -- but it is the change nearest `edgeInView`, and the
+	// cull there is exact only while every style keeps this, so it is asserted.
+	for (const dy of [-11, -12, 0, 11, 12]) {
+		const d = edgePath([220, 240], [340, 240 + dy], "orthogonal");
+		const numbers = (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+		const xs = numbers.filter((_, i) => i % 2 === 0);
+		const ys = numbers.filter((_, i) => i % 2 === 1);
+		assert.ok(Math.min(...xs) >= 220, `dy=${dy} left`);
+		assert.ok(Math.max(...xs) <= 340, `dy=${dy} right`);
+		assert.ok(Math.min(...ys) >= Math.min(240, 240 + dy), `dy=${dy} above`);
+		assert.ok(Math.max(...ys) <= Math.max(240, 240 + dy), `dy=${dy} below`);
+	}
 });
 
 test("every style stays inside its anchors' box, which is what culling assumes", () => {

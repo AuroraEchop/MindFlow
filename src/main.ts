@@ -103,6 +103,12 @@ export default class MindmapPlugin extends Plugin {
 	);
 
 	override async onload(): Promise<void> {
+		// One line, once, on the way in. With a map open it is not obvious which
+		// build is running -- "the new thing does nothing" and "an old build is
+		// running" look exactly alike from the outside, and this is the difference
+		// made visible without a file timestamp or a guess.
+		console.log(`mindmap-mode ${this.manifest.version} loaded`);
+
 		await this.loadSettings();
 
 		this.registerView(
