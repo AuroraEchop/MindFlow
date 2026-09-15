@@ -245,15 +245,15 @@ test("a block lands under its node, indented, with no marker in front of it", ()
 	assert.equal(find(after, "Other").text, "Other");
 });
 
-test("the block is separated from the title by a blank line", () => {
-	// A paragraph on the line right after a list item is a lazy continuation of
-	// it in CommonMark, so the title would swallow the block in any other tool
-	// that opens the note. This parser is lenient enough to tell them apart
-	// without the blank line -- which is exactly why the blank line is written
-	// rather than left out on the strength of that.
+test("the block sits directly under the title, no blank line", () => {
+	// The blank line that used to separate the block from the title was for
+	// CommonMark compatibility in other tools. The user asked for it gone;
+	// this parser is lenient enough to tell a block from a lazy continuation
+	// without it, and Obsidian's own reader handles the rest.
 	const p = parse("# R\n\n- Parent\n- Other\n");
 	const out = addBlock(p, find(p, "Parent"), "Explanation.").text;
-	assert.ok(out.includes("- Parent\n\n  Explanation."));
+	assert.ok(out.includes("- Parent\n  Explanation."));
+	assert.ok(!out.includes("- Parent\n\n  Explanation."));
 });
 
 test("the block folds and deletes with the node it belongs to", () => {

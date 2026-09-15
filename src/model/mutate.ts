@@ -155,12 +155,12 @@ export function addBlock(parsed: ParsedDoc, node: MindNode, text: string): Mutat
 	// code block, which is a different thing entirely.
 	const indent =
 		node.kind === "listitem" ? node.indent + " ".repeat(node.marker.length) + node.spacing : "";
-	const insert = ["", ...text.split("\n").map((line) => (line === "" ? "" : indent + line))];
+	const insert = text.split("\n").map((line) => (line === "" ? "" : indent + line));
 	const doc = spliceLines(parsed.doc, node.lineStart + 1, 0, insert);
 	if (parsed.doc.eols.at(-1) === "" && doc !== parsed.doc) {
 		doc.eols[doc.eols.length - 1] = "";
 	}
-	return done(doc, node.lineStart + 2);
+	return done(doc, node.lineStart + 1);
 }
 
 export function addChild(	parsed: ParsedDoc,
