@@ -155,9 +155,9 @@ test("the defaults answer the keys the map has always answered", () => {
 		[press("Tab"), "add-child"],
 		[press("Tab", { shift: true }), "outdent"],
 		[press("Enter"), "add-sibling"],
-		[press("Enter", { shift: true }), "edit-annotation"],
+		[press("Enter", { shift: true }), "insert-block"],
 		[press("F2"), "edit-title"],
-		[press("Enter", { ctrl: true }), "insert-block"],
+		[press("Enter", { ctrl: true }), "edit-annotation"],
 		[press("Enter", { ctrl: true, shift: true }), "toggle-check"],
 		[press("Delete"), "delete-node"],
 		[press("Backspace"), "delete-node"],
@@ -345,11 +345,11 @@ test("a real keydown reaches the action the table names for it", () => {
 	// one goes the whole way, from a KeyboardEvent's own fields to an action.
 	const bindings = resolveBindings(undefined);
 	const cases: Array<[Partial<KeyboardEvent>, ShortcutAction]> = [
-		[{ key: "Enter", ctrlKey: true }, "insert-block"],
-		[{ key: "Enter", metaKey: true }, "insert-block"],
+		[{ key: "Enter", ctrlKey: true }, "edit-annotation"],
+		[{ key: "Enter", metaKey: true }, "edit-annotation"],
 		[{ key: "Enter", ctrlKey: true, shiftKey: true }, "toggle-check"],
 		[{ key: "Enter" }, "add-sibling"],
-		[{ key: "Enter", shiftKey: true }, "edit-annotation"],
+		[{ key: "Enter", shiftKey: true }, "insert-block"],
 		[{ key: "Tab" }, "add-child"],
 		[{ key: "Tab", shiftKey: true }, "outdent"],
 		[{ key: "Backspace" }, "delete-node"],
