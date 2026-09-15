@@ -140,4 +140,12 @@ test("the scrollbar sits flush against the window's own edge", () => {
 		right === undefined || right === "0",
 		`the pane keeps the scrollbar off the edge (margin-right: ${right})`,
 	);
+	// And the window's own padding must not sit between the bar and the edge --
+	// Obsidian's `.modal` insets its whole content by default, which is the gap
+	// that had the bar riding one step inside the window rather than at it.
+	assert.equal(
+		properties(rule(WINDOW).body).get("padding-right"),
+		"0",
+		"the window's own inset keeps the scrollbar off the edge",
+	);
 });

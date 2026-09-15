@@ -1157,6 +1157,10 @@
 	height: 560px;
 	max-height: 85vh;
 	overflow: hidden;
+	/* The window's own padding is what kept the scrollbar one inset off the
+	   edge; nothing is wanted in that gap, and a scrollbar is looked for out
+	   at the very edge of the window, so the right inset goes away. */
+	padding-right: 0;
 }
 
 /* A column, so `.mm-settings` can be told to fill the height the window fixed.
