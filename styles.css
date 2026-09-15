@@ -1078,7 +1078,13 @@
 /* Grows a child from the card itself. Kept out of reach until the node is
    hovered or selected: an invisible button that still took clicks would swallow
    them from the canvas beside every card. It holds its place in the row either
-   way, so nothing shifts when it appears. */
+   way, so nothing shifts when it appears.
+
+   A branch that can be closed wears the minus instead, and the minus stays
+   visible without a hover -- it is the folding affordance, and folding has to
+   work from a card the pointer is nowhere near. Solid rather than dashed,
+   because unlike the plus it names something that exists: the branch is open
+   right there. */
 .mm-add {
 	display: flex;
 	align-items: center;
@@ -1097,13 +1103,19 @@
 	transition: opacity 120ms ease;
 }
 
+.mm-add.is-minus {
+	border: 1.5px solid var(--mm-branch, var(--interactive-accent));
+	color: var(--text-normal);
+}
+
 .mm-add .svg-icon {
 	width: 12px;
 	height: 12px;
 }
 
 .mm-node:hover .mm-add,
-.mm-node.is-selected .mm-add {
+.mm-node.is-selected .mm-add,
+.mm-node.has-children .mm-add {
 	opacity: 1;
 	pointer-events: auto;
 }

@@ -778,7 +778,7 @@ function addButton(id: string): FakeEl {
 	return button;
 }
 
-test("the branch button always grows a child", () => {
+test("the branch button presses through to the action its icon is showing", () => {
 	const h = harness();
 	const button = addButton("n1");
 
@@ -791,10 +791,10 @@ test("the branch button always grows a child", () => {
 		stopPropagation: () => {},
 	});
 
-	// The button is the plus, whatever the card is showing: hover is how the
-	// user says "work on this one", and the thing you do to the card you are
-	// working on is add to it. A circle that switched between growing and
-	// closing made the same press mean opposite things depending on state the
-	// pointer cannot see.
-	assert.deepEqual(h.calls, ["addChildTo(n1)"]);
+	// The button's icon comes from the same question the press asks
+	// (`branchButton.ts`): the minus that is showing folds the branch, the plus
+	// grows a child. The press reads the state out of the view again rather
+	// than out of the DOM, so the icon and the press cannot disagree even when
+	// the selection has moved since the card was painted.
+	assert.deepEqual(h.calls, ["toggleBranch(n1)"]);
 });

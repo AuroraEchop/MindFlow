@@ -62,6 +62,13 @@ export interface MapController {
 
 	addChildTo(id: string): void;
 	addSiblingTo(id: string): void;
+	/**
+	 * What the branch button's press does for this card right now: fold it if
+	 * the button is showing a minus, grow it a child if a plus. The button's
+	 * own icon comes from the same question (`branchButton.ts`), so the press
+	 * cannot mean something the icon is not saying.
+	 */
+	toggleBranch(id: string): void;
 	/** Write an indented text block under the node, and open it to be written. */
 	addBlock(id: string): void;
 	removeNode(id: string): void;
@@ -219,7 +226,7 @@ export function attachInteractions(controller: MapController): () => void {
 		const add = target.closest<HTMLElement>(".mm-add");
 		if (add) {
 			const id = nodeIdFrom(add);
-			if (id) controller.addChildTo(id);
+			if (id) controller.toggleBranch(id);
 			ev.stopPropagation();
 			return;
 		}

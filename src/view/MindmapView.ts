@@ -67,6 +67,7 @@ import type { Snapshot } from "../export/snapshot.ts";
 import { EXPORT_COMMANDS, runExport } from "../export/run.ts";
 import type { ExportFormat } from "../export/run.ts";
 import { Canvas } from "./canvas.ts";
+import { branchAction, branchIcon, showsPlus } from "./branchButton.ts";
 import { Frame } from "./frame.ts";
 import { clampedMargin, covers, emptyPlan, overlaps, planCull, viewBoxFrom } from "./culling.ts";
 import type { CullPlan, ViewBox } from "./culling.ts";
@@ -1500,6 +1501,7 @@ export class MindmapView extends TextFileView implements MapController {
 				collapsed,
 				hasChildren: this.childCount(node, showBody) > 0,
 				hiddenCount: collapsed ? this.hiddenCount(node, showBody) : 0,
+				selected: this.selectedId() === node.id,
 			});
 			this.elements.set(node.id, element);
 			if (element.hasMath) sawMath = true;
@@ -2048,11 +2050,62 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	private applySelection(): void {
-		for (const element of this.elements.values()) element.el.removeClass("is-selected");
+		const previous: NodeElement[] = [];
+		for (const element of this.elements.values()) {
+			if (element.el.hasClass("is-selected")) previous.push(element);
+			element.el.removeClass("is-selected");
+		}
 		const node = this.selectedNode();
-		if (node) this.elements.get(node.id)?.el.addClass("is-selected");
+		const picked = node ? this.elements.get(node.id) : undefined;
+		if (picked) picked.el.addClass("is-selected");
+		// The branch button answers to the picked state, and the selection moves
+		// without a paint: the class and icon the paint built the button with
+		// were the state then, not the state now. Both ends of the move are
+		// re-asked here -- the card picked and the card unpicked -- so the minus
+		// the ring lands on becomes the plus, and the one it leaves grows its
+		// minus back.
+		const ends = new Set<NodeElement>();
+		if (picked) ends.add(picked);
+		for (const element of previous) ends.add(element);
+		for (const element of ends) {
+			this.syncBranchButton(element, element === picked);
+		}
 		// The corner follows the selection when the setting asks it to.
 		this.applyToolbarVisibility();
+	}
+
+	/**
+	 * Re-ask the branch button what it does, for the state the card is in now.
+	 *
+	 * The paint built the button from the same question, but the answer moves
+	 * when the selection or the fold does, and neither of those repaints the
+	 * card. The icon is only re-drawn when it changes: `setIcon` replaces the
+	 * child it has, and a swap per selection move would flicker for nothing.
+	 */
+	private syncBranchButton(element: NodeElement, selected: boolean): void {
+		if (!element.add) return;
+		const id = element.el.dataset.id;
+		const layout = id ? this.layoutFor(id) : null;
+		if (!layout) return;
+		const action = branchAction({
+			hasChildren: this.childCount(layout.node, this.plugin.settings.showBodyNodes) > 0,
+			collapsed: this.collapsedKeys.has(layout.node.key),
+			selected,
+		});
+		const plus = showsPlus(action);
+		element.add.removeClass("is-plus", "is-minus");
+		element.add.addClass(plus ? "is-plus" : "is-minus");
+		element.add.setAttribute(
+			"aria-label",
+			t(action === "fold" ? "view.node.collapse" : "view.menu.addChild"),
+		);
+		if (element.add.dataset.branchAction !== action) {
+			element.add.dataset.branchAction = action;
+			setIcon(element.add, branchIcon(action));
+			if (!element.add.firstElementChild) {
+				element.add.setText(action === "fold" ? "−" : "+");
+			}
+		}
 	}
 
 	private selectedNode(): MindNode | null {
@@ -2689,6 +2742,27 @@ export class MindmapView extends TextFileView implements MapController {
 			if (this.collapsedKeys.has(node.key)) this.collapsedKeys.delete(node.key);
 			else this.collapsedKeys.add(node.key);
 			this.paint("fold");
+		});
+	}
+
+	/**
+	 * What the branch button's press means for this card right now.
+	 *
+	 * The button is drawn from the same question -- see `branchButton.ts` -- so
+	 * the press and the icon cannot disagree: a minus on the card folds it, a
+	 * plus grows it a child. The card that was picked when the button was built
+	 * may have been unpicked since, which is why the question is asked again
+	 * here instead of the answer being read off the DOM.
+	 */
+	toggleBranch(id: string): void {
+		this.withNode(id, (_parsed, node) => {
+			const action = branchAction({
+				hasChildren: this.childCount(node, this.plugin.settings.showBodyNodes) > 0,
+				collapsed: this.collapsedKeys.has(node.key),
+				selected: this.selectedId() === id,
+			});
+			if (action === "fold") this.toggleFold(id);
+			else this.addChildTo(id);
 		});
 	}
 

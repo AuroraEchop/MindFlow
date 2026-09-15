@@ -4,6 +4,7 @@ import { t } from "../i18n.ts";
 import type { LayoutNode } from "../layout/tidyTree.ts";
 import { nextInlineToken } from "../model/inlineText.ts";
 import type { InlineKind } from "../model/inlineText.ts";
+import { branchAction, branchIcon, showsPlus } from "./branchButton.ts";
 import { renderMathInto } from "./math.ts";
 import { MATH_DISPLAY, MATH_INLINE } from "./mathSyntax.ts";
 import type { NodeMaxWidth } from "./nodeWidth.ts";
@@ -152,6 +153,14 @@ export interface NodeElementOptions {
 	hasChildren: boolean;
 	/** Shown on the count while collapsed. */
 	hiddenCount: number;
+	/**
+	 * The card is the selected one, which is what the button answers to: a
+	 * picked card's button is the plus, an unpicked branch's is the minus. The
+	 * paint builds the button in the state it knows; the view re-asks the
+	 * question when the selection moves, because the selection moves without a
+	 * paint.
+	 */
+	selected: boolean;
 }
 
 export interface NodeElement {
@@ -257,15 +266,22 @@ export function buildNodeElement(
 	// reaches below.
 	//
 	// At most two circles, and at most one of them is the button. A closed
-	// branch shows the count of what is down there; the button is always the
-	// plus that grows a child -- hover is how the user says "work on this one",
-	// and the thing you do to the card you are working on is add to it. Closing
-	// an open branch is the toolbar's fold-all or a shortcut, not this button:
-	// a circle that switched between growing and closing made the same press
-	// mean opposite things depending on state the pointer cannot see.
+	// branch shows the count of what is down there; the button shows what a
+	// press does right now -- the minus that closes an open branch while the
+	// card sits unpicked, the plus that grows a child once the card is picked
+	// or all along when there is nothing to close. The state the button answers
+	// to is visible without a pointer -- the selection ring -- so a press
+	// meaning one thing at rest and another when picked is readable, and it is
+	// what the user asked the button to be. See `branchButton.ts`.
 	let toggle: HTMLElement | null = null;
 	let add: HTMLElement | null = null;
 	if (opts.hasChildren || opts.addable) {
+		// The stylesheet keeps a branch button visible without a hover -- it is
+		// the folding affordance, and folding has to work from a card the
+		// pointer is nowhere near. A leaf's button stays hover-only: without a
+		// branch to close there is nothing to keep on screen, and a ring of
+		// dashes beside every leaf is noise.
+		if (opts.hasChildren) el.addClass("has-children");
 		const tools = row.createDiv({ cls: "mm-tools" });
 
 		// The count, and only while the branch is closed. It stays out of the
@@ -282,13 +298,20 @@ export function buildNodeElement(
 		}
 
 		if (opts.addable) {
-			add = tools.createDiv({ cls: "mm-add" });
+			const action = branchAction(opts);
+			add = tools.createDiv({
+				cls: ["mm-add", showsPlus(action) ? "is-plus" : "is-minus"],
+			});
 			add.setAttribute("role", "button");
-			add.setAttribute("aria-label", t("view.menu.addChild"));
-			setIcon(add, "plus");
+			add.setAttribute(
+				"aria-label",
+				t(action === "fold" ? "view.node.collapse" : "view.menu.addChild"),
+			);
+			add.dataset.branchAction = action;
+			setIcon(add, branchIcon(action));
 			// `setIcon` is silent when the id is not in the bundled set, which
 			// would leave an invisible but clickable circle on the card.
-			if (!add.firstElementChild) add.setText("+");
+			if (!add.firstElementChild) add.setText(action === "fold" ? "−" : "+");
 		}
 	}
 
