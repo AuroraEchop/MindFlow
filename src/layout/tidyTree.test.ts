@@ -230,46 +230,64 @@ test("the root shares the single branch's row, whatever the subtree looks like",
 	assertNoOverlaps(root.children);
 });
 
-test("a balanced branch that lands a step away from the root's row is snapped onto it", () => {
-	// The same 9-pixel residue survives in balanced mode: the left group is
-	// centred on the range it covers, and a branch whose last leaf carries an
-	// annotation sits (first height - last height) / 4 below that range's
-	// middle. When the branch lands near enough to the root's row that its
-	// connector would be a step rather than a turn, the whole subtree moves onto
-	// the row -- the user's own reading of the bug: "move the left tree down a
-	// little". The subtree moves as one, so nothing inside it changes shape.
+test("a balanced group of one branch pins that branch to the root's row", () => {
+	// The connector from the root to a single branch is a straight horizontal
+	// line, and a step or a slant on it reads as a bug, not as a turn. The group
+	// of one is centred on its one member, so the two middles agree exactly --
+	// without any branch being moved off where `place` put it.
+	//
+	// The fixture is the shape that produced a nine-pixel step: twelve leaves
+	// whose last one carries an annotation, first 36px, last 72px. Centring the
+	// group on the range it covers put the branch (36 - 72) / 4 = 9px off the
+	// root's row; centring it on its first-and-last middles does not.
 	const heights = [36];
 	while (heights.length < 11) heights.push(36);
 	heights.push(72);
 	const root = build({
-		// One light branch on the right, the annotated one on the left.
+		// One light branch on the right, the annotated one alone on the left.
 		children: [leaf(), { children: heights.map((h) => ({ ...leaf(260, h) })) }],
 	});
 	layoutTree(root, OPTS);
 
 	const branch = root.children.find((n) => n.children.length > 0)!;
 	assert.equal(branch.side, -1, "the fixture did not mirror the branch to the left");
-	const rootMiddle = root.y + root.cardHeight / 2;
-	const branchMiddle = branch.y + branch.cardHeight / 2;
-	const offRow = Math.abs(branchMiddle - rootMiddle);
-	assert.ok(offRow === 0 || offRow >= 12, `the branch sits ${offRow}px off the root's row`);
+	assert.equal(
+		branch.y + branch.cardHeight / 2,
+		root.y + root.cardHeight / 2,
+		"the branch is off the root's row",
+	);
 	assertNoOverlaps(root.children);
 });
 
-test("a branch that cannot reach the row without hitting a sibling keeps its place", () => {
-	// Snapping spends the gap between siblings, and may not spend a sibling's
-	// box. With the gaps spent to nothing, a middle branch within a step of the
-	// row has nowhere to go -- the guard refuses the move, and the honest elbow
-	// stays. What may never happen is a snap that lands on a sibling: whatever
-	// the guard allows, the result still does not overlap.
+test("a parent with several children never has one snapped onto its row", () => {
+	// The fan around a parent with several children is structure: each child's
+	// elbow is as tall as its place in the fan asks, and sliding a child that
+	// happens to land near the parent's row onto it would spend the even
+	// spacing the siblings were placed at. What "not moved" can be asserted as
+	// is the placement `place` itself gives: tops separated by node box plus
+	// gap, and the parent on the middle of its first and last child's cards --
+	// no post-pass rewriting any of it afterwards.
 	const root = build({
-		children: [
-			{ ...leaf(120, 40), ann: 6 },
-			{ ...leaf(120, 30), ann: 2 },
-			{ ...leaf(120, 40), ann: 8 },
-		],
+		children: [{ ...leaf(120, 40), ann: 6 }, leaf(120, 30), { ...leaf(120, 40), ann: 6 }],
 	});
-	layoutTree(root, { ...OPTS, mode: "right", verticalGap: 0 });
+	layoutTree(root, { ...OPTS, mode: "right" });
+
+	for (let i = 1; i < root.children.length; i++) {
+		const prev = root.children[i - 1];
+		const child = root.children[i];
+		assert.equal(
+			child.y - (prev.y + prev.height),
+			OPTS.verticalGap,
+			`child ${i} is not a gap away from its predecessor`,
+		);
+	}
+	const first = root.children[0];
+	const last = root.children[root.children.length - 1];
+	const middle = (first.y + first.cardHeight / 2 + last.y + last.cardHeight / 2) / 2;
+	assert.ok(
+		Math.abs(root.y + root.cardHeight / 2 - middle) < 0.001,
+		"the parent is not on its children's first-and-last middle",
+	);
 	assertNoOverlaps(root.children);
 });
 

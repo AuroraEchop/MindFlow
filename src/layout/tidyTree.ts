@@ -143,103 +143,33 @@ function translate(n: LayoutNode, dx: number, dy: number): void {
 }
 
 /**
- * How much vertical run a right-angled connector needs before its turn reads
- * as a turn. A branch that landed nearer its parent's row than this gets moved
- * onto the row outright: the run is residue of stacking, not a placement
- * anybody asked for, and a step a few pixels tall is a kink in a line that
- * ought to be straight.
- */
-const ROW_SNAP = 12;
-
-/** The vertical extent of a subtree: node boxes, annotation strips included. */
-function subtreeExtent(n: LayoutNode): { top: number; bottom: number } {
-	let top = n.y;
-	let bottom = n.y + n.height;
-	for (const c of n.children) {
-		const e = subtreeExtent(c);
-		if (e.top < top) top = e.top;
-		if (e.bottom > bottom) bottom = e.bottom;
-	}
-	return { top, bottom };
-}
-
-/**
- * Whether shifting one child's subtree vertically keeps it clear of its
- * siblings. The gap between siblings is spacing the layout placed them with,
- * so the shift may spend part of it, but it may not spend a sibling's box.
+ * The middle a group is centred on: the middle of its first and last child's
+ * cards, which is the same reading of "centre" `place` gives every parent
+ * inside the group.
  *
- * Siblings are stacked vertically per side: in balanced mode the root's two
- * groups sit beside each other and overlap vertically on purpose, so only the
- * nearest sibling on the *same side* bounds the move.
- */
-function canAlignWithSiblings(group: LayoutNode[], index: number, dy: number): boolean {
-	const child = group[index];
-	const extent = subtreeExtent(child);
-	const top = extent.top - dy;
-	const bottom = extent.bottom - dy;
-	let prev = index - 1;
-	while (prev >= 0 && group[prev].side !== child.side) prev--;
-	if (prev >= 0 && top < subtreeExtent(group[prev]).bottom) return false;
-	let next = index + 1;
-	while (next < group.length && group[next].side !== child.side) next++;
-	if (next < group.length && bottom > subtreeExtent(group[next]).top) return false;
-	return true;
-}
-
-/**
- * Snap every branch that landed within a step's length of its parent's row
- * onto that row, then recurse down the tree.
+ * Not the middle of the range the group covers -- that drifted off the
+ * first-and-last reading by (first card height - last card height) / 4 once
+ * the two differed, which is a branch whose last leaf carries an annotation,
+ * and the drift came out of the connectors as a step. A group of one centres
+ * on that one, which pins a single branch to the root's row and a single-child
+ * parent to its child's row, whatever the subtree below them looks like.
  *
- * Most of the vertical spread a parent sees is structure: children above and
- * below it, joined by elbows as tall as the spread asks for. The residue is the
- * branch a few pixels off the row for no reason stronger than where the
- * stacking left it -- a group centred on a range whose first and last cards
- * differ in height, a sibling's middle landing where it lands. The connector to
- * that branch is a step shorter than the line is wide, which is the kink the
- * map keeps being asked not to draw. Moving the branch's whole subtree onto the
- * row is what the connector already assumes -- a parent and a child on one row
- * -- so that is what this does, and where a sibling's box would not pay for the
- * move, the elbow stays: an honest elbow beats a squeezed layout.
+ * A parent with several children is spread by `place` and never moved off it:
+ * the fan around such a parent is structure, each child's elbow as tall as its
+ * place in the fan asks, and sliding one child onto the row would spend the
+ * even spacing the others were placed at.
  */
-function alignNearRows(n: LayoutNode): void {
-	for (let i = 0; i < n.children.length; i++) {
-		const child = n.children[i];
-		const dy = child.y + child.cardHeight / 2 - (n.y + n.cardHeight / 2);
-		if (dy === 0 || Math.abs(dy) >= ROW_SNAP) continue;
-		if (!canAlignWithSiblings(n.children, i, dy)) continue;
-		translate(child, 0, -dy);
-	}
-	for (const child of n.children) alignNearRows(child);
+function groupMiddle(group: LayoutNode[]): number {
+	if (group.length === 0) return 0;
+	const first = group[0];
+	const last = group[group.length - 1];
+	return (first.y + first.cardHeight / 2 + last.y + last.cardHeight / 2) / 2;
 }
 
 function mirror(n: LayoutNode, axis: number): void {
 	n.x = 2 * axis - n.x - n.cardWidth;
 	n.side = -1;
 	for (const c of n.children) mirror(c, axis);
-}
-
-/**
- * The vertical middle of the cards a placed group covers.
- *
- * The cards, not the node boxes. The root is centred on what its branches read
- * as, and an annotation strip hanging off the bottom one is not something to
- * counterbalance -- centring on the occupied box instead would slide every card
- * on the map up by half the strip. With no strip anywhere this is exactly half
- * the height `placeGroup` reports, which is what keeps it from moving a map
- * that has none.
- */
-function cardMiddle(group: LayoutNode[]): number {
-	if (group.length === 0) return 0;
-	let top = Infinity;
-	let bottom = -Infinity;
-	const stack = [...group];
-	while (stack.length > 0) {
-		const n = stack.pop() as LayoutNode;
-		if (n.y < top) top = n.y;
-		if (n.y + n.cardHeight > bottom) bottom = n.y + n.cardHeight;
-		stack.push(...n.children);
-	}
-	return (top + bottom) / 2;
 }
 
 function setSide(n: LayoutNode, side: Side): void {
@@ -295,40 +225,30 @@ export function layoutTree(root: LayoutNode, opts: LayoutOptions): LayoutResult 
 
 	if (opts.mode === "right" || root.children.length < 2) {
 		placeGroup(root.children, childX, 0, opts);
-		// The root centres the way `place` centres every other parent: on the
-		// middle of its first and last child's cards. Not on `cardMiddle` of the
-		// whole group -- that is the range the subtree covers, and it drifts off
-		// the parent's own centre by (first card height - last card height) / 4
-		// once the two differ, which is a branch whose last leaf carries an
-		// annotation. The root and the branch then disagree about the row they
-		// share by that much, and the connector between them -- a straight line,
-		// since a parent and its only child sit on one row -- grew a step. With
-		// one child this is exactly the child's middle, so the two are pinned to
-		// the same row whatever the subtree below looks like.
-		if (root.children.length > 0) {
-			const first = root.children[0];
-			const last = root.children[root.children.length - 1];
-			const middle =
-				(first.y + first.cardHeight / 2 + last.y + last.cardHeight / 2) / 2;
-			for (const child of root.children) translate(child, 0, -middle);
-		}
+		// Every parent centres on `groupMiddle`'s reading of centre -- the
+		// middle of the first and last child's cards, `place`'s own. A group of
+		// one centres on that one, so a parent and its only child are pinned to
+		// the same row whatever the subtree below looks like, and the connector
+		// between them is the straight line that reading promises. Read once,
+		// before any child moves: the middle is computed off the children, and
+		// moving one changes it.
+		const middle = groupMiddle(root.children);
+		for (const child of root.children) translate(child, 0, -middle);
 		setSideAll(root.children, 1);
 	} else {
 		const { right, left } = partition(root.children);
 
 		placeGroup(right, childX, 0, opts);
-		const middleRight = cardMiddle(right);
+		const middleRight = groupMiddle(right);
 		for (const child of right) translate(child, 0, -middleRight);
 		setSideAll(right, 1);
 
 		placeGroup(left, childX, 0, opts);
-		const middleLeft = cardMiddle(left);
+		const middleLeft = groupMiddle(left);
 		for (const child of left) translate(child, 0, -middleLeft);
 		const axis = root.x + root.cardWidth / 2;
 		for (const child of left) mirror(child, axis);
 	}
-
-	alignNearRows(root);
 
 	return normalize(root, opts.padding);
 }
