@@ -197,6 +197,39 @@ test("a single branch is not split across both sides", () => {
 	assert.equal(root.children[0].side, 1);
 });
 
+test("the root shares the single branch's row, whatever the subtree looks like", () => {
+	// One branch is one row: the root and the branch are pinned to the same card
+	// middle, because the connector between them is a straight horizontal line
+	// and a step or a slant on it reads as a bug, not as a turn.
+	//
+	// Centring the root on the range the subtree covers instead gives the two
+	// middles a gap of (first card height - last card height) / 4 once the
+	// subtree's first and last cards differ -- a branch whose last leaf carries
+	// an annotation, say, which is exactly the shape this fixture is. The branch
+	// ends up (36 - 72) / 4 = 9px off the root's row, which is where the 9-pixel
+	// step on a one-branch map came from.
+	const heights = [36];
+	while (heights.length < 11) heights.push(36);
+	heights.push(72);
+	const root = build({
+		children: [{ children: heights.map((h) => ({ ...leaf(260, h) })) }],
+	});
+	layoutTree(root, OPTS);
+
+	const branch = root.children[0];
+	const rootMiddle = root.y + root.cardHeight / 2;
+	const branchMiddle = branch.y + branch.cardHeight / 2;
+	assert.equal(branchMiddle, rootMiddle, "the branch is off the root's row");
+
+	// The subtree itself was moved, not squeezed: its own internals still obey
+	// the centring `place` gives every other parent.
+	const leaves = branch.children;
+	const firstMiddle = leaves[0].y + leaves[0].cardHeight / 2;
+	const lastMiddle = leaves[leaves.length - 1].y + leaves[leaves.length - 1].cardHeight / 2;
+	assert.equal(branchMiddle, (firstMiddle + lastMiddle) / 2);
+	assertNoOverlaps(root.children);
+});
+
 test("branch indices propagate to every descendant for colouring", () => {
 	const root = build({
 		children: [{ children: [{ children: [leaf()] }] }, { children: [leaf()] }],

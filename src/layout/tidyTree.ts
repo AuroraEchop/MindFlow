@@ -225,8 +225,23 @@ export function layoutTree(root: LayoutNode, opts: LayoutOptions): LayoutResult 
 
 	if (opts.mode === "right" || root.children.length < 2) {
 		placeGroup(root.children, childX, 0, opts);
-		const middle = cardMiddle(root.children);
-		for (const child of root.children) translate(child, 0, -middle);
+		// The root centres the way `place` centres every other parent: on the
+		// middle of its first and last child's cards. Not on `cardMiddle` of the
+		// whole group -- that is the range the subtree covers, and it drifts off
+		// the parent's own centre by (first card height - last card height) / 4
+		// once the two differ, which is a branch whose last leaf carries an
+		// annotation. The root and the branch then disagree about the row they
+		// share by that much, and the connector between them -- a straight line,
+		// since a parent and its only child sit on one row -- grew a step. With
+		// one child this is exactly the child's middle, so the two are pinned to
+		// the same row whatever the subtree below looks like.
+		if (root.children.length > 0) {
+			const first = root.children[0];
+			const last = root.children[root.children.length - 1];
+			const middle =
+				(first.y + first.cardHeight / 2 + last.y + last.cardHeight / 2) / 2;
+			for (const child of root.children) translate(child, 0, -middle);
+		}
 		setSideAll(root.children, 1);
 	} else {
 		const { right, left } = partition(root.children);

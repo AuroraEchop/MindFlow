@@ -39,29 +39,6 @@ function strokeWidth(depth: number): number {
 export type EdgeStyle = "curve" | "orthogonal";
 
 /**
- * How far apart two faces may sit vertically before the elbow earns its elbow.
- *
- * The right angle is there to make a column of children read as one bus: out of
- * the parent's face, a single shared turn, and in to each child's. That reading
- * only survives while the turn is a visible length of line. A parent and its
- * only child are centred on each other, so the vertical run between them is
- * normally exactly zero -- but the layout centres on measured card heights, and
- * a measurement that lands a pixel or two off (a card re-measured a frame after
- * the one it was laid out in, a line-height that rounds) leaves a run of a few
- * pixels. Drawn as an elbow that is not a bus, it is a step: two horizontal
- * segments joined by a stub shorter than the stroke is wide, which reads as a
- * kink in an otherwise straight connector.
- *
- * Below this, the two ends are close enough to the same row that the run reads
- * as noise rather than as a turn, so the connector is one horizontal line
- * through the middle of it. Not a straight line *between* the anchors -- the
- * style is right-angled, and a line between two points of different heights is
- * a diagonal, which is exactly what this style is not for. Above the threshold,
- * the run is long enough to be the turn it was meant to be.
- */
-const ELBOW_MIN_RUN = 12;
-
-/**
  * The `d` attribute for one connector.
  *
  * Both styles stay inside the bounding box of their two anchors -- the curve
@@ -79,17 +56,16 @@ export function edgePath(
 	const [cx, cy] = to;
 
 	if (style === "orthogonal") {
-		// A run too short to read as a turn is noise from a measurement a pixel
-		// or two out, so the two ends are drawn as one horizontal line through
-		// the middle of it -- each anchor gives up half the run, which stays
-		// inside the box, and nothing bends. See ELBOW_MIN_RUN.
-		if (Math.abs(cy - py) < ELBOW_MIN_RUN) {
-			const my = (py + cy) / 2;
-			return `M ${px} ${my} L ${cx} ${my}`;
-		}
 		// Out of the parent's face, across, up or down, and in to the child's.
 		// The turn sits halfway between the two faces, which is what makes a
-		// column of children read as one bus rather than as a fan.
+		// column of children read as one bus rather than as a fan. On the same
+		// row it degrades to one straight horizontal line: the two L commands
+		// to the turn collapse onto it. Same-row is the norm for a parent and
+		// its only child -- the layout pins them there -- and for the rest the
+		// elbow is the shape the style names. The anchors are never moved to
+		// make a segment level: if the ends are off-row the turn says so,
+		// because a connector that leaves the middle of a face is pointing at
+		// nothing.
 		const mx = (px + cx) / 2;
 		return `M ${px} ${py} L ${mx} ${py} L ${mx} ${cy} L ${cx} ${cy}`;
 	}
