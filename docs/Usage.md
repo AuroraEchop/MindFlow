@@ -54,8 +54,8 @@ If the release page offers `mindflow.zip`, download that and unzip it into
 **Build from source:**
 
 ```bash
-git clone https://github.com/AuroraEchop/obsidian-mindflow.git
-cd obsidian-mindflow
+git clone https://github.com/AuroraEchop/MindFlow.git
+cd MindFlow
 npm install
 npm run build
 ```

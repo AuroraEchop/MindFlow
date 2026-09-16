@@ -5,7 +5,7 @@ import process from "node:process";
 import { builtinModules } from "node:module";
 
 const banner = `/*
-MindFlow — https://github.com/AuroraEchop/obsidian-mindflow
+MindFlow — https://github.com/AuroraEchop/MindFlow
 Copyright (c) 2026 AuroraEchop. MIT licensed.
 
 This is a generated file. Source lives in src/.

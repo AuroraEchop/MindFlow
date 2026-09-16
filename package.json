@@ -25,12 +25,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AuroraEchop/obsidian-mindflow.git"
+    "url": "git+https://github.com/AuroraEchop/MindFlow.git"
   },
   "bugs": {
-    "url": "https://github.com/AuroraEchop/obsidian-mindflow/issues"
+    "url": "https://github.com/AuroraEchop/MindFlow/issues"
   },
-  "homepage": "https://github.com/AuroraEchop/obsidian-mindflow#readme",
+  "homepage": "https://github.com/AuroraEchop/MindFlow#readme",
   "devDependencies": {
     "@types/node": "^24.3.0",
     "esbuild": "^0.28.1",
