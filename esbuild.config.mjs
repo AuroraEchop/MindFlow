@@ -5,8 +5,8 @@ import process from "node:process";
 import { builtinModules } from "node:module";
 
 const banner = `/*
-Mindmap Mode — https://github.com/PHANTOM-Nw/obsidian-mindmap-mode
-Copyright (c) 2026 PHANTOM-Nw. MIT licensed.
+MindFlow — https://github.com/AuroraEchop/obsidian-mindflow
+Copyright (c) 2026 AuroraEchop. MIT licensed.
 
 This is a generated file. Source lives in src/.
 */

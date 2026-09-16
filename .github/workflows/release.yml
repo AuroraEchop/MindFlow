@@ -70,9 +70,9 @@ jobs:
       # keeping it is a deliberate answer to it.
       - name: Package a convenience zip
         run: |
-          mkdir -p dist/mindmap-mode
-          cp main.js manifest.json styles.css LICENSE dist/mindmap-mode/
-          (cd dist && zip -r mindmap-mode.zip mindmap-mode)
+          mkdir -p dist/mindflow
+          cp main.js manifest.json styles.css LICENSE dist/mindflow/
+          (cd dist && zip -r mindflow.zip mindflow)
 
       - name: Attest the build provenance
         uses: actions/attest-build-provenance@v2
@@ -80,7 +80,7 @@ jobs:
           subject-path: |
             main.js
             styles.css
-            dist/mindmap-mode.zip
+            dist/mindflow.zip
 
       - name: Write release notes
         env:
@@ -108,17 +108,17 @@ jobs:
           **手动安装：** 把下方的 \`main.js\`、\`manifest.json\`、\`styles.css\` 下载到
 
           \`\`\`
-          <your vault>/.obsidian/plugins/mindmap-mode/
+          <your vault>/.obsidian/plugins/mindflow/
           \`\`\`
 
-          然后在 *设置 → 第三方插件* 中启用 **Mindmap Mode**。
-          （或者下载 \`mindmap-mode.zip\`，解压到 \`.obsidian/plugins/\` 下，一个文件搞定。）
+          然后在 *设置 → 第三方插件* 中启用 **MindFlow**。
+          （或者下载 \`mindflow.zip\`，解压到 \`.obsidian/plugins/\` 下，一个文件搞定。）
 
           **BRAT：** 把 \`$REPO\` 添加为 beta 插件。
 
           **Manual:** download \`main.js\`, \`manifest.json\` and \`styles.css\` below into the folder above,
-          then enable **Mindmap Mode** in *Settings → Community plugins*.
-          (Or download \`mindmap-mode.zip\` and unzip it into \`.obsidian/plugins/\` -- one download instead of three.)
+          then enable **MindFlow** in *Settings → Community plugins*.
+          (Or download \`mindflow.zip\` and unzip it into \`.obsidian/plugins/\` -- one download instead of three.)
 
           **BRAT:** add \`$REPO\` as a beta plugin.
 
@@ -158,7 +158,7 @@ jobs:
             --title "$TAG" \
             --notes-file release-notes.md \
             --draft \
-            main.js manifest.json styles.css LICENSE dist/mindmap-mode.zip
+            main.js manifest.json styles.css LICENSE dist/mindflow.zip
 
       - name: Summary
         env:

@@ -66,7 +66,7 @@ async function boot(): Promise<void> {
 
 		available = true;
 	} catch (error) {
-		console.error("Mindmap Mode: MathJax is unavailable, formulas will stay as text.", error);
+		console.error("MindFlow: MathJax is unavailable, formulas will stay as text.", error);
 		available = false;
 	} finally {
 		probe?.remove();
@@ -156,7 +156,7 @@ function mathSpan(source: string, display: boolean): HTMLElement {
 	} catch (error) {
 		// MathJax throws on malformed TeX. Uncaught, that would escape
 		// buildNodeElement and blank the entire map over one typo in one node.
-		console.error("Mindmap Mode: could not render", rawOf(source, display), error);
+		console.error("MindFlow: could not render", rawOf(source, display), error);
 		span.empty();
 		span.addClass("mm-math-error");
 		span.setText(rawOf(source, display));

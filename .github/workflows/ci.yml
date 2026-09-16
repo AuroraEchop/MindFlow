@@ -54,11 +54,11 @@ jobs:
       # the artifact and unzip it straight into <vault>/.obsidian/plugins/.
       - name: Stage the plugin folder
         run: |
-          mkdir -p dist/mindmap-mode
-          cp main.js manifest.json styles.css LICENSE dist/mindmap-mode/
+          mkdir -p dist/mindflow
+          cp main.js manifest.json styles.css LICENSE dist/mindflow/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mindmap-mode-${{ github.sha }}
-          path: dist/mindmap-mode
+          name: mindflow-${{ github.sha }}
+          path: dist/mindflow
           if-no-files-found: error

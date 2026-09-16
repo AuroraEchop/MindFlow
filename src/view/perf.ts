@@ -50,7 +50,7 @@ export function browserHost(): PerfHost {
 				/* as above */
 			}
 		},
-		debug: (detail) => console.debug("Mindmap Mode perf", detail),
+		debug: (detail) => console.debug("MindFlow perf", detail),
 	};
 }
 

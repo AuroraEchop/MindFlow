@@ -13,7 +13,7 @@ import { ensureMath, finishRenderMath } from "./math.ts";
  * is shown whole and rendered by Obsidian's own reading-view pipeline, which is
  * the only renderer that gets every case right.
  *
- * It is a `Modal` rather than the view's `.mm-popover` because `.mindmap-mode`
+ * It is a `Modal` rather than the view's `.mm-popover` because `.mindflow`
  * is `overflow: hidden` -- a popover big enough to read a long block would be
  * clipped by the viewport it hangs in.
  */
@@ -190,7 +190,7 @@ export class BlockDialog extends Modal {
 			await finishRenderMath();
 		} catch (error) {
 			// Uncaught, a single malformed block would leave the dialog blank.
-			console.error("Mindmap Mode: could not render this block.", error);
+			console.error("MindFlow: could not render this block.", error);
 			if (token !== this.renderToken) return;
 			host.empty();
 			host.createEl("pre", { text });

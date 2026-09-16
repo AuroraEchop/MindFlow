@@ -34,7 +34,7 @@ import type { ParkedUndo, UndoStacks } from "./undoPark.ts";
  */
 const PARKED_NOTES = 20;
 
-const HEADER_BUTTON_CLASS = "mindmap-mode-toggle";
+const HEADER_BUTTON_CLASS = "mindflow-toggle";
 
 /** Where the fold store sits in `data.json`, beside the flat settings. */
 const FOLD_STATE_KEY = "foldState";
@@ -124,7 +124,7 @@ export default class MindmapPlugin extends Plugin {
 		// build is running -- "the new thing does nothing" and "an old build is
 		// running" look exactly alike from the outside, and this is the difference
 		// made visible without a file timestamp or a guess.
-		console.log(`mindmap-mode ${this.manifest.version} loaded`);
+		console.log(`mindflow ${this.manifest.version} loaded`);
 
 		await this.loadSettings();
 

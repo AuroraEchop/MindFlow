@@ -3,7 +3,7 @@ tags: [demo, mindmap]
 status: draft
 ---
 
-# Mindmap Mode
+# MindFlow
 
 This paragraph belongs to the root node. It stays exactly where it is in the
 file — the map shows it as a `≡` badge instead of a card.

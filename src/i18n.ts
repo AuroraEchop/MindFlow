@@ -317,7 +317,7 @@ const EN = {
 	// --- what the plugin says at load ---------------------------------------
 	"main.notice.onlyMarkdown": "Only markdown notes can be shown as a mind map.",
 	"main.notice.update":
-		"Mindmap Mode was updated. A line written as \": text\" under a heading or list item now hangs under that node's card as an annotation instead of becoming a card of its own. Settings → Mindmap Mode → Appearance → Inline annotations turns it off.",
+		"MindFlow was updated. A line written as \": text\" under a heading or list item now hangs under that node's card as an annotation instead of becoming a card of its own. Settings → MindFlow → Appearance → Inline annotations turns it off.",
 
 	// --- the export, one pair of keys per format ----------------------------
 	"export.canvas.name": "Export mind map as Canvas",
@@ -624,7 +624,7 @@ const ZH: Record<I18nKey, string> = {
 	// --- 加载时的提示 --------------------------------------------------------
 	"main.notice.onlyMarkdown": "只有 Markdown 笔记可以显示为思维导图。",
 	"main.notice.update":
-		"Mindmap Mode 已更新。在标题或列表项下写成 “: text” 的行，现在会作为注解挂在那个节点的卡片下方，而不是成为独立卡片。可在「设置 → Mindmap Mode → 外观 → 行内注解」中关闭。",
+		"MindFlow 已更新。在标题或列表项下写成 “: text” 的行，现在会作为注解挂在那个节点的卡片下方，而不是成为独立卡片。可在「设置 → MindFlow → 外观 → 行内注解」中关闭。",
 
 	// --- 导出，每种格式一对键 ------------------------------------------------
 	"export.canvas.name": "导出思维导图为 Canvas",

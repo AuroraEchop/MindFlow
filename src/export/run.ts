@@ -143,7 +143,7 @@ export async function runExport(
 				: t("export.notice.done", { path: created.path }),
 		);
 	} catch (error) {
-		console.error("Mindmap Mode: the export failed.", error);
+		console.error("MindFlow: the export failed.", error);
 		const reason = error instanceof Error ? error.message : String(error);
 		new Notice(t("export.notice.failed", { reason }));
 	}
