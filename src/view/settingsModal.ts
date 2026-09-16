@@ -43,19 +43,17 @@ export class SettingsModal extends Modal {
 		// they like while the map stays visible behind it.
 		const titleEl = this.titleEl;
 		if (titleEl) {
-			titleEl.style.cursor = "move";
-			titleEl.style.userSelect = "none";
+			titleEl.addClass("mm-settings-handle");
 			let dragOrigin: { x: number; y: number; left: number; top: number } | null = null;
 			titleEl.addEventListener("pointerdown", (ev) => {
 				if (ev.button !== 0) return;
 				const rect = this.modalEl.getBoundingClientRect();
-				// Switch from centred to absolutely positioned before dragging,
-				// so `left/top` take effect.
-				this.modalEl.style.position = "fixed";
+				// Switch from centred to pinned before dragging, so `left/top`
+				// take effect. Measured first, because it is the class that
+				// moves it; only `left`/`top` are left to the pointer.
+				this.modalEl.addClass("is-dragging");
 				this.modalEl.style.left = `${rect.left}px`;
 				this.modalEl.style.top = `${rect.top}px`;
-				this.modalEl.style.transform = "none";
-				this.modalEl.style.margin = "0";
 				// Capture the pointer to the title bar. A fast drag leaves the bar
 				// long before the button goes up, and without the capture every
 				// move outside the element is delivered to whatever now sits under

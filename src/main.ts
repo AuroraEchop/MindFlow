@@ -123,8 +123,10 @@ export default class MindmapPlugin extends Plugin {
 		// One line, once, on the way in. With a map open it is not obvious which
 		// build is running -- "the new thing does nothing" and "an old build is
 		// running" look exactly alike from the outside, and this is the difference
-		// made visible without a file timestamp or a guess.
-		console.log(`mindflow ${this.manifest.version} loaded`);
+		// made visible without a file timestamp or a guess. `debug` rather than
+		// `log`: the plugin review allows warn, error and debug, and this is
+		// neither of the first two -- turn Verbose on in the console to see it.
+		console.debug(`mindflow ${this.manifest.version} loaded`);
 
 		await this.loadSettings();
 

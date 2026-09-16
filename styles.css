@@ -1230,6 +1230,22 @@
 	padding-right: 0;
 }
 
+/* The title bar is the window's handle: the pointer says so, and a drag across
+   it never turns into a selection of the title's own text. */
+.mm-settings-handle {
+	cursor: move;
+	user-select: none;
+}
+
+/* A drag takes the window out of the centring Obsidian gives it and pins it
+   where it was measured. `left`/`top` stay out of here -- they come from the
+   pointer, are set inline, and are the one thing a class cannot say. */
+.mm-settings-dialog.is-dragging {
+	position: fixed;
+	transform: none;
+	margin: 0;
+}
+
 /* A column, so `.mm-settings` can be told to fill the height the window fixed.
    `overflow` is what lets this shrink to it: an automatic minimum size does not
    apply to a scroll container, and without one its own content would push the
