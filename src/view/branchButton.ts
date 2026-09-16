@@ -23,10 +23,13 @@ export interface BranchButtonState {
  * The picked card is working on, and what you do to the card you are working
  * on is add to it -- so the picked card's button is the plus whatever else is
  * true. A branch that is open shows the minus while it is at rest: the button
- * is the only folding affordance the card carries, and it is visible without
- * hovering, so closing one branch is a press on the button you can see rather
- * than a hunt for a toolbar. Everything else -- a leaf, a closed branch --
- * offers the plus.
+ * is the only folding affordance the card carries, and it shows while the
+ * pointer is on the card, so closing one branch is a press on the button under
+ * the pointer. Everything else -- a leaf, a closed branch -- offers the plus.
+ *
+ * The button itself is visible only while the pointer is on the card or the
+ * card is picked; this function says what the visible button means, not when
+ * it shows. The visibility matrix is the stylesheet's, next to `.mm-add`.
  */
 export function branchAction(state: BranchButtonState): BranchAction {
 	if (state.selected) return "add";

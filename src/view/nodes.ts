@@ -276,11 +276,14 @@ export function buildNodeElement(
 	let toggle: HTMLElement | null = null;
 	let add: HTMLElement | null = null;
 	if (opts.hasChildren || opts.addable) {
-		// The stylesheet keeps a branch button visible without a hover -- it is
-		// the folding affordance, and folding has to work from a card the
-		// pointer is nowhere near. A leaf's button stays hover-only: without a
-		// branch to close there is nothing to keep on screen, and a ring of
-		// dashes beside every leaf is noise.
+		// The button answers to hover and to the picked state, and nothing else:
+		// hidden while the card sits unpicked and unhovered, the minus while the
+		// pointer is on a branch that can close, the plus for as long as the
+		// card is picked. A leaf's button is hover-only for the same reason.
+		// The visibility matrix lives in the stylesheet next to `.mm-add`; this
+		// side only has to build the button and keep it in sync -- which is
+		// `syncBranchButton`'s job whenever the selection or the fold moves
+		// without a paint.
 		if (opts.hasChildren) el.addClass("has-children");
 		const tools = row.createDiv({ cls: "mm-tools" });
 

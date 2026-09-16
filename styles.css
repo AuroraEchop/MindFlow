@@ -1080,11 +1080,13 @@
    them from the canvas beside every card. It holds its place in the row either
    way, so nothing shifts when it appears.
 
-   A branch that can be closed wears the minus instead, and the minus stays
-   visible without a hover -- it is the folding affordance, and folding has to
-   work from a card the pointer is nowhere near. Solid rather than dashed,
-   because unlike the plus it names something that exists: the branch is open
-   right there. */
+   Both states that show it are states the user named: a card with children
+   wears its minus only while the pointer is on it, and the picked card keeps
+   its plus without one -- focus is what turns the fold into an add, and focus
+   is what keeps the button there. Everything else hides until the pointer
+   returns. A branch that can be closed wears the minus, solid rather than
+   dashed, because unlike the plus it names something that exists: the branch
+   is open right there. */
 .mm-add {
 	display: flex;
 	align-items: center;
@@ -1114,8 +1116,7 @@
 }
 
 .mm-node:hover .mm-add,
-.mm-node.is-selected .mm-add,
-.mm-node.has-children .mm-add {
+.mm-node.is-selected .mm-add {
 	opacity: 1;
 	pointer-events: auto;
 }
