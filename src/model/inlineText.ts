@@ -24,6 +24,7 @@ export type InlineKind =
 	| "highlight"
 	| "em"
 	| "wikilink"
+	| "image"
 	| "link"
 	| "embed";
 
@@ -42,6 +43,12 @@ export interface InlineRule {
  * the tie-break contract for an exact draw. `**` has to precede `*`, and the
  * embed rule only survives at the end because `![[x]]` starts one character
  * before the wikilink inside it.
+ *
+ * `image` and `embed` are both built that way: each starts one character before
+ * a rule it contains -- the `link` and the `wikilink` -- and wins on position
+ * rather than on order, which is why the two of them may sit on either side of
+ * it. Without them the leading `!` would stay on the card as text, in front of
+ * a link, and a note's picture would read as `!alt`.
  */
 export const INLINE_RULES: InlineRule[] = [
 	{ kind: "code", re: /`([^`]+)`/g, visible: (m) => m[1], nested: false },
@@ -56,6 +63,15 @@ export const INLINE_RULES: InlineRule[] = [
 		// The alias, or the target when there is none. A target that has been
 		// given a label is not something the reader can see.
 		visible: (m) => m[2] ?? m[1],
+		nested: false,
+	},
+	{
+		kind: "image",
+		re: /!\[([^\]]*)\]\(([^)]+)\)/g,
+		// The alt text, or the target when the note wrote none. Nothing draws
+		// the picture itself -- see the emitter -- so the words beside it are
+		// all a reader has.
+		visible: (m) => m[1] || m[2],
 		nested: false,
 	},
 	{ kind: "link", re: /\[([^\]]+)\]\(([^)]+)\)/g, visible: (m) => m[1], nested: false },

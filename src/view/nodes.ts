@@ -2,139 +2,11 @@ import { setIcon } from "obsidian";
 
 import { t } from "../i18n.ts";
 import type { LayoutNode } from "../layout/tidyTree.ts";
-import { nextInlineToken } from "../model/inlineText.ts";
-import type { InlineKind } from "../model/inlineText.ts";
+import type { Block } from "../model/blocks.ts";
 import { branchAction, branchIcon, showsPlus } from "./branchButton.ts";
-import { renderMathInto } from "./math.ts";
-import { MATH_DISPLAY, MATH_INLINE } from "./mathSyntax.ts";
+import { renderBlocks } from "./blocks.ts";
+import { renderInline } from "./inline.ts";
 import type { NodeMaxWidth } from "./nodeWidth.ts";
-
-/** Carried through the recursion so nested markup can report what it emitted. */
-interface InlineContext {
-	sawMath: boolean;
-}
-
-type Emit = (m: RegExpExecArray, el: HTMLElement, ctx: InlineContext) => void;
-
-/**
- * A link, with its target carried as data rather than as an `href`.
- *
- * Never an `<a href>`: a note that writes `[click](javascript:…)` would then be
- * one click away from running script in the renderer. The target stays inert
- * text until the view is asked to open it, and the view refuses the schemes it
- * does not know.
- */
-function linkSpan(el: HTMLElement, cls: string, label: string, target: string): void {
-	const span = el.createSpan({ cls, text: label });
-	// `<path>` wrapping and a trailing `"title"` are markdown-link syntax, not
-	// part of what the link points at.
-	const href = target.trim().replace(/^<(.*)>$/, "$1").replace(/\s+"[^"]*"$/, "").trim();
-	if (href !== "") span.dataset.href = href;
-}
-
-/**
- * How each inline rule becomes DOM.
- *
- * The rules themselves live in `model/inlineText.ts`, where the search reads
- * them too. A `Record` over the kinds is what keeps the two halves together: a
- * rule added there without an emitter here is a compile error, not a token that
- * silently renders as nothing.
- *
- * Deliberately DOM-based throughout: every value goes in as text, never as
- * HTML, so a note can never inject markup into the map.
- */
-const EMIT: Record<InlineKind, Emit> = {
-	code: (m, el) => el.createEl("code", { cls: "mm-code", text: m[1] }),
-	strong: (m, el, ctx) => renderRange(el.createEl("strong"), m[1], ctx),
-	strike: (m, el, ctx) => renderRange(el.createEl("del"), m[1], ctx),
-	highlight: (m, el, ctx) => renderRange(el.createEl("mark"), m[1], ctx),
-	em: (m, el, ctx) => renderRange(el.createEl("em"), m[1], ctx),
-	wikilink: (m, el) => linkSpan(el, "mm-link", m[2] ?? m[1], m[1]),
-	link: (m, el) => linkSpan(el, "mm-link", m[1], m[2]),
-	embed: (m, el) => linkSpan(el, "mm-embed", m[1], m[1]),
-};
-
-const MATH_PATTERNS: Array<[RegExp, Emit]> = [
-	[
-		MATH_DISPLAY,
-		(m, el, ctx) => {
-			ctx.sawMath = true;
-			renderMathInto(el, m[1], true);
-		},
-	],
-	[
-		MATH_INLINE,
-		(m, el, ctx) => {
-			ctx.sawMath = true;
-			renderMathInto(el, m[1], false);
-		},
-	],
-];
-
-interface Token {
-	start: number;
-	end: number;
-	emit: (el: HTMLElement) => void;
-}
-
-/**
- * Math is scanned first and an inline token only adopted on a strict `<`, so a
- * formula wins an exact-index tie. Everything past that is decided by
- * earliest-match-wins, which is what keeps `$a_b$` away from the `__` rule and
- * `$x*y*z$` away from the `*` rule.
- */
-function nextToken(text: string, from: number, ctx: InlineContext): Token | null {
-	let best: Token | null = null;
-	for (const [re, emit] of MATH_PATTERNS) {
-		re.lastIndex = from;
-		const m = re.exec(text);
-		if (!m) continue;
-		if (best === null || m.index < best.start) {
-			best = {
-				start: m.index,
-				end: m.index + m[0].length,
-				emit: (el) => emit(m, el, ctx),
-			};
-		}
-	}
-	const inline = nextInlineToken(text, from);
-	if (inline && (best === null || inline.start < best.start)) {
-		const emit = EMIT[inline.rule.kind];
-		best = {
-			start: inline.start,
-			end: inline.end,
-			emit: (el) => emit(inline.match, el, ctx),
-		};
-	}
-	return best;
-}
-
-function renderRange(el: HTMLElement, text: string, ctx: InlineContext): void {
-	let i = 0;
-	while (i < text.length) {
-		const token = nextToken(text, i, ctx);
-		if (!token) {
-			el.appendText(text.slice(i));
-			return;
-		}
-		if (token.start > i) el.appendText(text.slice(i, token.start));
-		token.emit(el);
-		i = token.end;
-	}
-}
-
-/** Returns true when the title contained a formula, so the view knows to
- *  re-measure once MathJax has flushed its stylesheet. */
-export function renderInline(el: HTMLElement, text: string): boolean {
-	el.empty();
-	if (text.trim() === "") {
-		el.createSpan({ cls: "mm-placeholder", text: t("view.node.placeholder") });
-		return false;
-	}
-	const ctx: InlineContext = { sawMath: false };
-	renderRange(el, text, ctx);
-	return ctx.sawMath;
-}
 
 export interface NodeElementOptions {
 	/** Null means no annotation; an empty string is an explicit blank block. */
@@ -142,7 +14,16 @@ export interface NodeElementOptions {
 	/** Both caps from `nodeMaxWidth`: the node box, and the card's own text. */
 	maxWidth: NodeMaxWidth;
 	branchColors: boolean;
-	/** Render the text verbatim: code blocks and tables must not be marked up. */
+	/**
+	 * The note content as blocks, when the card holds any worth drawing as
+	 * blocks. Null for everything else, and for every topic card.
+	 */
+	blocks: Block[] | null;
+	/**
+	 * Render the text verbatim: a sample or a table, which are drawn in a
+	 * monospace face where alignment carries meaning. Only reached when
+	 * `blocks` is null, which is every card the block parser did not claim.
+	 */
 	preformatted: boolean;
 	/** Draw the button that opens the block whole, in its own dialog. */
 	expandable: boolean;
@@ -237,7 +118,10 @@ export function buildNodeElement(
 	// rather than at its own.
 	if (opts.maxWidth.text !== null) text.style.maxWidth = `${opts.maxWidth.text}px`;
 	let hasMath = false;
-	if (opts.preformatted) {
+	if (opts.blocks !== null) {
+		el.dataset.block = "blocks";
+		hasMath = renderBlocks(text, opts.blocks);
+	} else if (opts.preformatted) {
 		el.dataset.block = "pre";
 		text.setText(node.text);
 	} else {

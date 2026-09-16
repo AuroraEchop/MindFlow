@@ -29,6 +29,19 @@ test("a wikilink is found by its label, never by its target", () => {
 	assert.equal(plainText("![[diagram.png]]"), "diagram.png");
 });
 
+test("an image is found by its alt text, and the `!` is not left on the card", () => {
+	assert.equal(plainText("![卡片样式](../assets/card-styles.png)"), "卡片样式");
+	// No alt text: the target is all there is to read, so it is what is shown.
+	assert.equal(plainText("![](shot.png)"), "shot.png");
+	assert.equal(plainText("see ![a](b.png) now"), "see a now");
+
+	// One character before the link it contains, so it wins on position rather
+	// than on order -- the same trick the embed rule uses.
+	const image = nextInlineToken("![a](b.png)", 0);
+	assert.equal(image?.rule.kind, "image");
+	assert.deepEqual([image?.start, image?.end], [0, 11]);
+});
+
 test("code content is left exactly as written", () => {
 	assert.equal(plainText("`**not bold**`"), "**not bold**");
 	assert.equal(plainText("`[[not a link]]`"), "[[not a link]]");

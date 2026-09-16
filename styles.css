@@ -1,10 +1,10 @@
 /* ==========================================================================
-   Mindmap Mode
+   MindFlow
    Everything is driven by Obsidian's own CSS variables so the map follows the
    active theme, light or dark, without a second palette to maintain.
    ========================================================================== */
 
-.mindmap-mode {
+.mindflow {
 	--mm-b0: #4f9df7;
 	--mm-b1: #f2994a;
 	--mm-b2: #56c271;
@@ -845,8 +845,8 @@
    and styles those containers at up to (0,3,1). Matching them by class through
    the map's ancestor chain scores (0,4,0) and (0,5,0), so a formula stays inline
    in its card without reaching for !important. */
-.mindmap-mode .mm-text .mm-math .MathJax,
-.mindmap-mode .mm-text .mm-math .MathJax[display="true"] {
+.mindflow .mm-text .mm-math .MathJax,
+.mindflow .mm-text .mm-math .MathJax[display="true"] {
 	display: inline-block;
 	margin: 0;
 	padding: 0;
@@ -992,6 +992,60 @@
 	font-family: var(--font-monospace);
 	font-size: 0.95em;
 	tab-size: 4;
+}
+
+/* --- a note-content card drawn as blocks --------------------------------- */
+
+/* A card holding a table, and whatever else the note wrote around it. The card
+   is measured off this box, so everything in here is in the flow: no margin
+   collapse out of it, nothing positioned, nothing that would give a card a size
+   the layout was not told about. */
+.mm-node[data-block="blocks"] .mm-text > * + * {
+	margin-top: 6px;
+}
+
+/* The card's own line breaks still count inside prose -- a card is not a
+   reflowing page, and the note wrote those lines. It is the table below that
+   has to read as columns, which is the one thing `pre-wrap` cannot do. */
+.mm-text .mm-para {
+	white-space: pre-wrap;
+}
+
+/* Sized by the flow, never pinned: the card is `max-content` under a cap, so a
+   wide table wraps inside it rather than widening the card past the cap. */
+.mm-text .mm-table {
+	margin: 0;
+	border-collapse: collapse;
+	white-space: normal;
+}
+
+.mm-text .mm-table th,
+.mm-text .mm-table td {
+	border: 1px solid var(--background-modifier-border);
+	padding: 2px 7px;
+	text-align: left;
+	vertical-align: top;
+}
+
+/* A header row is what the delimiter row under it bought, so it is drawn as
+   one: a shade of its own, and the card's own colour rather than the muted one
+   the rest of the block is read in. */
+.mm-text .mm-table th {
+	background: var(--background-modifier-border);
+	color: var(--text-normal);
+	font-weight: 600;
+}
+
+/* A sample keeps its own shape, down to the line it breaks at. */
+.mm-text .mm-code-block {
+	margin: 0;
+	padding: 4px 6px;
+	border-radius: 4px;
+	background: var(--background-primary);
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+	white-space: pre;
+	overflow-x: auto;
 }
 
 /* --- the card's branch-side furniture ------------------------------------ */
@@ -1429,9 +1483,9 @@
 
 /* --- the block dialog ----------------------------------------------------- */
 
-/* A modal, not a popover: `.mindmap-mode` is `overflow: hidden`, so a panel big
+/* A modal, not a popover: `.mindflow` is `overflow: hidden`, so a panel big
    enough to read a long block would be clipped by the viewport it hangs in.
-   It also mounts outside `.mindmap-mode`, which is why none of the map's own
+   It also mounts outside `.mindflow`, which is why none of the map's own
    scoped rules -- the `.mm-text .mm-math` display override in particular --
    reach the rendered markdown in here. */
 .mm-block-dialog {
@@ -1526,7 +1580,7 @@
 /* --- the Shortcuts group in the settings tab ------------------------------ */
 
 /* Mounted in Obsidian's own settings window, so these are the only rules in
-   this file that live outside `.mindmap-mode`. */
+   this file that live outside `.mindflow`. */
 
 .mm-shortcut-keys {
 	display: flex;

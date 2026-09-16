@@ -89,6 +89,9 @@ export const COPIED = [
 	"border-top-right-radius",
 	"border-bottom-right-radius",
 	"border-bottom-left-radius",
+	// A table's cells share their edges only while this says so. Left out, every
+	// cell in the file would be drawn with its own border and a gap around it.
+	"border-collapse",
 	"padding-top",
 	"padding-right",
 	"padding-bottom",

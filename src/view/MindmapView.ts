@@ -22,6 +22,8 @@ import type { I18nKey } from "../i18n.ts";
 
 import { parseMarkdown } from "../model/parse.ts";
 import { annotationText, bodyCardCount } from "../model/annotations.ts";
+import { holdsTable, parseBlocks } from "../model/blocks.ts";
+import type { Block } from "../model/blocks.ts";
 import type { MindNode, ParsedDoc } from "../model/types.ts";
 import {
 	addChild,
@@ -74,8 +76,9 @@ import type { CullPlan, ViewBox } from "./culling.ts";
 import { Perf } from "./perf.ts";
 import { createEdgeLayer, renderEdges } from "./edges.ts";
 import type { EdgeStyle } from "./edges.ts";
-import { buildNodeElement, renderInline } from "./nodes.ts";
+import { buildNodeElement } from "./nodes.ts";
 import type { NodeElement } from "./nodes.ts";
+import { renderInline } from "./inline.ts";
 import { nodeMaxWidth } from "./nodeWidth.ts";
 import { attachInteractions } from "./interactions.ts";
 import {
@@ -107,7 +110,7 @@ import { pushRevision } from "../undoPark.ts";
 import type { UndoStacks } from "../undoPark.ts";
 import type MindmapPlugin from "../main.ts";
 
-export const MINDMAP_VIEW_TYPE = "mindmap-mode-view";
+export const MINDMAP_VIEW_TYPE = "mindflow-view";
 
 /** How far a press has to travel before it is a drag rather than a click. */
 const TOOLBAR_DRAG_THRESHOLD = 5;
@@ -280,6 +283,14 @@ interface PendingFocus {
 interface BodyRef {
 	ownerKey: string;
 	index: number;
+	/**
+	 * The block structure to draw, or null for the plain one-run card.
+	 *
+	 * Parsed once, where the card's text is prepared, rather than in the
+	 * builder: it is the same question twice, and the answer is what decided
+	 * how the text was prepared in the first place.
+	 */
+	blocks: Block[] | null;
 }
 
 /**
@@ -428,7 +439,7 @@ export class MindmapView extends TextFileView implements MapController {
 		this.plugin = plugin;
 		this.perf.enabled = plugin.settings.debugTiming;
 
-		this.contentEl.addClass("mindmap-mode");
+		this.contentEl.addClass("mindflow");
 		this.canvas = new Canvas(this.contentEl, {
 			wheel: plugin.settings.wheel,
 			// Only blank space starts a pan; everything a node owns belongs to the
@@ -1349,12 +1360,21 @@ export class MindmapView extends TextFileView implements MapController {
 		// structural metadata; strip it from the preview so the card reads as
 		// the text itself. Fenced code keeps its indent, which carries meaning.
 		const isCode = /^\s*(```|~~~)/.test(raw);
+		const clipped = previewOf(raw);
+		// A table is the one construct that cannot be read as a run of
+		// characters, so a block holding one is parsed into its parts and drawn
+		// as them. Nothing else changes: a paragraph reads the same either way,
+		// and the plain path is the one every other card is measured by.
+		const blocks = parseBlocks(clipped);
+		const structured = holdsTable(blocks);
 		const body: MindNode = {
 			id,
 			key: `${owner.key}${BODY_ID_MARK}${index}`,
 			kind: "body",
 			virtual: true,
-			text: isCode ? previewOf(raw) : blockPreviewOf(raw),
+			// A drawn block keeps its blank lines: they are what separates one
+			// block from the next, and the parser is the thing that reads them.
+			text: isCode || structured ? clipped : blockPreviewOf(raw),
 			level: owner.level,
 			indentWidth: 0,
 			indent: "",
@@ -1372,7 +1392,11 @@ export class MindmapView extends TextFileView implements MapController {
 			// parsed tree stays exactly as the parser left it.
 			parent: owner,
 		};
-		this.bodyNodes.set(id, { ownerKey: owner.key, index });
+		this.bodyNodes.set(id, {
+			ownerKey: owner.key,
+			index,
+			blocks: structured ? blocks : null,
+		});
 		return body;
 	}
 
@@ -1491,11 +1515,15 @@ export class MindmapView extends TextFileView implements MapController {
 			const collapsed = this.collapsedKeys.has(node.key);
 			const isBody = node.kind === "body";
 			const hasAnnotation = node.annotationIndices.length > 0;
+			// Body cards were all made by `childrenOf`, above, so the ref is
+			// there for every one of them and nothing else has an entry at all.
+			const blocks = isBody ? (this.bodyNodes.get(node.id)?.blocks ?? null) : null;
 			const element = buildNodeElement(this.nodeLayer, layout, {
 				annotation: hasAnnotation ? annotationText(parsed, node) : null,
 				maxWidth: nodeMaxWidth(node.kind, hasAnnotation, s.maxNodeWidth),
 				branchColors: s.branchColors,
-				preformatted: isBody && looksPreformatted(node.text),
+				blocks,
+				preformatted: isBody && blocks === null && looksPreformatted(node.text),
 				expandable: false,
 				addable: !isBody,
 				collapsed,
