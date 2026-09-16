@@ -11,128 +11,23 @@ line. The `<br>` is deliberate — a plain newline renders as a line break in
 release notes but collapses to a space when this file is viewed on GitHub, and
 the entry has to read correctly in both.
 
-## [1.1.1] - 2026-09-14
+## [2.0.0] - 2026-09-16
+
+MindFlow 的第一个版本。<br>The first release of MindFlow.
 
 ### 新增 / Added
 
-- 节点注释：标题或列表项下面写成 `: text` 的行不再单独成卡，而是贴在该节点卡片下方，以灰色文字和左侧竖线显示。连续的 `: ` 行保留换行，单独一行 `:` 表示注释里的空行，过长的行按正文卡片的宽度（**Maximum card width** 的 1.6 倍）折行 —— 注释可以把卡片撑得比标题本身更宽，节点标题仍按 **Maximum card width** 折行。注释在节点折叠时仍然可见，也不受 **Show note content** 影响。这是本插件自己的写法，不改动笔记：同一行在 Obsidian 的编辑和阅读视图里仍然只是一行以冒号开头的普通段落。<br>Node annotations: a line written as `: text` under a heading or list item no longer becomes a card of its own — it hangs under that node's card in muted text behind a vertical rule. Consecutive `: ` lines keep their line breaks, a lone `:` is a blank line inside the annotation, and a long line wraps at the width note content gets — **Maximum card width** times 1.6. An annotation may make its card wider than its title alone would, while the title still wraps at **Maximum card width**. An annotation stays visible when its node is folded, and does not depend on **Show note content**. This is a convention of the plugin, not a change to the note: Obsidian's editing and reading views show the same line as an ordinary paragraph that starts with a colon.
-- 注释在导图里直接编辑：双击注释，或在节点右键菜单里选 **Add annotation** / **Edit annotation**，打开一个多行编辑框。编辑框里按 Enter 换行，冒号前缀由插件写回文件；`Ctrl`/`Cmd`+`Enter` 或 **Save** 保存，清空后保存即删除注释。写回只替换注释所在的那几行，其余正文一个字节都不动。<br>Annotations are edited on the map: double-click one, or pick **Add annotation** / **Edit annotation** from a node's context menu, to open a multiline editor. Enter inserts a line break and the plugin writes the colon prefixes back to the file; `Ctrl`/`Cmd`+`Enter` or **Save** saves, and saving an empty box removes the annotation. The write replaces only the annotation's own lines, leaving the rest of the note byte-identical.
-- 设置的 Appearance 里新增 **Inline annotations** 开关，默认打开。已有的笔记里凡是以 `: ` 开头的正文行，从这个版本起都会显示为所属节点的注释，而不再是各自独立的正文卡片；关掉这个开关就恢复成原来的正文卡片。更新到这个版本之后，Obsidian 第一次加载插件时会弹出一条一次性提示，把这件事和开关的位置说一遍，之后不再出现。设置里这一项的说明，以及注释编辑框下方的提示，都写明了这个写法。<br>An **Inline annotations** toggle in the settings' Appearance group, on by default. In notes you already have, any body line written as `: text` now renders as its owner's annotation rather than as a body card of its own; turning the toggle off restores those body cards. The first load after the update shows a one-time notice saying so and naming the toggle, and never shows it again. The setting's own description, and a hint under the annotation editor, both spell the syntax out.
-- 注释跟着卡片一起导出：导出 Canvas 时，注释接在节点标题下面，成为同一个节点的文字；导出 SVG、PNG 或 HTML 时，注释就按导图上的样子画出来。<br>Annotations go into the exports with their card: a Canvas export carries the annotation in the same node's text, under the title, and an SVG, PNG or HTML export draws it exactly as the map does.
-- 每个发布版本现在都带上 `LICENSE`：GitHub release 的文件列表里有一份，`mindmap-mode.zip` 里也有一份，手动安装出来的插件目录因此也带着许可证。<br>Every release now ships `LICENSE`: it sits among the release's files and inside `mindmap-mode.zip`, so a hand-installed plugin folder carries the licence too.
-
-### 修复 / Fixed
-
-- 取消勾选不再连复选框一起删掉：`- [x] text` 取消勾选后回到 `- [ ] text`，除方括号里那一个字符外整行逐字节不变。`Ctrl`/`Cmd`+`Enter` 和卡片上的复选框现在只在 `[ ]` 和 `[x]` 之间切换，没有复选框的列表项则得到一个空的；删除复选框改由节点右键菜单里的 **Remove checkbox** 负责，同一个位置也能给普通列表项 **Add checkbox**。<br>Unchecking no longer takes the checkbox with it: `- [x] text` goes back to `- [ ] text`, byte for byte apart from the character inside the brackets. `Ctrl`/`Cmd`+`Enter` and the checkbox on the card now move between `[ ]` and `[x]` only, and give an item without a checkbox an empty one; **Remove checkbox** in a node's context menu is what takes one away, and **Add checkbox** in the same place puts one on a plain list item.
-
-## [1.1.0] - 2026-09-14
-
-### 新增 / Added
-
-- 导图可以导出为 Canvas、SVG、PNG 或 HTML 文件：四条命令在命令面板和标签页的"更多选项"菜单里，导出的就是眼前这张图，文件落在笔记旁边，不覆盖已有文件。<br>The map can be exported as a Canvas, SVG, PNG or HTML file: four commands in the command palette and the tab's *more options* menu write out the map as you see it, beside the note, never over an existing file.
-- 设置里新增 **Log render timings** 开关，默认关闭；打开后每次重绘的耗时会写进开发者控制台，用于排查卡顿。<br>A **Log render timings** toggle in settings, off by default; when on, the cost of every repaint goes to the developer console for diagnosing a slow map.
-- 导图右下角多了一块独立的导出面板，Canvas、SVG、PNG、HTML 四个按钮，就在相机工具栏上方，与命令面板和标签页菜单里的导出命令一致。<br>A separate export panel sits in the map's bottom-right corner, just above the camera toolbar, with Canvas, SVG, PNG and HTML buttons matching the export commands in the palette and the tab menu.
-
-### 修复 / Fixed
-
-- 解决了大图的性能问题：几百个节点全部展开、平移、缩放、聚焦和拖动时的卡顿与假死已修复。屏幕外的卡片分批处理，编辑和自动保存不再整图重绘，面板尺寸变化不再触发连续重排。<br>Large-map performance: stutter and freezes when expanding every node, panning, zooming, focusing or dragging on a map of several hundred nodes are fixed. Off-screen cards are handled in batches, edits and autosaves no longer repaint the whole map, and a pane resize no longer sets off repeated layouts.
-- 含公式的笔记打开和展开约快一倍：每个公式只排版一次，MathJax 就绪后不再整图重绘。<br>Notes with formulas open and expand about twice as fast: each formula is typeset once, and the map is no longer repainted once MathJax is up.
-- 修复大图每次拖动或缩放开始与结束时的轻微卡顿：相机移动标记上挂的样式规则曾让全图所有卡片重算样式。<br>Fixed a hitch at the start and end of every pan and zoom on a large map, where a style rule keyed on the camera-moving flag re-styled every card.
-
-## [1.0.10] - 2026-09-10
-
-### 新增 / Added
-
-- 导图上的每个快捷键现在都能自己改：插件设置里多了一组 **Shortcuts**，逐条列出导图响应的动作、它是干什么的、以及它当前绑的键。**Record** 会把你按下的下一个键记为新绑定，**×** 清空这一行让它不绑任何键，改过的行会多出一个箭头把默认键放回来，组末尾的 **Restore all defaults** 一次全部还原；两个动作撞到同一个键时，两行都会提示，并说明由哪一个先响应。改完立刻生效，已经打开的导图不用重开，工具栏里的快捷键帮助显示的也是你现在绑的键。<br>Every key the map answers to can now be changed: a **Shortcuts** group in the plugin's settings lists each action, what it does and the keys it is on. **Record** takes the next key you press, **×** leaves the action on no key at all, a reset arrow appears on any row you have changed to put its default back, and **Restore all defaults** at the foot of the group undoes the lot; bind two actions to one key and both rows say so, naming the one that answers. A change takes effect immediately in every open map — no reopening — and the map's own shortcut sheet shows whatever you have bound.
-- 同级之间的顺序现在可以用键盘调：选中一个节点，按 `Ctrl`/`Cmd`+`↑` / `↓`，它连同整棵子树就和上面 / 下面那个同级对调，移完还是选中它。这跟把卡片拖到那个同级的边缘是同一个操作 —— 落到列表项之间就写成列表项，落到标题之间就写成标题；已经在头一个或最后一个位置时什么都不会发生，文件也不会被写。一级分支照旧不参与排序，它们的左右分布归布局管。<br>Siblings can now be reordered from the keyboard: select a node, press `Ctrl`/`Cmd`+`↑` / `↓`, and it swaps places with the sibling above or below it — subtree and all — staying selected where it lands. It is the same operation as dragging the card onto that sibling's edge, so a node that lands among list items is written as one; at either end of a run nothing happens and nothing is written. First-level branches still do not reorder, by keyboard or by dragging — the layout decides how they split across the two sides of the root.
-- 命令面板里也有 *Move the selected node up among its siblings* 和 *Move the selected node down among its siblings* 两条命令，仍然默认不绑快捷键 —— 导图里那对键在插件自己的 **Shortcuts** 设置里改，这两条命令是留给命令面板的，或者你在 Obsidian 的快捷键设置里给它们绑一个自己的键。<br>Both moves are commands too — *Move the selected node up among its siblings* and *Move the selected node down among its siblings* — and stay deliberately unbound: the map's own keys are changed in the plugin's **Shortcuts** settings, while these two are there for the command palette, or for a hotkey of your own in Obsidian's settings.
-
-### 修复 / Fixed
-
-- 缩放之后卡片上的文字会发虚，图越大越明显：整张导图被长期固定在一块合成层里，浏览器只是把先前画好的那张位图拉伸到新倍率，而不是按新倍率把文字重画一遍。现在这个提示只在相机真正移动的时候挂上，停下约 0.2 秒后就撤掉，画面随即按你停住的那个倍率重画 —— 文字重新清晰，大图上的拖动照样顺滑。<br>Text on the cards went blurry after zooming, and the bigger the map the more obvious it was: the whole map was being kept in a compositing layer permanently, so a zoom stretched the bitmap the browser had already painted instead of repainting the text at the new scale. That `will-change` hint is now only applied while the camera is actually moving and dropped about a fifth of a second after it comes to rest, which gets the map repainted at the scale you stopped on — crisp text again, and dragging a large map is as smooth as it was.
-
-## [1.0.9] - 2026-08-19
-
-### 修复 / Fixed
-
-- 一张图上展开的分支多了以后，拖画布和拖节点都会发卡 —— 每张卡片都被单独提升成一个合成层，几百个节点就是几百块纹理，浏览器光调度这些层就忙不过来。现在整张导图只占一层，节点再多也不再影响拖动的流畅度。<br>Dragging the canvas, or dragging a node, used to get choppy once a lot of branches were unfolded on one map: every card was being promoted to its own compositing layer, so a few hundred nodes meant a few hundred textures for the browser to juggle. The whole map is one layer now, and the node count no longer decides how smoothly it drags.
-- 大图上的拖动和平移现在只画看得见的那一屏：视口之外的卡片会先从页面里撤下来，相机转回去再放回原处，连线同样只画视口附近的一段。几百个节点排开就有两万多像素高，以前不管在不在屏幕上都得整张一起渲染 —— 现在这份开销只跟一屏内容有关，跟笔记多大无关。<br>Dragging and panning a large map now only draws the screenful you can actually see: cards outside the viewport are taken out of the page until the camera comes back to them, and connectors are drawn for the region around it rather than for the whole note. A few hundred nodes lay out more than twenty thousand pixels tall, and every bit of that used to be rendered whether or not it was on screen — that cost now follows the size of your window instead of the size of your note.
-- 平移时不再让指针扫过的每张卡片都点亮一次悬停高亮，重绘整张图也只动一次 DOM —— 大图上的折叠、展开、编辑和拖放都跟着快了一截。<br>Panning no longer lights up a hover highlight on every card that slides past the pointer, and a repaint touches the document once instead of once per card and once per connector — folding, unfolding, editing and dropping on a large map are all quicker for it.
-
-## [1.0.8] - 2026-08-13
-
-### 新增 / Added
-
-- 导图现在自带查找：按 `Ctrl`/`Cmd`+`F` 打开查找条，输入即搜，计数显示第几个/共几个，`Enter` / `Shift`+`Enter` 在命中之间来回跳，`Esc` 关闭。工具栏多了一个查找按钮，命令面板里也有 *Find in the mind map*，想自定义快捷键就绑它。<br>The map can now find things: `Ctrl`/`Cmd`+`F` opens a find bar that searches as you type, counts which match you are on, steps with `Enter` / `Shift`+`Enter` and closes with `Esc`. There is a find button on the toolbar too, and a *Find in the mind map* command for binding your own hotkey.
-- 匹配的是卡片上看到的文字，不是原始 Markdown：`**bold** text` 能被"bold text"搜到，`[[note|Label]]` 只按"Label"命中，公式按它的 TeX 源码命中。`.*` 按钮切换成正则；两种方式都不区分大小写。<br>Matching follows the text you see on the card, not the raw markdown: `**bold** text` is found by "bold text", `[[note|Label]]` by "Label" alone, and a formula by its TeX source. The `.*` toggle switches to a regular expression; both modes are case-insensitive.
-- 跳到折叠分支里的命中会自动把它展开；走到下一个命中时，上一处为搜索展开的分支随即折回，关闭查找条时其余的也一并折回 —— 只留下你最后停在的那个命中所在的路径，那张卡片依然选中可见。你自己手动展开的分支始终不动。<br>Stepping to a match inside a folded branch opens it on the way, and stepping onwards folds that branch back again; closing the bar folds back the rest and keeps only the path to the match you stopped on, with that card still selected. Anything you opened yourself is left alone.
-
-### 变更 / Changed
-
-- 最低支持的 Obsidian 版本从 1.5.0 提高到 1.5.7：查找条的 `Ctrl`/`Cmd`+`F` 依赖 1.5.7 才有的视图级快捷键作用域，这样只要导图标签页是活动的它就能响应，而不必先点一下卡片。<br>The minimum Obsidian version rises from 1.5.0 to 1.5.7: the find bar's `Ctrl`/`Cmd`+`F` relies on the per-view hotkey scope introduced there, which is what lets it answer whenever the map's tab is active rather than only after a card has been clicked.
-
-## [1.0.6] - 2026-08-09
-
-### 新增 / Added
-
-- 导图现在会记住你把它折成了什么样。再打开同一篇笔记，折叠的分支还是折着的，镜头也落在你上次正在看的那张卡片上。这份状态存在插件自己的数据里，笔记一个字都不会改 —— 不产生 diff，也不会有合并冲突。<br>The map now remembers how you folded it. Reopen a note and the branches you collapsed are still collapsed, framed on the card you were last working on. That state lives in the plugin's own data, not in the note — your markdown is untouched, so there is nothing to diff and nothing to merge.
-- 设置 → 行为里多了**记住折叠状态**开关，默认打开。关掉它，每张导图都会像以前一样打开成"根 + 一级分支"。<br>A **Remember fold state** toggle in Settings → Behaviour, on by default. Turn it off and every map opens at the root plus its top-level branches, exactly as before.
-- 新命令 *Forget the saved fold state for this note*，用来只清掉当前这篇笔记记住的状态，不必去动设置。<br>A new command, *Forget the saved fold state for this note*, drops what is remembered about the note you are looking at without touching the setting.
-- 笔记改名、移动，或者整个文件夹被搬走时，记住的状态会跟着一起走；笔记被删除时状态一并清掉。<br>Renaming or moving a note — or moving the whole folder it sits in — carries its remembered state along, and deleting a note clears it.
-
-## [1.0.5] - 2026-07-28
-
-### 修复 / Fixed
-
-- 移除了一处对 Obsidian 1.13 才有的接口的调用。实际执行路径从未走到它，所以没有人遇到过问题，但插件不该引用高于自己 `minAppVersion` 的 API。设置页在新旧版本上的行为都不变。<br>Removed a call into an API that only exists in Obsidian 1.13. Nothing ever reached it, so nobody hit a problem, but a plugin should not reference an API newer than its own `minAppVersion`. The settings tab behaves the same on every version.
-
-## [1.0.4] - 2026-07-28
-
-### 新增 / Added
-
-- 设置项现在会出现在 Obsidian 1.13 及以上版本的设置搜索结果里。1.13 以下的版本设置页照旧，不受影响。<br>Settings now turn up in the settings search on Obsidian 1.13 and later. On older versions the settings tab is unchanged.
-
-### 变更 / Changed
-
-- 发布资产现在都带 GitHub 构建来源证明，任何人都可以验证它们确实由本仓库构建，而不是从谁的电脑上传的。手动安装用的 `mindmap-mode.zip` 保持不变。<br>Release assets now carry GitHub build provenance, so anyone can verify they were built from this repository rather than uploaded off somebody's laptop. The `mindmap-mode.zip` for installing by hand is still there.
-
-## [1.0.3] - 2026-07-28
-
-### 变更 / Changed
-
-- 插件简介改写为纯 ASCII 文本，以满足官方插件市场对描述的要求。功能没有任何变化。<br>Reworded the plugin description to plain ASCII, which the community plugin directory requires. Nothing about how the plugin behaves has changed.
-
-## [1.0.2] - 2026-07-27
-
-### 新增 / Added
-
-- 从笔记内容中打开链接 —— 卡片里的链接，点开后的行为和在笔记里点开完全一致。<br>Open links from note content — a link inside a card resolves the same way it does in the note.
-- 拖动卡片到同级节点之间，即可调整它们的先后顺序。<br>Reorder siblings by dragging a card onto its new place among them.
-- 鼠标悬停在卡片上会出现添加按钮，可以直接从这张卡片长出新节点。<br>Grow the tree straight from a card, with the add button that appears on hover.
-
-### 修复 / Fixed
-
-- 发布 tag 现在被锁定为 manifest 里的版本号：写错或带 `v` 前缀的 tag 会让构建直接失败，而不是发出一个 Obsidian 装不上、却又不报错的版本。<br>The release tag is now pinned to the manifest version, so a mistyped or `v`-prefixed tag fails the build instead of producing a release that Obsidian silently refuses to install.
-
-## [1.0.1] - 2026-07-27
-
-### 新增 / Added
-
-- 把内容块展开成一个渲染后的对话框。<br>Expand a content block into a rendered dialog.
-
-## [1.0.0] - 2026-07-27
-
-首个版本。<br>Initial release.
-
-### 新增 / Added
-
-- 在同一个标签页里把任意笔记切换成可编辑的思维导图。每一次修改都直接写回原来的 `.md` 文件 —— 不会生成任何新文件。<br>Toggle any note into an editable mind map in the same tab. Every edit writes straight back to the original `.md` file — no new files are ever created.
-- 笔记正文会以卡片的形式，画在它所属的标题旁边。<br>Note content is drawn as cards alongside the headings it belongs to.
-- 导图打开时默认折叠，只含正文的小节也跟着一起折叠。<br>Maps open folded, and sections holding only note content fold with them.
-- 节点标题里的 LaTeX 通过 MathJax 渲染。<br>LaTeX in node titles renders through MathJax.
-- 卡片宽度自适应文字，中日韩字符同样适用。<br>Cards size themselves horizontally to their text, CJK included.
-
-### 修复 / Fixed
-
-- 点了没有任何反应的折叠按钮。<br>Fold toggles that did nothing when clicked.
-- 折叠、展开小节时导图会跳动。<br>The map jumping as sections folded and unfolded.
+- 是一种视图模式，不是导出：在同一个标签页里把任意笔记切换成可编辑的放射状思维导图，不生成、不复制任何文件。每一次修改都按最小的行级编辑写回原来那份 `.md`，你没有动过的行逐字节原样返回，CRLF 也一样；frontmatter、围栏代码块、表格、HTML 和链接永远不会被重新格式化。<br>A view mode, not an export: toggle any note into an editable radial mind map in the same tab, creating and copying nothing. Every edit goes back to the original `.md` as the smallest line-level change, and lines you never touched come back byte for byte, CRLF included — frontmatter, fenced code blocks, tables, HTML and links are never reformatted.
+- 在画布上就地编辑：重命名、新建、删除、缩进、拖拽改父级、拖拽调同级顺序、折叠、勾选复选框，都在卡片上直接完成，不弹对话框；悬停在卡片上出现的加号可以从这张卡片直接长出新节点。同级也可以用 `Ctrl`/`Cmd`+`↑` / `↓` 从键盘换位，效果和把卡片拖到那个同级的边缘一样。<br>Edit on the canvas: rename, create, delete, indent, re-parent by dragging, reorder siblings by dragging, fold and tick a checkbox, all on the card and with no dialog in the way; the plus that appears on hover grows a child straight from that card. Siblings also swap from the keyboard with `Ctrl`/`Cmd`+`↑` / `↓`, exactly as if the card had been dragged onto that sibling's edge.
+- 节点注解：标题或列表项下面写一行 `: text`，它贴在卡片下方以灰色文字和左侧竖线显示，而不是单独成卡。双击或右键菜单即可编辑，写回只替换注解自己的那几行；节点折叠时注解仍然可见，导出时也跟着它的卡片一起走。<br>Node annotations: a line written as `: text` under a heading or list item hangs under that card in muted text behind a vertical rule instead of becoming a card of its own. Double-click one, or use the context menu, to edit it, and the write replaces only the annotation's own lines. An annotation stays visible when its node is folded, and goes into the exports with its card.
+- 正文卡片：段落、代码块和表格画在所属标题旁边，过长的内容按卡片宽度折行而不是撑破卡片；表格按表格画 —— 表头、列对齐、单元格里的行内标记都跟着来，而不是一段等宽文字；`Shift`+`Enter` 另加一段没有标题的文字块。<br>Body cards: paragraphs, code blocks and tables are drawn beside the heading they belong to, and long content wraps at the card's width rather than bursting it; a table is drawn as a table — header row, column alignment and the inline markup inside its cells — rather than as a run of monospace text; `Shift`+`Enter` adds a plain block of text with no heading of its own.
+- 三种卡片样式（边框 / 圆角卡片 / 极简）、曲线或直角连线，角落工具栏可以停在四个位置，也可以在你选中卡片之前先藏起来。<br>Three card styles (outline, rounded card, minimal), curved or right-angled connectors, and a corner toolbar that docks in any of four places or stays hidden until you pick a card.
+- 导图上的每个快捷键都能自己改：设置里的 Shortcuts 组逐条列出动作、它是干什么的、以及现在绑在哪个键上。Record 记下你按下的下一个键，× 清空这一行，改过的行多出一个箭头把默认键放回来；两个动作撞到同一个键时两行都会提示。改完立刻生效，已经打开的导图不用重开。<br>Every key the map answers to can be changed: a Shortcuts group lists each action, what it does and what it is on. Record takes the next key you press, × leaves the row unbound, a reset arrow appears on any row you changed to put its default back, and a clash is called out on both rows. A change takes effect immediately, with no open map to reopen.
+- 设置是一个独立窗口，浮在导图之上 —— 调外观和结构时不用离开正在看的这张图。<br>Settings are a window over the map, so changing how it looks and behaves does not mean leaving the map you are working on.
+- 一篇笔记一份撤销历史：Markdown 编辑器和导图共用同一个撤销栈，`Ctrl`/`Cmd`+`Z` 会一路回退过去。<br>One undo history per note: the markdown editor and the map share a single stack, so `Ctrl`/`Cmd`+`Z` walks back through both.
+- 导图自带查找：`Ctrl`/`Cmd`+`F` 打开查找条，输入即搜，计数显示第几个 / 共几个，`Enter` / `Shift`+`Enter` 在命中之间来回跳，`.*` 切换成正则。匹配的是卡片上看到的文字而不是原始 Markdown，跳到折叠分支里的命中会自动展开，走过去之后折回。<br>The map can find things: `Ctrl`/`Cmd`+`F` opens a find bar that searches as you type, counts which match you are on, steps with `Enter` / `Shift`+`Enter` and switches to a regular expression with `.*`. It matches the text you see on the card rather than the raw markdown, and opens a folded branch to reach a match and folds it back as you move on.
+- 导出为 Canvas、SVG、PNG 或 HTML：右下角面板、命令面板和标签页菜单三处入口，导出的就是眼前这张图，文件落在笔记旁边，不覆盖已有文件。<br>Export to Canvas, SVG, PNG or HTML: from the corner panel, the command palette or the tab's menu, writing out the map as you see it beside the note and never over an existing file.
+- 回来时还是你离开时的样子：折叠形状和焦点按笔记记住，存在插件自己的数据里，从不写进你的 markdown；笔记改名、移动时状态跟着走，笔记删除时一并清掉。<br>A map opens the way you left it: the fold shape and the card you were on are remembered per note, in the plugin's own data rather than in your markdown, and they follow the note when it is renamed or moved.
+- 界面中英双语，跟随 Obsidian 自己的语言设置。<br>The interface ships in Chinese and English, following Obsidian's own language setting.
+- 大图不再卡：只有看得见的那一屏会被画出来，公式只排版一次，缩放停下来之后文字按你停住的倍率重画，所以放大了也清晰。<br>Large maps stay smooth: only the screenful you can actually see is drawn, each formula is typeset once, and text is repainted at the zoom you stopped on, so it stays crisp when you zoom in.
+- 每份发布都带 `LICENSE`：GitHub release 的文件列表里有一份，手动安装出来的插件目录里也有一份。<br>Every release ships `LICENSE`: it sits among the release's files and inside a plugin folder installed by hand.
