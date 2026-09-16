@@ -1,0 +1,126 @@
+/**
+ * Finding nodes by their text.
+ *
+ * The tree is the source, never the DOM: a collapsed branch has no cards at all,
+ * and the cards that do exist hold MathJax output rather than the note's words.
+ * That makes this a pure module, which is also what lets it be tested directly.
+ */
+
+import { plainText } from "./inlineText.ts";
+import { walk } from "./types.ts";
+import type { MindNode } from "./types.ts";
+
+export interface SearchQuery {
+	text: string;
+	regex: boolean;
+}
+
+export interface SearchMatch {
+	key: string;
+	id: string;
+	/** The projection that matched, as a reader sees it on the card. */
+	text: string;
+}
+
+export interface SearchResult {
+	matches: SearchMatch[];
+	/** True when `regex` was on and the pattern would not compile. */
+	invalid: boolean;
+}
+
+/**
+ * Every node whose visible text matches, in document order.
+ *
+ * An empty query finds nothing rather than everything: the bar is open for most
+ * of a search session, and "all of them" is not a useful thing to highlight.
+ * Body cards are out of scope in v1 -- they are not in `byKey`, the selection
+ * refuses them, and their card face is a truncated preview of the block.
+ */
+export function searchTree(root: MindNode, query: SearchQuery): SearchResult {
+	const matches: SearchMatch[] = [];
+	if (query.text === "") return { matches, invalid: false };
+
+	let re: RegExp | null = null;
+	if (query.regex) {
+		try {
+			// No `g` flag: a shared `lastIndex` would carry from one node to the
+			// next and silently skip half the tree.
+			re = new RegExp(query.text, "i");
+		} catch {
+			// A pattern is incomplete for as long as it is being typed, so this is
+			// the normal case, not an error to report.
+			return { matches, invalid: true };
+		}
+	}
+	const needle = query.text.toLowerCase();
+
+	walk(root, (node) => {
+		// A virtual root stands for the filename and owns no line; a body card is
+		// note content the map only displays.
+		if (node.virtual || node.kind === "body") return;
+		const text = plainText(node.text);
+		const hit = re ? re.test(text) : text.toLowerCase().includes(needle);
+		if (hit) matches.push({ key: node.key, id: node.id, text });
+	});
+	return { matches, invalid: false };
+}
+
+/**
+ * The collapsed ancestors actually keeping a node off the map, outermost first.
+ *
+ * Outermost first because that is the one a caller wants on its own: opening a
+ * node whose own parent is still folded shows nothing, and a selection folded
+ * away has to land on the card that swallowed it.
+ */
+export function hiddenAncestorKeys(node: MindNode, collapsed: ReadonlySet<string>): string[] {
+	const keys: string[] = [];
+	for (let p: MindNode | null = node.parent; p; p = p.parent) {
+		if (collapsed.has(p.key)) keys.push(p.key);
+	}
+	return keys.reverse();
+}
+
+/**
+ * The keys a search recorded that are owed a fold again, given the one match it
+ * still has to keep on the map.
+ *
+ * A branch opened to show a match is only owed that for as long as that match is
+ * the one being looked at, so stepping away hands every other recorded key back.
+ * `keep`'s own ancestors are the exception: folding one of those would put the
+ * card the caller just found straight back out of sight. `keep` itself is not an
+ * exception -- a folded node still draws its own card, so nothing is lost.
+ *
+ * `null` keeps nothing, which is how "there is no match any more" is spelled.
+ * Order is the set's own; every caller folds all of them.
+ */
+export function refoldKeys(revealed: ReadonlySet<string>, keep: MindNode | null): string[] {
+	const spared = new Set<string>();
+	for (let p: MindNode | null = keep?.parent ?? null; p; p = p.parent) spared.add(p.key);
+	return [...revealed].filter((key) => !spared.has(key));
+}
+
+/**
+ * Whether nothing below the first level is open.
+ *
+ * The question a fold control asks when it has to say what pressing it will do:
+ * collapsing folds *from* the first level, so a map already at its first level
+ * is one where collapsing again would change nothing. The root is not one of the
+ * levels being asked about -- that fold leaves it open, and counting it would
+ * leave a map of a single branch with no way to ask for the whole thing -- but a
+ * root folded by hand hides everything below it, and that reads as folded.
+ *
+ * `hasChildren` is passed in rather than read off the node: whether a section has
+ * anything to hide depends on settings this layer does not know.
+ */
+export function foldedToFirstLevel(
+	root: MindNode,
+	collapsed: ReadonlySet<string>,
+	hasChildren: (node: MindNode) => boolean,
+): boolean {
+	if (collapsed.has(root.key)) return true;
+	for (const child of root.children) {
+		if (!hasChildren(child)) continue;
+		if (!collapsed.has(child.key)) return false;
+	}
+	return true;
+}
