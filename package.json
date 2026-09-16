@@ -1,6 +1,6 @@
 {
   "name": "obsidian-mindflow",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Toggle any note into an editable, radial mind map in the same tab. Every edit writes straight back to the original note, and no new files are ever created.",
   "type": "module",
   "main": "main.js",

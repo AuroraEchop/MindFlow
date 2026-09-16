@@ -11,6 +11,15 @@ line. The `<br>` is deliberate — a plain newline renders as a line break in
 release notes but collapses to a space when this file is viewed on GitHub, and
 the entry has to read correctly in both.
 
+## [2.0.1] - 2026-09-17
+
+修复了插件审核报出的两处问题。插件的行为没有任何变化。<br>Fixes the two findings the plugin review reported. Nothing about how the plugin behaves has changed.
+
+### 修复 / Fixed
+
+- 设置窗口的样式不再由代码直接写，改为样式表里的两个类；拖动窗口、把它停在你想停的地方，表现和以前一模一样。<br>The settings window no longer writes its own styles from code -- they are two classes in the stylesheet now. Dragging it, and pinning it where you leave it, work exactly as before.
+- 启动时写的那行版本日志从 `console.log` 改成了 `console.debug`，所以默认不再显示；在控制台里打开 Verbose 就能看到正在跑的是哪个构建。<br>The one line written on load is a `console.debug` rather than a `console.log`, so it no longer shows by default -- turn Verbose on in the console to see which build is running.
+
 ## [2.0.0] - 2026-09-16
 
 MindFlow 的第一个版本。<br>The first release of MindFlow.
