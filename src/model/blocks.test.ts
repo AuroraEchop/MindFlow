@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { holdsTable, parseBlocks } from "./blocks.ts";
-import type { Block, TableBlock } from "./blocks.ts";
+import { needsBlocks, parseBlocks } from "./blocks.ts";
+import type { Block, CalloutBlock, TableBlock } from "./blocks.ts";
 
 /** The one table in `blocks`, so a test can read past the union. */
 function onlyTable(blocks: Block[]): TableBlock {
@@ -57,13 +57,13 @@ test("cells are trimmed", () => {
 
 test("a delimiter row that disagrees with the header is not a table", () => {
 	const blocks = parseBlocks("| a | b |\n| --- |\n");
-	assert.equal(holdsTable(blocks), false);
+	assert.equal(needsBlocks(blocks), false);
 	assert.deepEqual(blocks, [{ kind: "paragraph", text: "| a | b |\n| --- |" }]);
 });
 
 test("a pipe with no delimiter row under it is prose", () => {
 	const blocks = parseBlocks("a | b\nnot a table");
-	assert.equal(holdsTable(blocks), false);
+	assert.equal(needsBlocks(blocks), false);
 	assert.deepEqual(blocks, [{ kind: "paragraph", text: "a | b\nnot a table" }]);
 });
 
@@ -145,7 +145,7 @@ test("blank lines separate blocks and produce none of their own", () => {
 test("an empty block is no blocks", () => {
 	assert.deepEqual(parseBlocks(""), []);
 	assert.deepEqual(parseBlocks("\n \n\t\n"), []);
-	assert.equal(holdsTable(parseBlocks("")), false);
+	assert.equal(needsBlocks(parseBlocks("")), false);
 });
 
 test("carriage returns never reach a cell or a sample", () => {
@@ -153,9 +153,116 @@ test("carriage returns never reach a cell or a sample", () => {
 	assert.deepEqual(onlyTable(blocks).rows, [["1", "2"]]);
 });
 
-test("holdsTable is what the view asks before it draws a card as blocks", () => {
-	assert.equal(holdsTable(parseBlocks("| a |\n| --- |\n| 1 |")), true);
-	assert.equal(holdsTable(parseBlocks("| a |\n| --- |")), true);
-	assert.equal(holdsTable(parseBlocks("just prose")), false);
-	assert.equal(holdsTable(parseBlocks("```\ncode\n```")), false);
+test("needsBlocks is what the view asks before it draws a card as blocks", () => {
+	assert.equal(needsBlocks(parseBlocks("| a |\n| --- |\n| 1 |")), true);
+	assert.equal(needsBlocks(parseBlocks("| a |\n| --- |")), true);
+	assert.equal(needsBlocks(parseBlocks("just prose")), false);
+	// A fenced sample is the third construct that has to be drawn rather than
+	// read: its fences are scaffolding, and a card showing them is a card
+	// showing the note's source instead of its content.
+	assert.equal(needsBlocks(parseBlocks("```\ncode\n```")), true);
+	assert.equal(needsBlocks(parseBlocks("> [!note]\n> hi")), true);
 });
+
+/** The one callout in `blocks`, so a test can read past the union. */
+function onlyCallout(blocks: Block[]): CalloutBlock {
+	const callout = blocks.find((block): block is CalloutBlock => block.kind === "callout");
+	assert.ok(callout, "expected a callout");
+	return callout;
+}
+
+test("a quoted `[!type]` becomes a callout holding what it quoted", () => {
+	const callout = onlyCallout(parseBlocks("> [!note] Read this\n> first\n> second"));
+	assert.equal(callout.type, "note");
+	assert.equal(callout.title, "Read this");
+	assert.equal(callout.fold, null);
+	assert.deepEqual(callout.blocks, [{ kind: "paragraph", text: "first\nsecond" }]);
+});
+
+test("a callout with no title keeps the empty string, not a made-up one", () => {
+	// The title a reader sees for one of these is a translated word, which is
+	// the renderer's business; the model reports only what the note wrote.
+	const callout = onlyCallout(parseBlocks("> [!WARNING]\n> care"));
+	assert.equal(callout.type, "warning");
+	assert.equal(callout.title, "");
+});
+
+test("the type is lowercased so `[!NOTE]` and `[!note]` are one thing", () => {
+	assert.equal(onlyCallout(parseBlocks("> [!NOTE]")).type, "note");
+});
+
+test("`-` folds the callout and `+` pins it open", () => {
+	assert.equal(onlyCallout(parseBlocks("> [!tip]-\n> hidden")).fold, "closed");
+	assert.equal(onlyCallout(parseBlocks("> [!tip]+ Rest")).fold, "open");
+	assert.equal(onlyCallout(parseBlocks("> [!tip]+ Rest")).title, "Rest");
+});
+
+test("a dash right after the type is the fold marker, title or no title", () => {
+	// Obsidian reads it the same way, and there is no way to write it
+	// otherwise: the marker has no separator of its own, so the dash is taken.
+	const callout = onlyCallout(parseBlocks("> [!note] - folded"));
+	assert.equal(callout.fold, "closed");
+	assert.equal(callout.title, "folded");
+});
+
+test("the quoted lines lose their `>` and are read as blocks in their own right", () => {
+	const callout = onlyCallout(
+		parseBlocks(
+			[
+				"> [!info] Table",
+				">",
+				"> | a | b |",
+				"> | --- | --- |",
+				"> | 1 | 2 |",
+			].join("\n"),
+		),
+	);
+	assert.deepEqual(onlyTable(callout.blocks).rows, [["1", "2"]]);
+});
+
+test("a callout inside a callout is a callout", () => {
+	const outer = onlyCallout(parseBlocks("> [!note] Outer\n> > [!tip] Inner\n> > deep"));
+	assert.equal(outer.title, "Outer");
+	// One `>` comes off per level, so the inner box is a box in its own right
+	// rather than a paragraph that starts with `>`.
+	const inner = onlyCallout(outer.blocks);
+	assert.equal(inner.title, "Inner");
+	assert.deepEqual(inner.blocks, [{ kind: "paragraph", text: "deep" }]);
+});
+
+test("an unquoted line ends the callout, blank or not", () => {
+	const blocks = parseBlocks("> [!note]\n> inside\n\nafter");
+	assert.equal(onlyCallout(blocks).blocks.length, 1);
+	assert.deepEqual(blocks[1], { kind: "paragraph", text: "after" });
+});
+
+test("a callout is a block of its own, so it does not swallow the prose above it", () => {
+	const blocks = parseBlocks("prose first\n> [!note]\n> boxed");
+	assert.deepEqual(blocks[0], { kind: "paragraph", text: "prose first" });
+	assert.equal(onlyCallout(blocks).type, "note");
+});
+
+test("a `>` that names no type is still a paragraph", () => {
+	// Only the `[!type]` form is a callout. A plain quote has no box to draw,
+	// and inventing one would put a colour on text the note never labelled.
+	assert.deepEqual(parseBlocks("> just quoted"), [
+		{ kind: "paragraph", text: "> just quoted" },
+	]);
+});
+
+test("a callout under an indented block is found through its indent", () => {
+	const blocks = parseBlocks(["  > [!note] Indented", "  > body"].join("\n"));
+	assert.equal(onlyCallout(blocks).title, "Indented");
+	assert.deepEqual(onlyCallout(blocks).blocks, [{ kind: "paragraph", text: "body" }]);
+});
+
+test("a callout with nothing quoted under it holds no blocks", () => {
+	const callout = onlyCallout(parseBlocks("> [!quote]"));
+	assert.deepEqual(callout.blocks, []);
+});
+
+test("trailing quoted blanks are spacing, not an empty paragraph", () => {
+	const callout = onlyCallout(parseBlocks("> [!note] T\n> body\n>\n>"));
+	assert.deepEqual(callout.blocks, [{ kind: "paragraph", text: "body" }]);
+});
+

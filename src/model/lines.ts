@@ -100,3 +100,37 @@ export function replaceLine(doc: LineDoc, index: number, content: string): LineD
 export function isBlank(line: string): boolean {
 	return line.trim().length === 0;
 }
+
+/**
+ * Whether a range of lines says more than one thing, which is the bar a
+ * note-content card clears before it is offered a fold.
+ *
+ * A folded card keeps its first line, so a block with a single line of content
+ * has nothing to give up -- the button would be there, the press would work,
+ * and the card would look exactly as it did. Blanks do not count towards the
+ * total, because the leading one is the note's spacing rather than content: a
+ * body range under a heading or a list item usually opens with the blank line
+ * that separates it from the item, so counting them would hand a one-line
+ * paragraph a fold of its own.
+ *
+ * Asked of the line range rather than of the text a card was drawn from, and
+ * that is the whole point: a folded card's own text is one line by
+ * construction, so a test on the text would take the button away the moment it
+ * was used and a folded block could never be opened again.
+ *
+ * Tolerant of a range that runs past the end of the document -- a remembered
+ * fold is checked against a fresh parse, and a line that is no longer there is
+ * simply a line with nothing on it.
+ */
+export function hasMoreThanOneLine(
+	lines: readonly string[],
+	start: number,
+	end: number,
+): boolean {
+	let seen = 0;
+	for (let i = Math.max(start, 0); i <= end && i < lines.length; i++) {
+		if (isBlank(lines[i])) continue;
+		if (++seen > 1) return true;
+	}
+	return false;
+}

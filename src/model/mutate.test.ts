@@ -10,15 +10,22 @@ import {
 	addChild,
 	addSibling,
 	addSiblingBefore,
+	bodyRangeText,
 	canMove,
+	canMoveBodyBlock,
 	canReorder,
 	canReorderDown,
 	canReorderUp,
 	deleteNode,
+	deleteNodes,
 	indentNode,
 	moveAfter,
 	moveBefore,
+	moveBodyBlock,
 	moveNode,
+	moveNodesAfter,
+	moveNodesBefore,
+	moveNodesInto,
 	outdentNode,
 	removeCheckbox,
 	renameNode,
@@ -443,17 +450,28 @@ test("reordering headings keeps their blank-line padding", () => {
 	assert.equal(out.text, "# R\n\n## H\n\n### B\n\ntext B\n\n### A\n\ntext A\n");
 });
 
-test("first-level branches are never reordered", () => {
+test("first-level branches reorder among themselves", () => {
 	const p = parse();
 	const alpha = find(p, "Alpha");
 	const beta = find(p, "Beta");
 	const two = find(p, "two");
 
-	// Alpha and Beta hang off the root, where the layout owns the order.
-	assert.equal(canReorder(beta, alpha), false);
-	assert.equal(canReorder(two, alpha), false);
-	assert.equal(moveBefore(p, beta, alpha).ok, false);
-	assert.equal(moveAfter(p, beta, alpha).ok, false);
+	// Alpha and Beta hang off the root, and the order they are written in is
+	// the order the map reads them in -- so a drop beside one of them is an
+	// order the user is entitled to set.
+	assert.equal(canReorder(beta, alpha), true);
+	// Beside a first-level branch is also how a subtree is promoted to that
+	// level, so the drop has to be allowed from any depth.
+	assert.equal(canReorder(two, alpha), true);
+
+	const moved = moveBefore(p, beta, alpha);
+	assert.ok(moved.ok);
+	assert.ok(moved.text.indexOf("## Beta") < moved.text.indexOf("## Alpha"));
+	// Beta carries its whole subtree, fenced sample and all.
+	assert.ok(moved.text.includes(CODE_LINE));
+	assert.equal(parseMarkdown(moved.text, { title: "Fixture" }).root.children.length, 2);
+	assert.equal(moveAfter(p, beta, alpha).ok, true);
+
 	// The root has no siblings at all.
 	assert.equal(canReorder(alpha, p.root), false);
 	// Reparenting a first-level branch is still allowed.
@@ -542,15 +560,21 @@ test("a move and its opposite leave a CRLF file byte for byte as it was", () => 
 	}
 });
 
-test("first-level branches cannot be moved up or down", () => {
+test("first-level branches move up and down like anything else", () => {
 	const p = parse();
-	// The layout owns their order, so dragging cannot reorder them either.
-	assert.equal(canReorderUp(find(p, "Beta")), false);
-	assert.equal(canReorderDown(find(p, "Alpha")), false);
-	assert.equal(reorderUp(p, find(p, "Beta")).ok, false);
-	assert.equal(reorderDown(p, find(p, "Alpha")).ok, false);
+	// The keyboard reaches the same places the pointer does.
+	assert.equal(canReorderUp(find(p, "Beta")), true);
+	assert.equal(canReorderDown(find(p, "Alpha")), true);
+
+	const up = reorderUp(p, find(p, "Beta"));
+	assert.ok(up.ok);
+	assert.ok(up.text.indexOf("## Beta") < up.text.indexOf("## Alpha"));
+	assert.equal(reorderDown(p, find(p, "Alpha")).ok, true);
+
+	// The root is still not in anyone's run.
 	assert.equal(canReorderUp(p.root), false);
 	assert.equal(canReorderDown(p.root), false);
+	assert.equal(reorderDown(p, p.root).ok, false);
 });
 
 test("a node moved beside list items is written as one", () => {
@@ -770,4 +794,311 @@ test("focusLine resolves to a real node after re-parsing", () => {
 			assert.ok(found, `${name} on "${node.text}" left a dangling focusLine`);
 		}
 	}
+});
+
+// --- moving a note-content block ------------------------------------------
+//
+// A block is a range of the note's lines rather than a node, so none of the
+// node machinery above applies to it. What the two share is the indentation
+// rule: only the leading whitespace that attaches a block to an owner moves,
+// and the lines inside it are never touched.
+
+const BLOCK_SOURCE = ["# Root", "", `${F}js`, CODE_LINE, F, "", "- item", ""].join("\n");
+
+/**
+ * Index of the code block among a node's body ranges.
+ *
+ * Searched across the whole range rather than read off its first line: a range
+ * carries the blank line that separates it from what came before, so the fence
+ * is the second line of the block rather than the first.
+ */
+function codeIndex(parsed: ParsedDoc, node: MindNode): number {
+	return node.bodyRanges.findIndex(([start, end]) =>
+		parsed.doc.lines.slice(start, end + 1).some((line) => line.includes(F)),
+	);
+}
+
+test("a code block moved under a list item becomes that item's body", () => {
+	const p = parse(BLOCK_SOURCE);
+	const owner = find(p, "Root");
+	const index = codeIndex(p, owner);
+	assert.ok(index >= 0, "the fixture has a code block under the heading");
+	const item = find(p, "item");
+
+	const out = moveBodyBlock(p, owner, index, item, null);
+	assert.equal(out.ok, true);
+
+	const after = parseMarkdown(out.text, { title: "Fixture" });
+	const itemAfter = find(after, "item");
+	assert.equal(itemAfter.bodyRanges.length, 1);
+	assert.equal(find(after, "Root").bodyRanges.length, 0);
+	// The item's body column is two past the margin, so the fence and the line
+	// under it both start there.
+	assert.match(bodyRangeText(after, itemAfter.bodyRanges[0]), /^ {2}```js$/m);
+	assert.match(bodyRangeText(after, itemAfter.bodyRanges[0]), new RegExp(`^ {2}${F}$`, "m"));
+});
+
+test("the sample's own indentation moves with it, and only by the shift", () => {
+	const source = ["# Root", "", `${F}js`, "if (x) {", "  keep();", "}", F, "", "- item", ""].join("\n");
+	const p = parse(source);
+	const owner = find(p, "Root");
+	const out = moveBodyBlock(p, owner, codeIndex(p, owner), find(p, "item"), null);
+
+	assert.equal(out.ok, true);
+	// Two columns further in, because that is where the item's body sits.
+	assert.ok(out.text.includes("  if (x) {"), "the first code line took the shift");
+	assert.ok(out.text.includes("    keep();"), "the code's own indent survived the trip");
+});
+
+test("a block can be dropped above what the target already holds", () => {
+	// An owner usually has a single body range -- the parser runs a node's whole
+	// prose together -- so "reorder among an owner's blocks" is a rare case and
+	// the one worth pinning is a named landing line, which is what dropping onto
+	// a particular card's edge asks for.
+	const source = ["# Root", "", `${F}js`, CODE_LINE, F, "", "## A", "", "A's own prose.", ""].join("\n");
+	const p = parse(source);
+	const owner = find(p, "Root");
+	const a = find(p, "A");
+	const first = a.bodyRanges[0]?.[0];
+	assert.ok(first !== undefined, "the fixture gives A a body");
+
+	const out = moveBodyBlock(p, owner, codeIndex(p, owner), a, first);
+	assert.equal(out.ok, true);
+	assert.ok(
+		out.text.indexOf(`${F}js`) < out.text.indexOf("A's own prose."),
+		"the sample landed above the prose the target already had",
+	);
+
+	const after = parseMarkdown(out.text, { title: "Fixture" });
+	assert.equal(find(after, "Root").bodyRanges.length, 0, "the block left its old owner");
+	assert.equal(find(after, "A").bodyRanges.length, 1);
+});
+
+test("a same-owner drop needs a line, and a block cannot land inside itself", () => {
+	const p = parse(BLOCK_SOURCE);
+	const owner = find(p, "Root");
+	const index = codeIndex(p, owner);
+	const range = owner.bodyRanges[index];
+
+	// With no line named the block would go back exactly where it came from.
+	assert.equal(canMoveBodyBlock(owner, index, owner, null), false);
+	assert.equal(canMoveBodyBlock(owner, index, owner, range[0]), true);
+	// Landing on the owner itself is fine when a line is named, because that is
+	// a reorder rather than a reparent.
+	assert.equal(canMoveBodyBlock(owner, index, find(p, "item"), null), true);
+	assert.equal(moveBodyBlock(p, owner, index, owner, null).ok, false);
+});
+
+test("a body range index that is not there is refused, not thrown", () => {
+	const p = parse(BLOCK_SOURCE);
+	const owner = find(p, "Root");
+	assert.equal(canMoveBodyBlock(owner, 99, find(p, "item"), null), false);
+	assert.equal(moveBodyBlock(p, owner, 99, find(p, "item"), null).ok, false);
+});
+
+// --- deleting a selection -----------------------------------------------------
+
+const TREE = `# Root
+
+- alpha
+	- alpha one
+	- alpha two
+- beta
+
+	beta body
+
+- gamma
+`;
+
+test("several subtrees go as one edit, and nothing else moves", () => {
+	const p = parse(TREE);
+	const out = deleteNodes(p, [find(p, "alpha"), find(p, "gamma")]);
+	assert.equal(out.ok, true);
+	assert.equal(out.text, "# Root\n\n- beta\n\n\tbeta body\n");
+});
+
+test("a node inside another selected node is not spliced twice", () => {
+	// `alpha one` is already going with `alpha`'s block. Removing it a second
+	// time would take whatever moved up to take its place.
+	const p = parse(TREE);
+	const out = deleteNodes(p, [find(p, "alpha one"), find(p, "alpha")]);
+	assert.equal(out.ok, true);
+	assert.equal(out.text, "# Root\n\n- beta\n\n\tbeta body\n\n- gamma\n");
+});
+
+test("the order the nodes arrive in does not matter", () => {
+	const p = parse(TREE);
+	const forwards = deleteNodes(p, [find(p, "alpha"), find(p, "gamma")]);
+	const backwards = deleteNodes(p, [find(p, "gamma"), find(p, "alpha")]);
+	assert.equal(forwards.text, backwards.text);
+});
+
+test("the selection lands on the parent of the first node that went", () => {
+	const p = parse(TREE);
+	const out = deleteNodes(p, [find(p, "alpha two"), find(p, "beta")]);
+	assert.equal(out.ok, true);
+	assert.equal(out.focusLine, find(p, "alpha").lineStart);
+});
+
+test("deleting nothing is not an edit", () => {
+	const p = parse(TREE);
+	const out = deleteNodes(p, []);
+	assert.equal(out.ok, false);
+	assert.equal(out.text, serialize(p));
+});
+
+test("the root has no line to delete and is dropped from the batch", () => {
+	const p = parse(TREE);
+	const out = deleteNodes(p, [p.root, find(p, "gamma")]);
+	assert.equal(out.ok, true);
+	assert.equal(out.text, "# Root\n\n- alpha\n\t- alpha one\n\t- alpha two\n- beta\n\n\tbeta body\n");
+});
+
+// --- moving a whole selection -------------------------------------------------
+
+const GROUP = `# Root
+
+- alpha
+	- alpha one
+- beta
+
+	beta body
+
+- gamma
+- delta
+`;
+
+const HEADINGS = `# Root
+
+## Alpha
+
+alpha text
+
+## Beta
+
+beta text
+
+## Gamma
+`;
+
+test("a whole selection lands under a card, together and in written order", () => {
+	const p = parse(GROUP);
+	const out = moveNodesInto(p, [find(p, "alpha"), find(p, "gamma")], find(p, "beta"));
+	assert.equal(out.ok, true);
+	assert.equal(
+		out.text,
+		"# Root\n\n- beta\n\n\tbeta body\n\t- alpha\n\t\t- alpha one\n\t- gamma\n\n- delta\n",
+	);
+	// And the note reads back as the tree that just described: both cards are
+	// beta's children, and alpha still has the child it arrived with.
+	const after = parse(out.text);
+	assert.deepEqual(
+		find(after, "beta").children.map((n) => n.text),
+		["alpha", "gamma"],
+	);
+	assert.deepEqual(
+		find(after, "alpha").children.map((n) => n.text),
+		["alpha one"],
+	);
+});
+
+test("the order the nodes arrive in does not matter", () => {
+	const p = parse(GROUP);
+	const forwards = moveNodesInto(p, [find(p, "alpha"), find(p, "gamma")], find(p, "beta"));
+	const backwards = moveNodesInto(p, [find(p, "gamma"), find(p, "alpha")], find(p, "beta"));
+	assert.equal(forwards.text, backwards.text);
+});
+
+test("a node inside another selected node travels once, not twice", () => {
+	// `alpha one` is already inside alpha's block. Lifting it a second time
+	// would take it back out of the parent it had just arrived under.
+	const p = parse(GROUP);
+	const out = moveNodesInto(p, [find(p, "alpha"), find(p, "alpha one")], find(p, "gamma"));
+	assert.equal(out.ok, true);
+	const after = parse(out.text);
+	assert.deepEqual(
+		find(after, "gamma").children.map((n) => n.text),
+		["alpha"],
+	);
+	assert.deepEqual(
+		find(after, "alpha").children.map((n) => n.text),
+		["alpha one"],
+	);
+});
+
+test("a drop that cannot take the whole selection is not an edit at all", () => {
+	// Half a drag is worse than none: the target is one of the cards being
+	// carried, so the whole run is refused rather than the rest going without.
+	const p = parse(GROUP);
+	const out = moveNodesInto(p, [find(p, "alpha"), find(p, "gamma")], find(p, "alpha"));
+	assert.equal(out.ok, false);
+	assert.equal(out.text, serialize(p));
+});
+
+test("a node the note does not write is dropped, as deleting one drops it", () => {
+	const p = parse(GROUP);
+	const out = moveNodesInto(p, [p.root, find(p, "gamma")], find(p, "beta"));
+	assert.equal(out.ok, true);
+	// The blank line the note had between beta's body and delta is the note's
+	// own and stays where it was; only the cards moved.
+	assert.equal(
+		out.text,
+		"# Root\n\n- alpha\n\t- alpha one\n- beta\n\n\tbeta body\n\t- gamma\n\n- delta\n",
+	);
+});
+
+test("the run lands above the card it was dropped beside", () => {
+	const p = parse(GROUP);
+	const out = moveNodesBefore(p, [find(p, "gamma"), find(p, "delta")], find(p, "alpha"));
+	assert.equal(out.ok, true);
+	assert.equal(
+		out.text,
+		"# Root\n\n- gamma\n- delta\n- alpha\n\t- alpha one\n- beta\n\n\tbeta body\n",
+	);
+});
+
+test("the run lands below the whole subtree of the card it was dropped beside", () => {
+	const p = parse(GROUP);
+	const out = moveNodesAfter(p, [find(p, "alpha"), find(p, "gamma")], find(p, "delta"));
+	assert.equal(out.ok, true);
+	assert.equal(
+		out.text,
+		"# Root\n\n- beta\n\n\tbeta body\n\n- delta\n- alpha\n\t- alpha one\n- gamma\n",
+	);
+});
+
+test("headings in the run keep a blank line between them", () => {
+	// The seam a reader notices: `### A` written straight under the last line
+	// of `A`'s own content.
+	const p = parse(HEADINGS);
+	const out = moveNodesInto(p, [find(p, "Alpha"), find(p, "Gamma")], find(p, "Beta"));
+	assert.equal(out.ok, true);
+	assert.equal(
+		out.text,
+		"# Root\n\n## Beta\n\nbeta text\n\n### Alpha\n\nalpha text\n\n### Gamma\n",
+	);
+});
+
+test("the selection lands on the first line of the run", () => {
+	const p = parse(GROUP);
+	const out = moveNodesInto(p, [find(p, "alpha"), find(p, "gamma")], find(p, "beta"));
+	assert.equal(out.focusLine, 5);
+	assert.equal(out.text.split("\n")[out.focusLine], "\t- alpha");
+});
+
+test("one node takes the single-node path, byte for byte", () => {
+	// The group path is the new one, and it has to agree with the move that was
+	// there before it for the case that was always the common one.
+	const p = parse(GROUP);
+	const alone = moveNodesInto(p, [find(p, "alpha")], find(p, "beta"));
+	const ordinary = moveNode(p, find(p, "alpha"), find(p, "beta"));
+	assert.equal(alone.text, ordinary.text);
+	assert.equal(alone.focusLine, ordinary.focusLine);
+});
+
+test("moving nothing is not an edit", () => {
+	const p = parse(GROUP);
+	const out = moveNodesInto(p, [], find(p, "beta"));
+	assert.equal(out.ok, false);
+	assert.equal(out.text, serialize(p));
 });

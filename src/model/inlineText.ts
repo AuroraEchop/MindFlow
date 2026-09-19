@@ -26,7 +26,8 @@ export type InlineKind =
 	| "wikilink"
 	| "image"
 	| "link"
-	| "embed";
+	| "embed"
+	| "tag";
 
 export interface InlineRule {
 	kind: InlineKind;
@@ -76,6 +77,28 @@ export const INLINE_RULES: InlineRule[] = [
 	},
 	{ kind: "link", re: /\[([^\]]+)\]\(([^)]+)\)/g, visible: (m) => m[1], nested: false },
 	{ kind: "embed", re: /!\[\[([^\]]+)\]\]/g, visible: (m) => m[1], nested: false },
+	{
+		kind: "tag",
+		// A tag starts at a `#` that opens the line or follows a space or an
+		// opening bracket, and the rule *consumes* that character to say so --
+		// which is why the prefix is group 1 and why the emitter puts it back.
+		// A lookbehind is the obvious way to write this and the one way it may
+		// not be written: Obsidian's review refuses lookbehind outright, because
+		// a WebView older than iOS 16.4 does not have it. Consuming the
+		// character is also what keeps `C#`, a URL's `#fragment` and a `#`
+		// glued to the word before it from being tags.
+		//
+		// The lookahead refuses a digit, so `#42` stays a number, which is the
+		// rule Obsidian itself uses.
+		re: /(^|[\s(])#([^\s#\d][^\s#]*)/g,
+		// The `#` is the one marker that is part of what a reader sees, which is
+		// why this rule's visible text is the match itself and not a group of
+		// it: search and the card agree without either of them special-casing.
+		// The prefix counts as visible too, or `a #tag` would be found as
+		// `a#tag`.
+		visible: (m) => `${m[1]}#${m[2]}`,
+		nested: false,
+	},
 ];
 
 export interface InlineToken {

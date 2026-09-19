@@ -96,3 +96,63 @@ test("the shared patterns are not left holding state between scans", () => {
 	assert.equal(plainText(text), "a b c and y and d");
 	assert.deepEqual(nextInlineToken(text, 0), nextInlineToken(text, 0));
 });
+
+// --- tags --------------------------------------------------------------------
+
+test("a tag is a token, and the `#` is part of what it says", () => {
+	const tag = nextInlineToken("#tag", 0);
+	assert.equal(tag?.rule.kind, "tag");
+	assert.deepEqual([tag?.start, tag?.end], [0, 4]);
+	// Group 1 is the space or bracket the rule had to consume to say the `#`
+	// was allowed to be there; group 2 is the tag itself.
+	assert.equal(tag?.match[1], "");
+	assert.equal(tag?.match[2], "tag");
+
+	// Unlike every other marker, the `#` is drawn -- so the tokenizer finding
+	// one changes nothing about what search sees.
+	assert.equal(plainText("#tag"), "#tag");
+	assert.equal(plainText("see #tag now"), "see #tag now");
+	assert.equal(plainText("**bold** and #tag"), "bold and #tag");
+});
+
+test("a tag starts the line or follows a space, and nowhere else", () => {
+	assert.equal(nextInlineToken("#start", 0)?.rule.kind, "tag");
+	assert.equal(nextInlineToken("a #mid", 0)?.rule.kind, "tag");
+	assert.equal(nextInlineToken("(#paren)", 0)?.rule.kind, "tag");
+	// The bracket is consumed along with the `#`, so the token opens on it.
+	assert.equal(nextInlineToken("(#paren)", 0)?.start, 0);
+
+	assert.equal(nextInlineToken("C#", 0), null, "a language is not a tag");
+	assert.equal(nextInlineToken("https://x.test/#anchor", 0), null, "a fragment is not a tag");
+	assert.equal(nextInlineToken("a#glued", 0), null);
+});
+
+test("a `#` in front of a number is a number", () => {
+	assert.equal(nextInlineToken("#42", 0), null);
+	assert.equal(plainText("closes #42 and #43"), "closes #42 and #43");
+	assert.equal(nextInlineToken("#7th", 0), null);
+});
+
+test("a tag with a path, a hyphen or letters outside ASCII is still one tag", () => {
+	assert.equal(nextInlineToken("#a/b/c", 0)?.match[2], "a/b/c");
+	assert.equal(nextInlineToken("#well-known", 0)?.match[2], "well-known");
+	assert.equal(nextInlineToken("#中文标签", 0)?.match[2], "中文标签");
+});
+
+test("a bare `#` and a tag inside code are both just text", () => {
+	assert.equal(nextInlineToken("#", 0), null);
+	assert.equal(nextInlineToken("# a heading", 0), null);
+	assert.equal(plainText("`#notatag`"), "#notatag");
+});
+
+test("the space in front of a tag is drawn, not swallowed by the match", () => {
+	// The rule has to consume that space to say the `#` may follow one, so the
+	// emitter is what puts it back. Without that, `a #tag` would read `a#tag`.
+	const tag = nextInlineToken("a #tag", 0);
+	assert.deepEqual([tag?.start, tag?.end], [1, 6]);
+	assert.equal(tag?.match[1], " ");
+	assert.equal(tag?.match[2], "tag");
+
+	assert.equal(plainText("a #tag"), "a #tag");
+	assert.equal(plainText("a  #tag"), "a  #tag");
+});

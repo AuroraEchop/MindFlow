@@ -40,11 +40,46 @@ export interface ParagraphBlock {
 	text: string;
 }
 
-export type Block = TableBlock | CodeBlock | ParagraphBlock;
+/**
+ * A blockquote that opens with `[!type]`: Obsidian's callout.
+ *
+ * The `>` is the note's way of saying "this is one box, not a paragraph", and
+ * read as characters it says nothing at all -- which is why a callout is the
+ * second construct, after the table, that a card cannot draw as a run of text.
+ * The type is kept as written and lowercased; what it means is the renderer's
+ * business, because the aliases (`tip` and `hint`, `danger` and `error`) are a
+ * reading convention rather than a fact about the note.
+ */
+export interface CalloutBlock {
+	kind: "callout";
+	/** The type as written, lowercased: `note`, `warning`, or anything custom. */
+	type: string;
+	/** The title the note wrote, or "" when it wrote none. */
+	title: string;
+	/**
+	 * `-` folds the callout shut and `+` pins it open; null when the note wrote
+	 * neither, which is what an ordinary `> [!note]` has.
+	 */
+	fold: "open" | "closed" | null;
+	/** The callout's own content, read exactly as a body range is. */
+	blocks: Block[];
+}
+
+export type Block = TableBlock | CodeBlock | ParagraphBlock | CalloutBlock;
 
 const FENCE = /^([ \t]*)(`{3,}|~{3,})[ \t]*(.*)$/;
 /** One cell of a delimiter row: dashes, optionally pinned to either edge. */
 const DELIMITER_CELL = /^:?-+:?$/;
+/**
+ * A callout's opening line.
+ *
+ * Anchored to the `>` so a sentence that merely mentions the syntax stays
+ * prose. The fold marker is only read where the title has not started yet, so
+ * `> [!note]-` folds while `> [!note] - a title` keeps its dash.
+ */
+const CALLOUT = /^[ \t]*>[ \t]*\[!([^\]\s]+)\][ \t]*([+-])?[ \t]*(.*)$/;
+/** One line still inside a blockquote, with its `>` and the space after it. */
+const QUOTE_LINE = /^[ \t]*>[ \t]?(.*)$/;
 
 /**
  * The indentation every line shares, removed.
@@ -165,6 +200,42 @@ function openingFence(line: string): RegExpExecArray | null {
 }
 
 /**
+ * The callout starting at `index`, or null when there is not one.
+ *
+ * The body is every following line that is still quoted, with one `>` taken
+ * off, and it is read by this same function -- so a table inside a callout is a
+ * table, and a callout inside a callout is a callout. A line that is not quoted
+ * ends it, blank or not: that is what Obsidian does, and it is why the `>` has
+ * to be repeated on an empty line to keep a callout open.
+ */
+function readCallout(lines: string[], index: number): { block: CalloutBlock; next: number } | null {
+	const open = CALLOUT.exec(lines[index]);
+	if (!open) return null;
+
+	const inner: string[] = [];
+	let next = index + 1;
+	while (next < lines.length) {
+		const quoted = QUOTE_LINE.exec(lines[next]);
+		if (!quoted) break;
+		inner.push(quoted[1]);
+		next++;
+	}
+	// Trailing blank quote lines are the note's spacing, not content.
+	while (inner.length > 0 && inner[inner.length - 1].trim() === "") inner.pop();
+
+	return {
+		block: {
+			kind: "callout",
+			type: open[1].toLowerCase(),
+			title: open[3].trim(),
+			fold: open[2] === "-" ? "closed" : open[2] === "+" ? "open" : null,
+			blocks: parseBlocks(inner.join("\n")),
+		},
+		next,
+	};
+}
+
+/**
  * A body range as the blocks it is made of, in order.
  *
  * Blank lines are separators and produce nothing; a run of lines with no blank
@@ -205,6 +276,13 @@ export function parseBlocks(source: string): Block[] {
 			continue;
 		}
 
+		const callout = readCallout(lines, i);
+		if (callout) {
+			blocks.push(callout.block);
+			i = callout.next;
+			continue;
+		}
+
 		const table = readTable(lines, i);
 		if (table) {
 			blocks.push(table.block);
@@ -215,12 +293,15 @@ export function parseBlocks(source: string): Block[] {
 		// Everything else is prose, up to whatever ends it. A fence ends it --
 		// fenced code is allowed to interrupt a paragraph -- a blank line ends
 		// it, and so does a table, which cannot open here but can start the next
-		// block.
+		// block. A callout ends it the same way a table does: `> [!note]` is a
+		// box of its own, and a paragraph that swallowed it would show the
+		// syntax rather than the box.
 		const start = i;
 		while (
 			i < lines.length &&
 			lines[i].trim() !== "" &&
 			!openingFence(lines[i]) &&
+			!CALLOUT.test(lines[i]) &&
 			!readTable(lines, i)
 		) {
 			i++;
@@ -232,12 +313,20 @@ export function parseBlocks(source: string): Block[] {
 }
 
 /**
- * Whether these blocks hold a table.
+ * Whether a card has to be drawn as these blocks rather than as one run of
+ * text.
  *
- * What the view asks before it commits a card to being drawn as blocks: a
- * paragraph reads the same either way, and the plain path is the one every
- * existing card is measured and styled by.
+ * What the view asks before it commits a card to the structured path. Three
+ * constructs cannot survive being read as characters: a table, whose `|` is
+ * only a column edge once something has decided it is one; a callout, whose
+ * `>` and `[!type]` are scaffolding the reader is never meant to see; and a
+ * fenced sample, whose fences are the note's way of saying "leave this alone"
+ * and are the one part of it nobody wants to read. A paragraph reads the same
+ * either way, and the plain path is the one every other card is measured and
+ * styled by.
  */
-export function holdsTable(blocks: readonly Block[]): boolean {
-	return blocks.some((block) => block.kind === "table");
+export function needsBlocks(blocks: readonly Block[]): boolean {
+	return blocks.some(
+		(block) => block.kind === "table" || block.kind === "callout" || block.kind === "code",
+	);
 }

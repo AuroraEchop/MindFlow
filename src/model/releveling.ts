@@ -76,7 +76,16 @@ function contentColumn(spec: NodeSpec): number {
 	return indentWidthOf(spec.indent) + spec.marker.length + 1;
 }
 
-function currentContentColumn(node: MindNode): number {
+/**
+ * The column a node's own body sits at: where its paragraphs, code samples and
+ * tables start.
+ *
+ * A heading's body starts at the margin, and a list item's starts past its
+ * marker -- the same column `relevelBlock` shifts a moved subtree's body lines
+ * to, so a block lifted out of one node and put under another can be shifted by
+ * the difference between two of these and land in the right place.
+ */
+export function bodyColumn(node: MindNode): number {
 	if (isHeadingLike(node)) return 0;
 	return indentWidthOf(node.indent + node.marker + node.spacing);
 }
@@ -149,7 +158,7 @@ export function relevelBlock(
 		if (n.lineStart >= start && n.lineStart <= end) {
 			rewrites.set(n.lineStart, renderWithSpec(n, spec));
 		}
-		const delta = contentColumn(spec) - currentContentColumn(n);
+		const delta = contentColumn(spec) - bodyColumn(n);
 		if (delta !== 0) {
 			for (const [s, e] of n.bodyRanges) {
 				for (let i = Math.max(s, start); i <= Math.min(e, end); i++) shifts.set(i, delta);
