@@ -106,6 +106,9 @@ export const COPIED = [
 	"min-width",
 	"max-width",
 	"display",
+	// A picture is pinned to an explicit box, and this is what decides whether
+	// a shape that does not match it is letterboxed or stretched.
+	"object-fit",
 	"flex-direction",
 	"flex-wrap",
 	"justify-content",
@@ -119,6 +122,11 @@ export const COPIED = [
 	"position",
 	"left",
 	"top",
+	// All four offsets, not two. An absolutely positioned element anchored to
+	// the right or the bottom has nothing to say so with once these are left
+	// out, and lands in the top-left corner of whatever contains it.
+	"right",
+	"bottom",
 	"white-space",
 	// The annotation strip breaks anywhere and the card's text only at a word;
 	// uncopied, both would fall back to `normal` and rewrap in the file.
@@ -174,6 +182,7 @@ export const INHERITED = new Set([
 export const INITIAL: Record<string, string> = {
 	"background-image": "none",
 	"box-shadow": "none",
+	"object-fit": "fill",
 	"text-decoration-line": "none",
 	"stroke-dasharray": "none",
 	"max-width": "none",
@@ -193,8 +202,16 @@ export const INITIAL: Record<string, string> = {
 	"column-gap": "normal",
 };
 
-/** Interactive chrome: the fold/add row, and the button that opens a block. */
-const CHROME = ".mm-tools, .mm-expand";
+/**
+ * Interactive chrome: the fold/add row, and the two circles a video card
+ * carries.
+ *
+ * The media buttons would come out invisible either way -- they are drawn at
+ * `opacity: 0` until the pointer arrives, and `opacity` is one of the
+ * properties that gets copied -- but a file should not carry two absolutely
+ * positioned divs that answer to nothing.
+ */
+const CHROME = ".mm-tools, .mm-media-button, .mm-code-copy";
 
 /** Selection, search and drag state -- a moment in the app, not part of the map. */
 const STATE_CLASSES = [
@@ -209,6 +226,16 @@ const STATE_CLASSES = [
 ];
 
 const DROPPED_ATTRIBUTES = ["contenteditable", "tabindex", "draggable"];
+
+/**
+ * The map's own bookkeeping, which is not part of the map.
+ *
+ * `data-media-path` is how the export found the bytes, and `data-media-ready`
+ * is how the map knows a picture has landed; both are spent by the time the
+ * fragment is written, and neither means anything to whoever opens the file.
+ * `data-href` is deliberately not here -- that one is the link a reader follows.
+ */
+const DROPPED_DATA = ["data-media-path", "data-media-ready", "data-media-src"];
 
 /** What a size has to gain to become a border box, per axis. */
 const EXTRA: Record<string, string[]> = {
@@ -292,6 +319,7 @@ function copyStyle(
 
 function dropAttributes(clone: Element): void {
 	for (const name of DROPPED_ATTRIBUTES) clone.removeAttribute(name);
+	for (const name of DROPPED_DATA) clone.removeAttribute(name);
 	for (const attribute of Array.from(clone.attributes)) {
 		if (attribute.name.toLowerCase().startsWith("on")) {
 			clone.removeAttribute(attribute.name);

@@ -64,8 +64,15 @@ export const EXPORT_COMMANDS: readonly ExportCommand[] = (
 export interface ExportSource {
 	/** The `.canvas` file's text, or null when there is nothing on the map. */
 	canvasFile(): string | null;
-	/** The map as an XHTML fragment, or null when there is nothing on the map. */
-	snapshot(): Snapshot | null;
+	/**
+	 * The map as an XHTML fragment, or null when there is nothing on the map.
+	 *
+	 * Asynchronous for one reason: a picture is only in the file if its bytes
+	 * are, and reading them is a vault call. Everything else about the snapshot
+	 * is synchronous, and the map is put back the way it was before this
+	 * resolves.
+	 */
+	snapshot(): Promise<Snapshot | null>;
 }
 
 /**
@@ -107,7 +114,7 @@ export async function runExport(
 			return;
 		}
 
-		const snapshot = source.snapshot();
+		const snapshot = await source.snapshot();
 		if (snapshot === null) {
 			new Notice(t("export.notice.nothing"));
 			return;

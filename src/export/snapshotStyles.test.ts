@@ -52,6 +52,9 @@ const LONGHANDS: Record<string, string[]> = {
 		`border-${side}-style`,
 		`border-${side}-color`,
 	]),
+	// Both compute down to longhands, and both are used by the callout below.
+	gap: ["row-gap", "column-gap"],
+	flex: ["flex-grow", "flex-shrink", "flex-basis"],
 };
 
 /**
@@ -91,6 +94,18 @@ test("the card's row is carried into an export too", () => {
 	const copied = new Set(COPIED);
 	for (const property of required(".mm-row")) {
 		assert.ok(copied.has(property), `snapshot.ts does not copy ${property}`);
+	}
+});
+
+test("a callout is a box in the export as well as on the map", () => {
+	const copied = new Set(COPIED);
+	// The three rules that give it its shape. The per-type colours are custom
+	// properties, which the copy leaves alone on purpose: what it writes down
+	// is the colour each element resolved to.
+	for (const selector of [".mm-text .mm-callout", ".mm-text .mm-callout-head"]) {
+		for (const property of required(selector)) {
+			assert.ok(copied.has(property), `snapshot.ts does not copy ${property} (${selector})`);
+		}
 	}
 });
 
