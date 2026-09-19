@@ -217,7 +217,11 @@ const TABLE = [
 	// by name, and this is the same Enter family rather than a key of its own.
 	{ action: "toggle-check", defaults: ["Mod+Shift+Enter"] },
 	{ action: "expand-body", defaults: [] },
-	{ action: "indent", defaults: ["]"] },
+	// Mod+Shift+Tab, pairing the outdent on Shift+Tab: a bare punctuation key
+	// answers differently on every keyboard layout and never arrives at all
+	// through an IME, which is how `]` shipped -- a demote that works on one
+	// keyboard and silently does nothing on the next is not a binding.
+	{ action: "indent", defaults: ["Mod+Shift+Tab"] },
 	{ action: "outdent", defaults: ["Shift+Tab"] },
 	{ action: "move-up", defaults: ["Mod+ArrowUp"] },
 	{ action: "move-down", defaults: ["Mod+ArrowDown"] },
@@ -227,6 +231,9 @@ const TABLE = [
 	{ action: "navigate-left", defaults: ["ArrowLeft"] },
 	{ action: "navigate-right", defaults: ["ArrowRight"] },
 	{ action: "search", defaults: ["Mod+f"] },
+	// The same bar with its replace row open, which is the pair Obsidian's own
+	// editor uses. Escape still closes it; nothing else here is Mod+h.
+	{ action: "replace", defaults: ["Mod+h"] },
 	{ action: "close-search", defaults: ["Escape"] },
 	{ action: "undo", defaults: ["Mod+z"] },
 	{ action: "redo", defaults: ["Mod+Shift+z", "Mod+y"] },

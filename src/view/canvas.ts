@@ -4,7 +4,7 @@ import { MotionFlag, SETTLE_MS } from "./motion.ts";
 export interface CanvasOptions {
 	wheel: "zoom" | "pan";
 	/** Return true to let a pointerdown start a pan. */
-	canPan: (target: HTMLElement) => boolean;
+	canPan: (target: HTMLElement, ev: PointerEvent) => boolean;
 	/**
 	 * The camera moved. Coalesced onto one call per frame on purpose: a pan
 	 * writes a new transform on every pointer event, but whatever the view
@@ -39,6 +39,15 @@ export class Canvas {
 	private opts: CanvasOptions;
 	private readonly pointers = new Map<number, { x: number; y: number }>();
 	private panning = false;
+	/**
+	 * Whether the pan key is being held down.
+	 *
+	 * Brought in from the view rather than watched for here: what the key means
+	 * for the camera is this file's business, but which key it is, and when it
+	 * is down, is the keyboard's -- and that lives one layer up, in
+	 * `interactions.ts`.
+	 */
+	private panKey = false;
 	private last = { x: 0, y: 0 };
 	private pinchDistance = 0;
 	private viewFrame = 0;
@@ -85,6 +94,29 @@ export class Canvas {
 		this.opts = { ...this.opts, ...opts };
 	}
 
+	/** Whether the pan key is held -- see `holdPan`. */
+	get panKeyHeld(): boolean {
+		return this.panKey;
+	}
+
+	/**
+	 * Hold or release the pan key.
+	 *
+	 * Held, a left press pans wherever it lands, cards included. A map is mostly
+	 * cards, so a pan that stopped at the first one would be a pan of the gaps
+	 * between them -- and the moment a user wants the camera is the moment a
+	 * card is in the way, a big one most of all.
+	 *
+	 * The viewport carries a class for the length of the hold, which is how the
+	 * pointer comes to say so and how a drag across the text of a card stays a
+	 * drag rather than turning into a text selection.
+	 */
+	holdPan(held: boolean): void {
+		if (this.panKey === held) return;
+		this.panKey = held;
+		this.viewport.toggleClass("is-pan-ready", held);
+	}
+
 	private on<K extends keyof HTMLElementEventMap>(
 		el: HTMLElement,
 		type: K,
@@ -124,7 +156,12 @@ export class Canvas {
 			}
 			const target = ev.target as HTMLElement;
 			const middleClick = ev.button === 1;
-			if (!middleClick && !this.opts.canPan(target)) return;
+			// A left press with the pan key held is a pan wherever it lands, so
+			// `canPan` -- which answers for the map's own surface -- is not
+			// asked. Middle-click already pans over a card as well as off one
+			// and is left as it was.
+			const heldPan = this.panKey && ev.button === 0;
+			if (!middleClick && !heldPan && !this.opts.canPan(target, ev)) return;
 
 			this.panning = true;
 			// Deliberately not promoting the layer here: a press and hold that never

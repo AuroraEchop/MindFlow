@@ -113,10 +113,50 @@ export function putNoteState(
 	now: number,
 ): FoldStore {
 	if (path === "") return store;
+
+	// The same note, unchanged, is the ordinary case rather than the exception:
+	// the view calls this on every paint, and a paint that moved no fold and no
+	// selection has nothing to say. Returning `store` itself is what lets the
+	// caller's `next === store` guard fire -- it never could while every call
+	// built a fresh object, and rebuilding a two-hundred-entry store per
+	// keystroke in order to say nothing is exactly what that guard was written
+	// to avoid.
+	const before = store[path];
+	if (before !== undefined && sameEntry(before, entry) && now - before.at < RESTAMP_AFTER) {
+		return store;
+	}
+
 	const state: NoteViewState = { collapsed: [...entry.collapsed], at: now };
 	if (entry.focusKey !== undefined) state.focusKey = entry.focusKey;
 	if (entry.focusId !== undefined) state.focusId = entry.focusId;
 	return prune({ ...store, [path]: state });
+}
+
+/**
+ * How stale the stamp has to be before an otherwise unchanged note is rewritten.
+ *
+ * `at` is what `prune` evicts by, so it cannot simply be left alone: the note
+ * being edited right now would become the first one thrown away. Re-stamping it
+ * once a minute keeps the eviction order honest while leaving the rebuild rare
+ * enough that typing does not pay for it.
+ */
+export const RESTAMP_AFTER = 60_000;
+
+/**
+ * Whether the store already says what `entry` says.
+ *
+ * `at` is a stamp, not a fact, so it is not compared. The collapsed list is
+ * compared in order: the view hands over a Set's iteration order, which is
+ * stable between paints, and a reordered list that means the same thing costs
+ * one write, never a wrong answer.
+ */
+function sameEntry(before: NoteViewState, entry: NoteViewEntry): boolean {
+	if (before.focusKey !== entry.focusKey || before.focusId !== entry.focusId) return false;
+	if (before.collapsed.length !== entry.collapsed.length) return false;
+	for (let i = 0; i < before.collapsed.length; i++) {
+		if (before.collapsed[i] !== entry.collapsed[i]) return false;
+	}
+	return true;
 }
 
 /** The store with one note's state gone. */

@@ -3,9 +3,16 @@ import { setIcon } from "obsidian";
 import { t } from "../i18n.ts";
 import type { LayoutNode } from "../layout/tidyTree.ts";
 import type { Block } from "../model/blocks.ts";
-import { branchAction, branchIcon, showsPlus } from "./branchButton.ts";
+import {
+	branchAction,
+	branchIcon,
+	branchLabelKey,
+	showsPlus,
+	BRANCH_FALLBACK_TEXT,
+} from "./branchButton.ts";
 import { renderBlocks } from "./blocks.ts";
 import { renderInline } from "./inline.ts";
+import type { MediaContext } from "./media.ts";
 import type { NodeMaxWidth } from "./nodeWidth.ts";
 
 export interface NodeElementOptions {
@@ -20,15 +27,28 @@ export interface NodeElementOptions {
 	 */
 	blocks: Block[] | null;
 	/**
+	 * The licence to draw pictures and videos, or null when the map is not
+	 * drawing them. Null is the chip an embed has always been.
+	 */
+	media: MediaContext | null;
+	/**
 	 * Render the text verbatim: a sample or a table, which are drawn in a
 	 * monospace face where alignment carries meaning. Only reached when
 	 * `blocks` is null, which is every card the block parser did not claim.
 	 */
 	preformatted: boolean;
-	/** Draw the button that opens the block whole, in its own dialog. */
-	expandable: boolean;
 	/** Draw the branch-side button at all. Off for note content. */
 	addable: boolean;
+	/**
+	 * The card folds its own content instead of a branch under it.
+	 *
+	 * True for a note-content card holding code, which is the one card whose
+	 * body is long enough to be worth closing and which has no branch to close
+	 * instead. It is what gives such a card the button at all -- `addable` is
+	 * false for every note-content card, and a card with neither has nothing
+	 * for the button to do.
+	 */
+	collapsible: boolean;
 	collapsed: boolean;
 	/** True when the node has anything to unfold, body cards included. */
 	hasChildren: boolean;
@@ -57,9 +77,15 @@ export interface NodeElement {
 	text: HTMLElement;
 	toggle: HTMLElement | null;
 	checkbox: HTMLElement | null;
-	expand: HTMLElement | null;
 	add: HTMLElement | null;
 	hasMath: boolean;
+	/**
+	 * The card holds a picture or a video. Owned by the builder rather than by
+	 * the view, because only the builder saw what the note's markup turned
+	 * into -- and the view needs it to know which cards a cull may not measure
+	 * until the media inside them has landed.
+	 */
+	hasMedia: boolean;
 	/**
 	 * Owned by the view, not by the builder: true once the card has been taken
 	 * out of the document for sitting outside the viewport. It rides here so
@@ -118,30 +144,19 @@ export function buildNodeElement(
 	// rather than at its own.
 	if (opts.maxWidth.text !== null) text.style.maxWidth = `${opts.maxWidth.text}px`;
 	let hasMath = false;
+	let hasMedia = false;
 	if (opts.blocks !== null) {
 		el.dataset.block = "blocks";
-		hasMath = renderBlocks(text, opts.blocks);
+		const drawn = renderBlocks(text, opts.blocks, opts.media);
+		hasMath = drawn.math;
+		hasMedia = drawn.media;
 	} else if (opts.preformatted) {
 		el.dataset.block = "pre";
 		text.setText(node.text);
 	} else {
-		hasMath = renderInline(text, node.text);
-	}
-
-	// Inside the card, not beside it. `canPan` already lets a pointerdown on
-	// `.mm-card` through, and anything outside it would have to be named there
-	// too or the canvas takes pointer capture and swallows the click.
-	// Absolutely positioned, so it stays out of flow and cannot move the
-	// measurements `measureAndPlace` takes off this element.
-	let expand: HTMLElement | null = null;
-	if (opts.expandable) {
-		expand = card.createDiv({ cls: "mm-expand" });
-		expand.setAttribute("role", "button");
-		expand.setAttribute("aria-label", t("view.menu.showBlock"));
-		setIcon(expand, "maximize-2");
-		// `setIcon` is silent when the id is not in the bundled set, which would
-		// leave an invisible but clickable box in the corner of every card.
-		if (!expand.firstElementChild) expand.setText("⤢");
+		const drawn = renderInline(text, node.text, opts.media);
+		hasMath = drawn.math;
+		hasMedia = drawn.media;
 	}
 
 	// The furniture on the branch side of the card, in one row absolutely
@@ -159,7 +174,7 @@ export function buildNodeElement(
 	// what the user asked the button to be. See `branchButton.ts`.
 	let toggle: HTMLElement | null = null;
 	let add: HTMLElement | null = null;
-	if (opts.hasChildren || opts.addable) {
+	if (opts.hasChildren || opts.addable || opts.collapsible) {
 		// The button answers to hover and to the picked state, and nothing else:
 		// hidden while the card sits unpicked and unhovered, the minus while the
 		// pointer is on a branch that can close, the plus for as long as the
@@ -177,6 +192,13 @@ export function buildNodeElement(
 		// number the user can only read by hovering the thing they are about to
 		// press. It stays a control all the same -- reopening a branch without
 		// hovering to find the button again is the same gesture it always was.
+		//
+		// Only for a card with a branch under it, though: the count says how
+		// many cards a fold is holding back, and a note-content card has no
+		// cards to hold. What a folded block needs is not a number but the way
+		// back out, and that is the button -- which the stylesheet holds out in
+		// the open for as long as a block is folded, exactly where a branch's
+		// count would have been.
 		if (opts.hasChildren && opts.collapsed) {
 			toggle = tools.createDiv({ cls: "mm-toggle" });
 			toggle.setAttribute("role", "button");
@@ -184,21 +206,18 @@ export function buildNodeElement(
 			toggle.setText(String(opts.hiddenCount));
 		}
 
-		if (opts.addable) {
+		if (opts.addable || opts.collapsible) {
 			const action = branchAction(opts);
 			add = tools.createDiv({
 				cls: ["mm-add", showsPlus(action) ? "is-plus" : "is-minus"],
 			});
 			add.setAttribute("role", "button");
-			add.setAttribute(
-				"aria-label",
-				t(action === "fold" ? "view.node.collapse" : "view.menu.addChild"),
-			);
+			add.setAttribute("aria-label", t(branchLabelKey(action)));
 			add.dataset.branchAction = action;
 			setIcon(add, branchIcon(action));
 			// `setIcon` is silent when the id is not in the bundled set, which
 			// would leave an invisible but clickable circle on the card.
-			if (!add.firstElementChild) add.setText(action === "fold" ? "−" : "+");
+			if (!add.firstElementChild) add.setText(BRANCH_FALLBACK_TEXT[action]);
 		}
 	}
 
@@ -217,7 +236,9 @@ export function buildNodeElement(
 		const annotation = row.createDiv({ cls: "mm-text mm-annotation" });
 		annotation.setAttribute("aria-label", t("view.node.annotationAria"));
 		if (opts.annotation.trim() !== "") {
-			hasMath = renderInline(annotation, opts.annotation) || hasMath;
+			const drawn = renderInline(annotation, opts.annotation, opts.media);
+			hasMath = drawn.math || hasMath;
+			hasMedia = drawn.media || hasMedia;
 		} else {
 			// Never empty: a blank strip still has to occupy its own line.
 			annotation.setText(opts.annotation || "\u00a0");
@@ -231,9 +252,9 @@ export function buildNodeElement(
 		text,
 		toggle,
 		checkbox,
-		expand,
 		add,
 		hasMath,
+		hasMedia,
 		offscreen: false,
 		measured: false,
 	};

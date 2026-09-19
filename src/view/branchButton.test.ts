@@ -21,8 +21,20 @@ import { branchAction, branchIcon, showsPlus } from "./branchButton.ts";
  * always arguing for a fold. The CSS tests at the bottom pin the matrix.
  */
 function state(partial: Partial<Parameters<typeof branchAction>[0]>): Parameters<typeof branchAction>[0] {
-	return { hasChildren: false, collapsed: false, selected: false, ...partial };
+	return { hasChildren: false, collapsed: false, selected: false, collapsible: false, ...partial };
 }
+
+test("a card that folds its own body collapses and expands, picked or not", () => {
+	// A note-content card has no branch, so the selected-card rule that makes
+	// the button a plus has nothing to say about one: the only question left is
+	// whether the block is folded.
+	assert.equal(branchAction(state({ collapsible: true })), "collapse");
+	assert.equal(branchAction(state({ collapsible: true, collapsed: true })), "expand");
+	assert.equal(branchAction(state({ collapsible: true, selected: true })), "collapse");
+	assert.equal(branchIcon(branchAction(state({ collapsible: true }))), "chevrons-down-up");
+	assert.equal(branchIcon(branchAction(state({ collapsible: true, collapsed: true }))), "chevrons-up-down");
+	assert.equal(showsPlus(branchAction(state({ collapsible: true }))), false);
+});
 
 test("an open branch shows the minus while it is not picked", () => {
 	// The minus is the folding affordance, and it shows while the pointer is on
@@ -80,17 +92,31 @@ test("the branch button is visible on hover and on the picked card, nothing else
 	// it lets go. A branch with children once kept its button on screen at all
 	// times -- which made an unpicked, unhovered card wear a button that argued
 	// for a fold nobody was looking at. `has-children` must never hand out
-	// visibility on its own; only the two states that mean it do.
+	// visibility on its own; only the states that mean it do.
+	//
+	// A folded note-content card is the third of those states, and the only one
+	// that is not about the pointer: a block has no branch to count, so the way
+	// back out has to stand where a branch's count would. It is keyed on the
+	// body kind as well, because a folded *branch* still keeps the count and
+	// its button must stay hover-only.
 	const rules = visibilityRules(".mm-add");
 	const show = rules.filter((rule) => /opacity:\s*1/.test(rule.body));
 	assert.ok(show.length > 0, "nothing shows the branch button");
 	for (const rule of show) {
 		const parts = rule.selector.split(",").map((part) => part.trim());
 		for (const part of parts) {
+			if (/\.is-collapsed \.mm-add$/.test(part)) {
+				assert.match(
+					part,
+					/\[data-kind="body"\]/,
+					`"${part}" shows a folded card's button, which a folded branch must not get`,
+				);
+				continue;
+			}
 			assert.match(
 				part,
 				/:hover \.mm-add$|\.is-selected \.mm-add$/,
-				`"${part}" shows the branch button for a state that is neither hover nor focus`,
+				`"${part}" shows the branch button for a state that is neither hover, focus nor a folded block`,
 			);
 		}
 	}

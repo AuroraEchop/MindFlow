@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
 	MAX_REMEMBERED_NOTES,
+	RESTAMP_AFTER,
 	forgetFolder,
 	forgetNote,
 	putNoteState,
@@ -10,7 +11,7 @@ import {
 	renameFolder,
 	renameNote,
 } from "./foldStore.ts";
-import type { FoldStore } from "./foldStore.ts";
+import type { FoldStore, NoteViewEntry } from "./foldStore.ts";
 
 /** A store with `count` notes, oldest first, so eviction order is nameable. */
 function stackOf(count: number, prefix = "n"): FoldStore {
@@ -106,6 +107,48 @@ test("notes written in the same pass evict in a fixed order", () => {
 
 test("an empty path is refused rather than stored", () => {
 	assert.deepEqual(putNoteState({}, "", { collapsed: ["h:a"] }, 1), {});
+});
+
+test("writing a note that already says the same thing hands back the same store", () => {
+	const store = putNoteState({}, "a.md", { collapsed: ["h:x"], focusKey: "h:x" }, 1);
+	const again = putNoteState(store, "a.md", { collapsed: ["h:x"], focusKey: "h:x" }, 2);
+	assert.equal(again, store, "the caller's identity check is what keeps a paint free");
+});
+
+test("a change to the fold shape, the focus key or the focus id is a change", () => {
+	const store = putNoteState({}, "a.md", { collapsed: ["h:x"], focusKey: "h:x", focusId: "0.1" }, 1);
+	const changed: NoteViewEntry[] = [
+		{ collapsed: ["h:x", "h:y"], focusKey: "h:x", focusId: "0.1" },
+		{ collapsed: ["h:x"], focusKey: "h:y", focusId: "0.1" },
+		{ collapsed: ["h:x"], focusKey: "h:x", focusId: "0.2" },
+		{ collapsed: ["h:x"], focusKey: "h:x" },
+	];
+	for (const entry of changed) {
+		assert.notEqual(
+			putNoteState(store, "a.md", entry, 2),
+			store,
+			`${JSON.stringify(entry)} should have been written`,
+		);
+	}
+});
+
+test("an unchanged note is rewritten once its stamp goes stale", () => {
+	const store = putNoteState({}, "a.md", { collapsed: ["h:x"] }, 1);
+	assert.equal(
+		putNoteState(store, "a.md", { collapsed: ["h:x"] }, 1 + RESTAMP_AFTER - 1),
+		store,
+		"still fresh enough to leave alone",
+	);
+
+	const restamped = putNoteState(store, "a.md", { collapsed: ["h:x"] }, 1 + RESTAMP_AFTER);
+	assert.notEqual(restamped, store, "the eviction order has to keep moving");
+	assert.equal(restamped["a.md"].at, 1 + RESTAMP_AFTER);
+});
+
+test("a stale stamp never swallows a real change", () => {
+	const store = putNoteState({}, "a.md", { collapsed: ["h:x"] }, 1);
+	const changed = putNoteState(store, "a.md", { collapsed: ["h:y"] }, 1 + RESTAMP_AFTER * 10);
+	assert.deepEqual(changed["a.md"].collapsed, ["h:y"]);
 });
 
 // --- forgetting ---------------------------------------------------------------

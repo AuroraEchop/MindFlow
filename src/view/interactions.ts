@@ -3,7 +3,7 @@ import { CARD_STYLE_CLASSES } from "./cardStyle.ts";
 import { edgePath } from "./edges.ts";
 import type { EdgeStyle } from "./edges.ts";
 import { comboFromEvent, resolveAction } from "./shortcuts.ts";
-import type { ShortcutBindings } from "./shortcuts.ts";
+import type { KeyCombo, ShortcutBindings } from "./shortcuts.ts";
 
 export type Direction = "up" | "down" | "left" | "right";
 
@@ -32,6 +32,14 @@ interface CardBox {
 	right: number;
 	top: number;
 	bottom: number;
+	/**
+	 * Which side of the root the card is drawn on: 1 right, -1 left.
+	 *
+	 * Read off the element rather than worked out from the tree, because the
+	 * question is only ever "which way does this card's own half face", and the
+	 * map has already answered it when it drew the card.
+	 */
+	side: 1 | -1;
 }
 
 /**
@@ -54,11 +62,19 @@ export interface MapController {
 	canvas: Canvas;
 	isEditing(): boolean;
 	selectedId(): string | null;
-	select(id: string | null): void;
+	/**
+	 * `additive` adds the card to the selection instead of replacing it, which
+	 * is what Shift and Ctrl/Cmd ask for on a card.
+	 */
+	select(id: string | null, additive?: boolean): void;
+	/** Replace the selection with every card a band swept over. */
+	selectMany(ids: readonly string[]): void;
+	/** How many cards the next delete or fold would act on. */
+	selectionSize(): number;
 	beginEdit(id: string): void;
 	editAnnotation(id: string): void;
 	/** Take the user to the line this card is written on. */
-	revealInNote(id: string): void;
+	revealInNote(id: string): Promise<void>;
 
 	addChildTo(id: string): void;
 	addSiblingTo(id: string): void;
@@ -83,16 +99,45 @@ export interface MapController {
 	expandBody(id: string): void;
 	/** Follow a link written in a note-content card. */
 	openLink(href: string, ev: MouseEvent): void;
+	/**
+	 * Enlarge a picture or a video over the map.
+	 *
+	 * False when there was nothing to show, which puts the click back on the
+	 * path it would have taken -- a file that has since left the vault still
+	 * resolves to a chip, and a chip is still a link.
+	 */
+	previewMedia(el: HTMLElement): boolean;
 	/** The node's own menu, at the pointer. */
 	showMenu(id: string, ev: MouseEvent): void;
 	navigate(direction: Direction): void;
 
 	openSearch(): void;
+	/** The same bar, with the replace row already showing. */
+	openReplace(): void;
 	/** False when there was no search bar to close, so Escape stays free. */
 	closeSearch(): boolean;
 
 	canDrop(id: string, targetId: string, mode: DropMode): boolean;
 	move(id: string, targetId: string, mode: DropMode): void;
+	/**
+	 * What a drag that starts on this card carries.
+	 *
+	 * The card alone, or the whole selection when the card is part of one.
+	 * Asked once, when the drag starts, and everything after that is about the
+	 * list rather than about the card under the pointer.
+	 */
+	carriedBy(id: string): readonly string[];
+	/** Whether every card being carried could land in this slot -- all or none. */
+	canDropMany(ids: readonly string[], targetId: string, mode: DropMode): boolean;
+	moveMany(ids: readonly string[], targetId: string, mode: DropMode): void;
+	/**
+	 * Whether a plain drag on blank canvas moves the map rather than banding it.
+	 *
+	 * The one answer the camera and the band are both given: with it off the
+	 * press is the band's and the pan key is what moves the map, with it on the
+	 * press is the camera's and the band waits for the modifier.
+	 */
+	dragToPan(): boolean;
 	/** How the map draws its connectors now, so a drag's guide can match them. */
 	edgeStyle(): EdgeStyle;
 	/**
@@ -113,6 +158,15 @@ export interface MapController {
 	 * card the prose hangs under. Null for an id that is not a body card's.
 	 */
 	bodyOwner(id: string): string | null;
+	/**
+	 * Whether this note-content card is a block the user may pick up and move.
+	 *
+	 * Most note content is prose the note owns and the map only draws, and a
+	 * press on it stays a press on the card above it. A code sample is the one
+	 * block worth carrying somewhere else, so the map says which cards those
+	 * are rather than the interaction layer guessing from the DOM.
+	 */
+	canDragBody(id: string): boolean;
 
 	undo(): void;
 	redo(): void;
@@ -165,6 +219,21 @@ const DIRECTIONS: Record<
 /** Reached only by an action no `case` claimed, which is a compile error. */
 function assertHandled(_action: never): void {}
 
+/**
+ * Whether this is the map's pan key, held on its own.
+ *
+ * Bare `Space`, which is exactly how the fold binding spells it. Nothing else
+ * about it is configurable: a pan key is a modifier, the same kind of key as
+ * Shift, and the map does not offer "rebind the modifier" -- so it answers to
+ * the physical key rather than to whatever the fold has since been moved to.
+ *
+ * Shift and Space together are left to the band, and Space as one half of a
+ * combination belongs to whatever else is bound to it.
+ */
+function isPanKey(combo: KeyCombo): boolean {
+	return combo.key === "Space" && !combo.mod && !combo.shift && !combo.alt;
+}
+
 function nodeIdFrom(target: EventTarget | null): string | null {
 	if (!(target instanceof HTMLElement)) return null;
 	const el = target.closest<HTMLElement>(".mm-node");
@@ -175,6 +244,16 @@ export function attachInteractions(controller: MapController): () => void {
 	const { canvas } = controller;
 	const viewport = canvas.viewport;
 	const cleanups: Array<() => void> = [];
+
+	/**
+	 * Whether a press has landed since the pan key went down.
+	 *
+	 * The pan key is a hold rather than a tap, and which of the two the user
+	 * meant is knowable at one moment only: the release. A press that came with
+	 * the hold says they were reaching for the canvas, and the fold the key is
+	 * also bound to must not fire when the release finally arrives.
+	 */
+	let panKeyPressed = false;
 
 	const on = <K extends keyof HTMLElementEventMap>(
 		el: HTMLElement,
@@ -197,11 +276,36 @@ export function attachInteractions(controller: MapController): () => void {
 			ev.stopPropagation();
 			return;
 		}
+		// While the pan key is held the pointer belongs to the camera, and the
+		// click that ends a pan must not select whatever the pan happened to
+		// stop over. The capture the pan took is released before this fires, so
+		// the target really is the card under the pointer.
+		if (canvas.panKeyHeld) {
+			ev.stopPropagation();
+			return;
+		}
 		const target = ev.target as HTMLElement;
 
 		// Links, but only in note content: a title is something you select and
 		// drag, and a link filling one would leave no way to grab the node.
-		const link = target.closest<HTMLElement>(".mm-link[data-href], .mm-embed[data-href]");
+		// A picture or a video is the one target in there whose plain click is
+		// not the link's -- it is a preview, and `Ctrl`/`Cmd`+click is what
+		// still reaches the file. Spoken for here rather than by a listener on
+		// the element, of which there is none.
+		const media = target.closest<HTMLElement>(".mm-media[data-href]");
+		if (
+			media?.closest('.mm-node[data-kind="body"], .mm-annotation') &&
+			!(ev.ctrlKey || ev.metaKey) &&
+			controller.previewMedia(media)
+		) {
+			ev.preventDefault();
+			ev.stopPropagation();
+			return;
+		}
+
+		const link = target.closest<HTMLElement>(
+			".mm-link[data-href], .mm-embed[data-href], .mm-media[data-href]",
+		);
 		if (link?.closest('.mm-node[data-kind="body"], .mm-annotation')) {
 			const href = link.dataset.href;
 			if (href) controller.openLink(href, ev);
@@ -218,7 +322,10 @@ export function attachInteractions(controller: MapController): () => void {
 			const id = nodeIdFrom(target);
 			if (id) {
 				ev.preventDefault();
-				controller.revealInNote(id);
+				// Nothing here waits on it: the gesture is over the moment the
+				// view swaps, and `void` is how a deliberate non-await is said
+				// rather than left looking like an oversight.
+				void controller.revealInNote(id);
 				return;
 			}
 		}
@@ -255,11 +362,18 @@ export function attachInteractions(controller: MapController): () => void {
 			return;
 		}
 		const id = nodeIdFrom(target);
-		controller.select(id);
+		// Shift and Ctrl/Cmd both add, because both are what a list uses for
+		// this and neither is spoken for here. Shift is the one the band below
+		// asks for too, so a shift-drag that ends on a card behaves like the
+		// shift-click it looks like.
+		controller.select(id, ev.shiftKey || ev.ctrlKey || ev.metaKey);
 		if (!controller.isEditing()) viewport.focus({ preventScroll: true });
 	});
 
 	on(viewport, "dblclick", (ev) => {
+		// The same as the click above: with the pan key down, a double press of
+		// the button is two pans that went nowhere, not "edit this card".
+		if (canvas.panKeyHeld) return;
 		const target = ev.target as HTMLElement;
 		const id = nodeIdFrom(target);
 		if (!id) return;
@@ -271,9 +385,130 @@ export function attachInteractions(controller: MapController): () => void {
 		controller.beginEdit(id);
 	});
 
+	// --- banding a selection ---------------------------------------------------
+	//
+	// A drag that starts on blank canvas draws a box and takes every card it
+	// swept over. Which press that is depends on the drag mode, and the gate
+	// below is both halves of it: with the mode on, blank canvas belongs to the
+	// camera and the band waits for the modifier; with it off, the plain press
+	// is the band's and the map is moved with the pan key. `canPan` is asked the
+	// same question, so the two cannot both claim a press.
+	//
+	// The box is drawn in the untransformed layer above the viewport, so the
+	// rectangle the pointer describes is the rectangle on screen -- inside the
+	// viewport it would be in map coordinates, and the band would drift away
+	// from the pointer as soon as the map was zoomed.
+	let band: { pointer: number; x: number; y: number; left: number; top: number } | null = null;
+	let bandEl: HTMLElement | null = null;
+
+	const paintBand = (ev: PointerEvent): void => {
+		if (!band || !bandEl) return;
+		bandEl.style.left = `${Math.min(band.x, ev.clientX) - band.left}px`;
+		bandEl.style.top = `${Math.min(band.y, ev.clientY) - band.top}px`;
+		bandEl.style.width = `${Math.abs(ev.clientX - band.x)}px`;
+		bandEl.style.height = `${Math.abs(ev.clientY - band.y)}px`;
+	};
+
+	const endBand = (commit: boolean): void => {
+		if (!band || !bandEl) return;
+		const rect = bandEl.getBoundingClientRect();
+		bandEl.remove();
+		bandEl = null;
+		band = null;
+		// The click that follows the release is the band's to suppress, not to
+		// obey: the pointer was captured, so the click retargets to the
+		// viewport -- which reads as a press on nothing, the exact gesture a
+		// plain click turns into "clear the selection". Left alone it would
+		// undo the band the moment the box closed.
+		suppressClick = true;
+		if (!commit) return;
+
+		const ids: string[] = [];
+		for (const card of Array.from(viewport.querySelectorAll<HTMLElement>(".mm-card"))) {
+			const node = card.closest<HTMLElement>(".mm-node");
+			const id = node?.dataset.id;
+			// A culled card has no box to compare against, and it is not on
+			// screen for the band to have swept over.
+			if (!id || node?.classList.contains("is-offscreen")) continue;
+			// Only topic cards join a band selection. Note-content blocks
+			// cannot move as nodes -- one mixed into the selection would make
+			// `canDropMany` reject the whole drop, so banding a card and its
+			// code block together would leave nothing draggable. The root and
+			// the virtual placeholders are not carriers either.
+			const kind = node?.dataset.kind;
+			if (kind === "body" || kind === "root") continue;
+			if (node?.classList.contains("is-virtual")) continue;
+			const box = card.getBoundingClientRect();
+			if (box.right < rect.left || box.left > rect.right) continue;
+			if (box.bottom < rect.top || box.top > rect.bottom) continue;
+			ids.push(id);
+		}
+		// A band that caught nothing clears the selection, which is what
+		// dragging a box over empty space means.
+		controller.selectMany(ids);
+	};
+
+	on(viewport, "pointerdown", (ev) => {
+		// With the pan key held the press is already the camera's, even if Shift
+		// has since joined the gesture: there is no blank canvas left to sweep
+		// once the whole map is canvas.
+		if (canvas.panKeyHeld) return;
+		if (ev.button !== 0 || controller.isEditing()) return;
+		if (controller.dragToPan() && !ev.shiftKey) return;
+		if ((ev.target as HTMLElement).closest(".mm-node")) return;
+		const host = viewport.parentElement;
+		if (!host) return;
+		// The host is the layer above the transformed one, so the box is
+		// written in screen coordinates and stays under the pointer however
+		// the map is zoomed or panned while the drag runs.
+		const box = host.getBoundingClientRect();
+		band = {
+			pointer: ev.pointerId,
+			x: ev.clientX,
+			y: ev.clientY,
+			left: box.left,
+			top: box.top,
+		};
+		bandEl = host.createDiv({ cls: "mm-band" });
+		paintBand(ev);
+		viewport.setPointerCapture(ev.pointerId);
+		ev.preventDefault();
+	});
+
+	on(viewport, "pointermove", (ev) => {
+		if (!band || ev.pointerId !== band.pointer) return;
+		paintBand(ev);
+	});
+
+	on(viewport, "pointerup", (ev) => {
+		if (!band || ev.pointerId !== band.pointer) return;
+		paintBand(ev);
+		endBand(true);
+	});
+
+	on(viewport, "pointercancel", () => endBand(false));
+
 	// --- dragging to reparent or reorder ---------------------------------------
 	let dragId: string | null = null;
 	let dragPointer = -1;
+	/**
+	 * Whether what is being carried is a note-content block rather than a node.
+	 *
+	 * The two are dragged with the same gesture and land in the same places, but
+	 * a block reads a slot differently -- see `MapController.canDrop` -- and the
+	 * cards it may land on are measured differently too.
+	 */
+	let carryingBody = false;
+	/**
+	 * Every card this drag is carrying: the one that was picked up, plus the
+	 * rest of the selection when it was part of one.
+	 *
+	 * A set rather than the list it arrives as, because the question it answers
+	 * -- "is this card coming with me" -- is asked once per card per frame while
+	 * the pointer moves, and the answer is what decides whether a card is a
+	 * place to land or part of what is looking for one.
+	 */
+	let carryingIds = new Set<string>();
 	let origin = { x: 0, y: 0 };
 	let dragging = false;
 	let hovered: HTMLElement | null = null;
@@ -306,13 +541,19 @@ export function attachInteractions(controller: MapController): () => void {
 	 * Boxes and not slot points, because the pointer's distance to the *card* is
 	 * what decides the target -- see `boxDistance`. Which of the card's three
 	 * slots it means is settled afterwards, from the pointer's height.
+	 *
+	 * `dragId` rather than the whole of what is being carried: a card is not a
+	 * place to land on itself, and the other cards coming along are not places
+	 * to land either.
 	 */
 	const measureCards = (): void => {
 		cards = [];
 		bodies = [];
 		for (const node of viewport.querySelectorAll<HTMLElement>(".mm-node")) {
 			const id = node.dataset.id;
-			if (!id || id === dragId) continue;
+			if (!id || carryingIds.has(id)) continue;
+			// Which way this card's own half faces -- see `modeFor`.
+			const side: 1 | -1 = node.dataset.side === "left" ? -1 : 1;
 			// The card, not the row. `.mm-row` is the drawn box the annotation
 			// sits inside, so a title narrower or shorter than its annotation
 			// would put the row's box somewhere the card's is not. `.mm-card` is
@@ -327,6 +568,20 @@ export function attachInteractions(controller: MapController): () => void {
 			// is handed to the card that owns the prose: a pointer over it is a
 			// pointer over that card.
 			if (node.dataset.kind === "body") {
+				// Unless what is being carried is another block, which is looking
+				// for a block to land beside rather than for an owner -- so a
+				// card of its own kind is a target in its own right.
+				if (carryingBody) {
+					cards.push({
+						id,
+						side,
+						left: rect.left,
+						right: rect.right,
+						top: rect.top,
+						bottom: rect.bottom,
+					});
+					continue;
+				}
 				const owner = controller.bodyOwner(id);
 				if (owner) {
 					bodies.push({
@@ -341,6 +596,7 @@ export function attachInteractions(controller: MapController): () => void {
 			}
 			cards.push({
 				id,
+				side,
 				left: rect.left,
 				right: rect.right,
 				top: rect.top,
@@ -372,12 +628,22 @@ export function attachInteractions(controller: MapController): () => void {
 	 * The card is cut in two down its middle, and which half the pointer is in
 	 * decides between "beside it" and "inside it".
 	 *
-	 * The right half is where a card's own children are drawn, so a pointer
-	 * level with the card and past its middle is asking the card to open up and
-	 * take the node. The left half is the card's own column, shared with the
-	 * rest of its row, so a pointer there means the row -- and then the height
-	 * says which way along it: above the middle is before the card, below it is
-	 * after.
+	 * The half that faces the card's own children is where a pointer means
+	 * "inside it": level with the card and over that half is asking it to open
+	 * up and take the node. The other half is the column the card shares with
+	 * its parent and the rest of its row, so a pointer there means the row --
+	 * and then the height says which way along it: above the middle is before
+	 * the card, below it is after.
+	 *
+	 * Which half that is depends on the side of the root the card is on, so the
+	 * cut is mirrored rather than always taken on the right. `tidyTree` keeps a
+	 * whole subtree on one side of its parent: a card to the right of the root
+	 * has its children to its right, and the right half is the inward one; a
+	 * card on the left has them to its left, and it is the left half. Reading
+	 * both the same way round put the two slots of every left-side card on the
+	 * wrong halves -- the outward half nested and the inward half reordered,
+	 * exactly backwards -- and the deeper the branch, the more of the map that
+	 * was.
 	 *
 	 * Cut horizontally, because a map runs left to right. The vertical position
 	 * cannot separate "inside" from "beside" for the same reason: a card's
@@ -386,7 +652,8 @@ export function attachInteractions(controller: MapController): () => void {
 	const modeFor = (card: CardBox, x: number, y: number): DropMode => {
 		const midX = card.left + (card.right - card.left) / 2;
 		const midY = card.top + (card.bottom - card.top) / 2;
-		if (y >= card.top && y <= card.bottom && x >= midX) return "child";
+		const inward = card.side === 1 ? x >= midX : x <= midX;
+		if (y >= card.top && y <= card.bottom && inward) return "child";
 		return y < midY ? "before" : "after";
 	};
 
@@ -397,24 +664,25 @@ export function attachInteractions(controller: MapController): () => void {
 	 *
 	 * A card that refuses the slot keeps its place in the running, taken as
 	 * "inside it" instead. That fallback is what stops a card growing a dead
-	 * band along its edges: reordering is refused on a first-level branch -- the
-	 * layout splits those between the root's two sides by weight, so their order
-	 * is not the user's to set -- and without the fallback, aiming just below
-	 * one of those cards found nothing at all and the card would not stick.
+	 * band along its edges: the root takes no sibling, because it has none, and
+	 * without the fallback aiming just above or below it found nothing at all
+	 * and the card would not stick.
 	 *
-	 * `canDrop` is asked before the distance is compared rather than after: a
+	 * `canDropMany` is asked before the distance is compared rather than after: a
 	 * slot that would be refused must not win the comparison and leave the guide
-	 * pointing somewhere the node cannot go.
+	 * pointing somewhere the node cannot go. It is asked of everything being
+	 * carried, because a slot that would leave part of the group behind is not a
+	 * slot at all.
 	 */
 	const nearestSlot = (x: number, y: number): DropSlot | null => {
-		const id = dragId;
-		if (id === null) return null;
+		if (carryingIds.size === 0) return null;
+		const carried = [...carryingIds];
 
 		// Over a note's prose the answer is the card the prose belongs to, and
 		// the only thing a drop there can mean is "inside it".
 		for (const body of bodies) {
 			if (x < body.left || x > body.right || y < body.top || y > body.bottom) continue;
-			if (controller.canDrop(id, body.owner, "child")) {
+			if (controller.canDropMany(carried, body.owner, "child")) {
 				return { targetId: body.owner, mode: "child" };
 			}
 		}
@@ -423,9 +691,9 @@ export function attachInteractions(controller: MapController): () => void {
 		let nearest = DROP_RADIUS;
 		for (const card of cards) {
 			const mode = modeFor(card, x, y);
-			const usable = controller.canDrop(id, card.id, mode)
+			const usable = controller.canDropMany(carried, card.id, mode)
 				? mode
-				: controller.canDrop(id, card.id, "child")
+				: controller.canDropMany(carried, card.id, "child")
 					? "child"
 					: null;
 			if (usable === null) continue;
@@ -577,11 +845,46 @@ export function attachInteractions(controller: MapController): () => void {
 	 */
 	let ghost: HTMLElement | null = null;
 
-	/** Put the copy's centre at a point in screen space. */
+	/**
+	 * The rest of what the drag carries, as one faded copy each.
+	 *
+	 * Each rides at the offset its card held from the one under the pointer
+	 * when the drag started, so the group reads as a group in flight: the
+	 * picked-up card leads, the company fades behind it. Without them a group
+	 * drag would show one card moving and a set of rings claiming cards were
+	 * coming along that nothing on screen said were moving at all.
+	 */
+	let ghostExtras: { el: HTMLElement; dx: number; dy: number }[] = [];
+
+	/** Put the copies where the pointer is: the leader centred, company offset. */
 	const moveGhost = (x: number, y: number): void => {
 		if (!ghost) return;
 		ghost.style.left = `${x}px`;
 		ghost.style.top = `${y}px`;
+		for (const extra of ghostExtras) {
+			extra.el.style.left = `${x + extra.dx}px`;
+			extra.el.style.top = `${y + extra.dy}px`;
+		}
+	};
+
+	/** Build one copy from a row, styled the way the original is styled. */
+	const buildGhost = (row: HTMLElement, rect: DOMRect): HTMLElement => {
+		const el = document.body.createDiv({ cls: "mm-drag-ghost" });
+		el.style.width = `${rect.width}px`;
+		el.style.height = `${rect.height}px`;
+		// The branch colour is set by a rule on the node the copy has left
+		// behind, so it is read off the original and carried over by hand.
+		const branch = getComputedStyle(row).getPropertyValue("--mm-branch");
+		if (branch.trim() !== "") el.style.setProperty("--mm-branch", branch.trim());
+		// A card style is a class on the map, and the copy is on `document.body`
+		// -- outside it. The class is what carries the fill, the border and the
+		// shadow to the copy; without it the copy of a flat card would arrive as
+		// a boxed one.
+		for (const cls of CARD_STYLE_CLASSES) {
+			if (row.closest(`.${cls}`)) el.addClass(cls);
+		}
+		el.appendChild(row.cloneNode(true));
+		return el;
 	};
 
 	const startGhost = (node: HTMLElement, ev: PointerEvent): void => {
@@ -602,39 +905,47 @@ export function attachInteractions(controller: MapController): () => void {
 			dy: card.top + card.height / 2 - (rect.top + rect.height / 2),
 		};
 
-		ghost = document.body.createDiv({ cls: "mm-drag-ghost" });
-		ghost.style.width = `${rect.width}px`;
-		ghost.style.height = `${rect.height}px`;
-		// The branch colour is set by a rule on the node the copy has left
-		// behind, so it is read off the original and carried over by hand.
-		const branch = getComputedStyle(row).getPropertyValue("--mm-branch");
-		if (branch.trim() !== "") ghost.style.setProperty("--mm-branch", branch.trim());
-		// A card style is a class on the map, and the copy is on `document.body`
-		// -- outside it. The class is what carries the fill, the border and the
-		// shadow to the copy; without it the copy of a flat card would arrive as
-		// a boxed one.
-		for (const cls of CARD_STYLE_CLASSES) {
-			if (row.closest(`.${cls}`)) ghost.addClass(cls);
-		}
-		ghost.appendChild(row.cloneNode(true));
+		ghost = buildGhost(row, rect);
 		moveGhost(ev.clientX, ev.clientY);
+
+		// One faded copy per card the drag carries besides the one under the
+		// pointer, parked at the offset its original holds from the leader.
+		const centerX = card.left + card.width / 2;
+		const centerY = card.top + card.height / 2;
+		for (const id of carryingIds) {
+			if (id === dragId) continue;
+			const otherRow = nodeElement(id)?.querySelector<HTMLElement>(".mm-row");
+			if (!otherRow) continue;
+			const otherRect = otherRow.getBoundingClientRect();
+			const extra = buildGhost(otherRow, otherRect);
+			extra.addClass("mm-drag-ghost-extra");
+			const dx = otherRect.left + otherRect.width / 2 - centerX;
+			const dy = otherRect.top + otherRect.height / 2 - centerY;
+			ghostExtras.push({ el: extra, dx, dy });
+			extra.style.left = `${ev.clientX + dx}px`;
+			extra.style.top = `${ev.clientY + dy}px`;
+		}
 	};
 
 	const endGhost = (): void => {
 		ghost?.remove();
 		ghost = null;
+		for (const extra of ghostExtras) extra.el.remove();
+		ghostExtras = [];
 	};
 
 	const endDrag = (): void => {
 		cancelDropFrame();
 		endGhost();
 		endGuide();
-		if (dragId) nodeElement(dragId)?.removeClass("is-dragging");
+		for (const carried of carryingIds) nodeElement(carried)?.removeClass("is-dragging");
 		viewport.removeClass("is-dragging-node");
 		clearHover();
 		dragId = null;
 		dragPointer = -1;
 		dragging = false;
+		carryingBody = false;
+		carryingIds = new Set();
 		cards = [];
 		bodies = [];
 		activeSlot = null;
@@ -642,16 +953,61 @@ export function attachInteractions(controller: MapController): () => void {
 
 	on(viewport, "pointerdown", (ev) => {
 		if (ev.button !== 0 || controller.isEditing()) return;
+		// The pan key owns the press wherever it lands, cards included: the
+		// pointer is already dragging the canvas under this one, and a second
+		// gesture reading the same press would carry a card along with it.
+		if (canvas.panKeyHeld) return;
 		const target = ev.target as HTMLElement;
+		// The fold button of a note-content card is the one handle the block
+		// has: a press there starts a body drag, and the press-release without
+		// a move stays what it always was -- the fold or unfold itself (the
+		// drag threshold sees to that, and a completed drag suppresses the
+		// click that would otherwise fold it). A branch button on a topic card
+		// folds and grows, never drags.
+		const add = target.closest<HTMLElement>(".mm-add");
+		if (add) {
+			const id = nodeIdFrom(add);
+			const isBody =
+				id !== null && add.closest('.mm-node[data-kind="body"]') !== null;
+			if (id && isBody && controller.canDragBody(id)) {
+				dragId = id;
+				carryingBody = true;
+				carryingIds = new Set(controller.carriedBy(id));
+				dragPointer = ev.pointerId;
+				origin = { x: ev.clientX, y: ev.clientY };
+				dragging = false;
+			}
+			return;
+		}
 		if (target.closest(".mm-tools, .mm-checkbox")) return;
+		// The two circles on a video card are controls, not card surface: a
+		// press that drifts by a few pixels would otherwise be read as the
+		// start of a drag and the pointer would be captured before the click
+		// landed.
+		if (target.closest(".mm-media-button")) return;
+		// The copy button on a sample is a control too, and the same argument
+		// applies: a press that drifts a few pixels is a press on the button,
+		// not the start of a drag that would carry the card away instead.
+		if (target.closest(".mm-code-copy")) return;
+		// And once a video is playing it is a player. Its scrubber is a
+		// press-and-drag gesture, which is exactly the gesture the card's own
+		// drag is waiting for -- so the card gives it up while it plays.
+		if (target.closest(".mm-media-video.is-playing")) return;
 		const card = target.closest<HTMLElement>(".mm-card");
-		// A body card stands for lines the note owns, not a node that can be
-		// reparented, so it never starts a drag.
-		if (!card || card.closest('.mm-node[data-kind="body"]')) return;
+		if (!card) return;
 		const id = nodeIdFrom(card);
 		if (!id) return;
+		// A body card's surface is never a handle, whatever the block holds.
+		// The note owns that text -- a press there is selection, preview and
+		// edit, and the one way to move the block is its button, which sits
+		// on the connector line for exactly this reason. Before the button
+		// existed this read the block's shape (`canDragBody`), which is why
+		// some blocks dragged from the card and some did not.
+		if (card.closest('.mm-node[data-kind="body"]') !== null) return;
 
 		dragId = id;
+		carryingBody = false;
+		carryingIds = new Set(controller.carriedBy(id));
 		dragPointer = ev.pointerId;
 		origin = { x: ev.clientX, y: ev.clientY };
 		dragging = false;
@@ -665,10 +1021,15 @@ export function attachInteractions(controller: MapController): () => void {
 			if (moved < DRAG_THRESHOLD) return;
 			dragging = true;
 			viewport.addClass("is-dragging-node");
+			// Everything being carried goes flat at once. Marking only the card
+			// under the pointer would say the others are staying, which is the
+			// one thing the rings on them were promising they would not do.
+			for (const carried of carryingIds) {
+				nodeElement(carried)?.addClass("is-dragging");
+			}
 			const node = viewport.querySelector<HTMLElement>(
 				`.mm-node[data-id="${CSS.escape(dragId)}"]`,
 			);
-			node?.addClass("is-dragging");
 			// The card the drag left behind becomes an empty slot, and a copy of
 			// it goes with the pointer -- which is what says the card is being
 			// carried rather than the map being panned.
@@ -704,9 +1065,9 @@ export function attachInteractions(controller: MapController): () => void {
 			// that frame and the release.
 			const slot = activeSlot;
 			if (slot) {
-				const source = dragId;
+				const carried = [...carryingIds];
 				endDrag();
-				controller.move(source, slot.targetId, slot.mode);
+				controller.moveMany(carried, slot.targetId, slot.mode);
 				return;
 			}
 		}
@@ -738,6 +1099,23 @@ export function attachInteractions(controller: MapController): () => void {
 		// not Enter.
 		const combo = comboFromEvent(ev);
 		const action = resolveAction(controller.bindings(), combo);
+
+		// The pan key. Not a binding but a modifier, like Shift -- and it keeps
+		// whatever action the table also gives it, which is the fold by default.
+		// Holding it turns any press into a pan, so that action cannot fire on
+		// the way down; the release below decides, once it is known whether a
+		// press came with the hold.
+		if (isPanKey(combo)) {
+			// A held key repeats its keydown. Arming is idempotent, but clearing
+			// the press flag is not: clearing it on every repeat would forget a
+			// press that had already happened and fold on the release anyway.
+			if (!canvas.panKeyHeld) {
+				canvas.holdPan(true);
+				panKeyPressed = false;
+			}
+			if (action === "toggle-fold") return;
+		}
+
 		if (!action) return;
 		const id = controller.selectedId();
 
@@ -774,6 +1152,10 @@ export function attachInteractions(controller: MapController): () => void {
 			case "search":
 				ev.preventDefault();
 				controller.openSearch();
+				return;
+			case "replace":
+				ev.preventDefault();
+				controller.openReplace();
 				return;
 			case "close-search":
 				// Only ours while a search is open; otherwise Escape keeps
@@ -846,6 +1228,9 @@ export function attachInteractions(controller: MapController): () => void {
 				ev.preventDefault();
 				controller.toggleCheck(id);
 				return;
+			// On the way down this is reached only by a key the fold has been
+			// moved to: on its default, the pan key, it waits for the release --
+			// see the branch above the dispatch.
 			case "toggle-fold":
 				if (!id) return;
 				ev.preventDefault();
@@ -853,7 +1238,12 @@ export function attachInteractions(controller: MapController): () => void {
 				return;
 			case "indent":
 				if (!id) return;
+				// Stops the event rather than only preventing the default: the
+				// binding sits on Ctrl/Cmd+Shift+Tab, which is Obsidian's
+				// previous-tab switcher at the document, and a move that also
+				// flipped tabs would look like the key did nothing at all.
 				ev.preventDefault();
+				ev.stopPropagation();
 				controller.indent(id);
 				return;
 			case "outdent":
@@ -874,8 +1264,52 @@ export function attachInteractions(controller: MapController): () => void {
 		}
 	});
 
+	/**
+	 * The pan key coming up: the other half of the fold it is bound to.
+	 *
+	 * The release is the first moment the gesture can be read. Nothing was held
+	 * but the key, so it was a tap and the fold fires; a press came with it, so
+	 * the user was reaching for the canvas and there is nothing to fold.
+	 */
+	on(viewport, "keyup", (ev) => {
+		if (!isPanKey(comboFromEvent(ev))) return;
+		const tapped = canvas.panKeyHeld && !panKeyPressed;
+		canvas.holdPan(false);
+		panKeyPressed = false;
+		if (!tapped) return;
+		const id = controller.selectedId();
+		if (!id) return;
+		ev.preventDefault();
+		controller.toggleFold(id);
+	});
+
+	/**
+	 * The other way the key comes up: without us.
+	 *
+	 * The focus can leave mid-hold -- for the toolbar, the find bar, another
+	 * pane -- and the release then never reaches this element. A map left
+	 * holding its pan key would not select text again, so losing the focus ends
+	 * the hold as surely as letting go of the key does.
+	 */
+	on(viewport, "blur", () => {
+		canvas.holdPan(false);
+		panKeyPressed = false;
+	});
+
+	// The pointer half of the same fact, and the one thing the release needs to
+	// know. It is a listener of its own rather than a line in either gesture
+	// handler below: what it records is that the mouse was used, whichever
+	// gesture the press turned out to start.
+	on(viewport, "pointerdown", () => {
+		if (canvas.panKeyHeld) panKeyPressed = true;
+	});
+
 	return () => {
 		cancelDropFrame();
+		// The viewport's pan-ready state is put there by the key handlers above,
+		// and they are what is being taken away here -- so it goes with them, and
+		// a map torn down mid-hold does not come back with a grabbed cursor.
+		canvas.holdPan(false);
 		for (const off of cleanups) off();
 		cleanups.length = 0;
 	};
