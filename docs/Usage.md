@@ -21,15 +21,16 @@ note as a minimal line edit. Toggle back and your note is still your note.
 5. [Shortcuts reference](#5-shortcuts-reference)
 6. [The shortcuts settings page](#6-the-shortcuts-settings-page)
 7. [Annotations (`: text`)](#7-annotations-text)
-8. [Content cards: paragraphs, code blocks, tables](#8-content-cards-paragraphs-code-blocks-tables)
-9. [Finding a node](#9-finding-a-node)
-10. [Export](#10-export)
-11. [Settings reference](#11-settings-reference)
-12. [View memory and fold state](#12-view-memory-and-fold-state)
-13. [Inserting an annotation line from the markdown editor](#13-inserting-an-annotation-line-from-the-markdown-editor)
-14. [Undo and redo](#14-undo-and-redo)
-15. [Known limits](#15-known-limits)
-16. [Troubleshooting](#16-troubleshooting)
+8. [Content cards: paragraphs, code blocks, tables, callouts](#8-content-cards-paragraphs-code-blocks-tables-callouts)
+9. [Pictures and videos](#9-pictures-and-videos)
+10. [Finding a node](#10-finding-a-node)
+11. [Export](#11-export)
+12. [Settings reference](#12-settings-reference)
+13. [View memory and fold state](#13-view-memory-and-fold-state)
+14. [Inserting an annotation line from the markdown editor](#14-inserting-an-annotation-line-from-the-markdown-editor)
+15. [Undo and redo](#15-undo-and-redo)
+16. [Known limits](#16-known-limits)
+17. [Troubleshooting](#17-troubleshooting)
 
 ---
 
@@ -103,6 +104,13 @@ Every card on the map corresponds to a line of structure in the note:
 
 What you already wrote is the structure — there is no second outline to maintain.
 
+**A card draws the inline markup you wrote**, so the map reads like the note: bold,
+italics, `code`, highlights, strikethrough, `[[wikilinks]]`, links, embedded
+pictures and `#tags` — a tag is drawn as a badge, because a tag is a label rather
+than somewhere to go. A card holding a table, a fenced sample or a `> [!note]`
+callout is drawn as those blocks rather than as the characters they are spelled
+with.
+
 ### The corner toolbar
 
 A row of buttons sits in the corner of the canvas:
@@ -139,27 +147,108 @@ The toolbar's behaviour is configurable:
 | Double-click an annotation | Edit the `: ` lines under that card |
 | Double-click a content card | Edit that block in place |
 | Click a card | Select it (blue ring) |
+| `Shift` or `Ctrl`/`Cmd`+click a card | Add it to the selection; click it again to drop it |
+| `Shift`+drag blank space | Sweep a selection box and select every card it covers |
 | Click a link in a content card | Open it — note, heading, PDF, attachment or web address |
 | `Ctrl`/`Cmd`+click a card | Jump to the line it is written on |
 | **+** beside a card | New child |
 | Right-click a card | The node's menu |
 | Drag a card onto another | Reparent it |
-| Drag onto a card's top / bottom edge | Drop it in beside that card |
-| Wheel / pinch | Zoom; drag blank space to pan |
+| Drag onto a card's root-facing half | Drop it in beside that card |
+| Drag one of several selected cards | Move the whole selection, keeping the order it is written in |
+| Drag blank space | Sweep the selection box — or move the map, with [Drag mode](#drag-mode) on |
+| Hold `Space` and drag | Pan the canvas — **over a card too**, without selecting its text |
+| Wheel / pinch | Zoom |
 
 **Editing happens in place — no dialogs.** The card's text becomes an editable
 field with an opaque background, lifted above the other cards so nothing bleeds
-through. `Enter` saves, `Esc` cancels, clicking away saves too.
+through. A **node title and a content block** save on `Enter`; an **annotation**
+may hold several lines, so there `Enter` writes one and `Ctrl`/`Cmd`+`Enter`
+saves; and inside a **code block** `Shift`+`Enter` starts a new line. All three
+cancel on `Esc`, and clicking away or pressing `Tab` saves too.
 
 ![Editing in place](../assets/inline-edit.png)
+
+### Drag mode
+
+A plain drag on blank canvas does one of two things, and **Preferences → Drag
+mode** decides which. `Space`+drag and `Shift`+click keep working either way, so
+the setting is safe to try:
+
+| Drag mode | A plain drag on blank canvas | The selection box |
+| --- | --- | --- |
+| **Off** (the default) | Sweeps the selection box | a plain drag |
+| **On** | Moves the map | `Shift`+drag |
+
+**On** is how the map worked before the setting existed: the plain press is the
+camera's, and the box waits for `Shift`. **Off**, the plain press belongs to the
+box and the map is moved with the pan key (`Space`), with the middle button, or by
+scrolling — whichever way **Mouse wheel** is set up to allow.
+
+Turning it on the first time puts up a notice saying what moved, since it is a
+gesture you already have in your fingers by then. It is the only time it says
+anything; turning it off and on again is silent.
+
+### Selecting several cards
+
+`Shift` or `Ctrl`/`Cmd`+click adds a card to the selection, and clicking it again
+takes it back out. To catch a handful at once, drag a box over them: a box follows
+the pointer and every card it covers is selected when you let go. A box over empty
+space clears the selection.
+
+Which press draws that box is [Drag mode](#drag-mode)'s business: with it off a
+plain drag draws it, with it on `Shift`+drag does.
+
+Dragging any one of the selected cards **takes the whole selection with it** — the
+rings on the others say they are in this too. The run lands together and keeps the
+order those cards are written in, and however many of them went, it is one undo
+step. A note-content card is the exception: a code block is only carried when it is
+the card you picked up, because a block is written under a card rather than being a
+card in the tree.
+
+With more than one card selected, the keys that act on a card act on all of them:
+
+| Key | What it does to the selection |
+| --- | --- |
+| `Delete` / `Backspace` | Deletes every selected card and its subtree |
+| `Space` | Folds the selection when anything in it is open, opens it when all of it is folded |
+
+Either way it is **one undo step**, however many cards went. Right-clicking a card
+inside the selection and choosing **Delete** does the same thing, and the
+selection is only ever held in memory — nothing about it is written into the note.
+
+### Linking a card to another note
+
+A card can point at another note, and the link it writes is an ordinary
+`[[Note name]]`, so it works in Obsidian exactly as it does anywhere else. The
+card's right-click menu carries it, and so does the command palette:
+
+| Menu item / command | What it does |
+| --- | --- |
+| Link to a note… | Picks a note from a searchable list and writes `[[it]]` as the card's title |
+| New note from this node | Creates an empty note in the same folder, named after the card, and links to it |
+| Open the linked note | Goes to it |
+| Remove the link | Puts the card's own words back, leaving the text the link was made from |
+
+The last two appear only when the card is a link and nothing else; **Link to a
+note…** appears when the card has a name to link from. A link in a card's title
+is clickable on the map, so a map can be a way into a vault rather than only a
+way of looking at one note.
 
 ### Dragging
 
 While you drag, a translucent copy follows the pointer and the original card goes
 faint. Over another card, that card highlights to show where the drop would land:
 
-- **Middle of the card** — become its child;
-- **Top / bottom edge** — drop in before / after it.
+- **The half facing away from the root** — become its child. That is the half the
+  card draws its own children on;
+- **The half facing the root** — drop in before / after it. That is the column it
+  shares with its parent and its siblings, and the height says which way along it.
+
+**The halves mirror with the side the card is on.** The layout keeps a whole
+subtree on one side of its parent, so a card left of the root has its children to
+its left — and that is where "become its child" is too. Follow the highlight on
+the card; there is nothing to work out.
 
 The copy always follows the pointer rather than jumping to a predicted spot — you
 judge the landing yourself, and the highlight tells you what the map thinks.
@@ -171,9 +260,30 @@ heading onto a bullet and the whole subtree becomes nested bullets; drop a bulle
 onto a heading and it becomes a top-level list. Checkbox state survives the round
 trip.
 
-**Top-level branches are not reordered by dragging.** The layout splits them
-between the two sides of the root by weight, so their order is its to decide — a
-drop anywhere on a top-level card reparents.
+**A top-level branch drags like any other card.** Drop it above or below another
+top-level branch and it takes that place among the root's own children; drop a
+card from any depth beside one and it comes up to that level.
+
+**In balanced layout, a drop past the halfway point changes sides.** The reading
+order is down the right-hand column of the root and then down the left-hand one,
+and the layout cuts that order in half by subtree weight — so the order is yours
+and the side follows from it. To have position and order line up exactly, set
+**Layout** to **One side**.
+
+### Panning the canvas
+
+**Hold `Space` and drag with the left button.** That works whatever
+[Drag mode](#drag-mode) is set to, and it is the way to move the map with the
+pointer when the mode is off. The pointer turns into a hand and
+**the canvas moves wherever you started** — over a card, inside a code block,
+across a table. It cannot turn into a text selection either, because for as long
+as `Space` is down the whole map is canvas: the mouse belongs to it, and a click
+does not select a card on the way past. With **Drag mode** on, a plain drag on
+blank space moves the map as well.
+
+`Space` counts once it is **released**: press and let go without touching the
+mouse and it is the fold it has always been; press the left button at any point
+during the hold and that press is a pan, so nothing folds.
 
 ---
 
@@ -188,11 +298,11 @@ Every key below is a **default**. Each one can be changed in the settings.
 | `Enter` | New sibling |
 | `Tab` | New child |
 | `Shift`+`Tab` | Outdent |
-| `]` | Indent under the previous sibling |
+| `Ctrl`/`Cmd`+`Shift`+`Tab` | Indent under the previous sibling |
 | `F2` | Edit the node title |
 | `Ctrl`/`Cmd`+`Enter` | Add / edit the annotation |
 | `Shift`+`Enter` | Add a text block |
-| `Delete` / `Backspace` | Delete the node and its children |
+| `Delete` / `Backspace` | Delete the node and its children — every selected card, when more than one is selected |
 | `Ctrl`/`Cmd`+`Shift`+`Enter` | Check / uncheck |
 
 ### Moving and folding
@@ -200,7 +310,7 @@ Every key below is a **default**. Each one can be changed in the settings.
 | Key | Action |
 | --- | --- |
 | `Ctrl`/`Cmd`+`↑` / `↓` | Move the node up / down among its siblings |
-| `Space` | Fold / unfold |
+| `Space` | Fold / unfold — **on release** — the whole selection, when more than one card is selected. Held with the mouse down it pans the canvas instead, and that press does not fold |
 | `↑` `↓` `←` `→` | Move the selection |
 
 ### View
@@ -214,6 +324,7 @@ Every key below is a **default**. Each one can be changed in the settings.
 | `Ctrl`/`Cmd`+`-` | Zoom out |
 | `Ctrl`/`Cmd`+`.` | Centre on the selection |
 | `Ctrl`/`Cmd`+`F` | Find in the map |
+| `Ctrl`/`Cmd`+`H` | Find and replace in the map |
 | `Esc` | Close the find bar (only the map's while one is open) |
 
 > **`Ctrl`/`Cmd`+`Enter` vs `Shift`+`Enter`:** the first is the annotation (a
@@ -298,8 +409,9 @@ becoming a card of its own.
 ### Editing
 
 **Double-click an annotation**, or pick **Add annotation** / **Edit annotation**
-from a node's context menu, and the strip becomes editable in place. `Enter` saves,
-`Esc` cancels, clicking away saves too. **Saving an empty strip removes the
+from a node's context menu, and the strip becomes editable in place. An annotation
+can hold several lines, so `Enter` writes one and `Ctrl`/`Cmd`+`Enter` saves;
+`Esc` cancels, and clicking away saves too. **Saving an empty strip removes the
 annotation entirely** — no stray colon left behind.
 
 ### About the syntax
@@ -319,13 +431,21 @@ note changes either way.
 
 ---
 
-## 8. Content cards: paragraphs, code blocks, tables
+## 8. Content cards: paragraphs, code blocks, tables, callouts
 
 Content that is not a heading or a list item stays exactly where it is in the note
 — and gets its own card on the map, folding and unfolding with the branch it
 belongs to, interleaved with its siblings in file order. Prose is set in the
 reading face and its inline markup is rendered as usual; a code block keeps a
 monospace face and its own line breaks.
+
+**A sample is drawn as a sample.** The fence lines are not shown — they are the
+note saying "leave this alone", and the card already says it by drawing the block
+in monospace. Its top right corner carries the language the fence named, and a
+copy button that appears under the pointer (or on keyboard focus) and puts the
+whole sample on the clipboard, turning into a ✓ while it does. Both sit above the
+code rather than in it, so neither is something the sample appears to contain, and
+neither can change the card's size.
 
 **A block holding a table is drawn as a table**: a header row, the alignment each
 column's `:` asked for, and the `**bold**`, `` `code` ``, formulas and links inside
@@ -335,24 +455,143 @@ written in the same block is drawn as itself too. A block with no table in it is
 drawn the way it always was — one run of monospace text.
 
 **A card is only a preview** — long blocks are clipped (40 lines / 2000
-characters). **Double-click the card** to edit the block in place (or pick **Edit
-the block source** from its context menu), where Obsidian's own reading view
-renders it, so every kind of markdown shows in full.
+characters). **Double-click the card** to edit the block in place, or pick **Edit
+the block source** from its context menu. `Enter` saves, `Esc` cancels and
+clicking away saves too. **A code block is the exception**: it is the one block
+whose text *is* its line breaks, so there `Shift`+`Enter` starts a new line and
+`Enter` still saves.
+
+**Any content card can be folded.** The card carries the same fold button a parent
+card does: press it and the block is down to its first line of content — for a
+sample that is the opening fence, which names the language; for a paragraph it is
+the first sentence — and the button stays out in the open, where a folded branch
+shows its count, waiting to open the whole block again. Paragraphs, code and
+tables all fold, **as long as the block has more than one line of content**: a
+folded one-line block would still be showing that line, which is a fold that does
+nothing, so a single-line block has no button. A folded card still carries the
+button, and the fold is remembered per note — in the plugin's own data, never in
+your markdown.
 
 While editing a text block, the card shows the prose **without its indentation**
 (a block holding a table keeps its blank lines — they are what separates one block
 from the next); the plugin puts the indentation back on save. The indent is
 structural metadata for the parser, not something to read.
 
-**Content cards cannot be renamed, dragged or deleted** — those lines belong to the
-note, and the map is only showing them. (Selecting one and pressing `Delete` is the
-exception: that does remove the corresponding lines.)
+**Content cards cannot be renamed or deleted** — those lines belong to the note, and
+the map is only showing them. (Selecting one and pressing `Delete` is the exception:
+that does remove the corresponding lines.)
+
+**A code block card can be dragged.** Drop it on another card and it becomes that
+card's own body; drop it on a card's top or bottom edge and it lands beside that
+card — as a block of that card's parent; drop it on another **code block card** and
+it lands above or below that one. Only the indentation that attaches a block to the
+node it hangs under moves with it; the lines themselves are never touched, so
+indentation, spacing and comments come through exactly as they were.
 
 Turn **Show note content** off in the settings to keep them off the map.
 
+### Callouts
+
+A `> [!note]` blockquote is drawn as the box it is in Obsidian rather than as the
+`>` and `[!type]` it is written with:
+
+```markdown
+> [!warning] Read this first
+> Everything under the `>` is the callout's own content.
+```
+
+- The **type** decides the icon and the colour, and it is Obsidian's own list —
+  `note`, `abstract`, `info`, `todo`, `tip`, `success`, `question`, `warning`,
+  `failure`, `danger`, `bug`, `example`, `quote`, plus the aliases Obsidian accepts
+  (`hint` and `important` are `tip`, `error` is `danger`, and so on).
+- With **no title** the card shows Obsidian's own title for that type, in your
+  interface language. Write one and it is used instead.
+- `> [!note]-` is folded down to its title, which is what the note asked for;
+  `> [!note]+` and a plain `> [!note]` are both open.
+- A custom type (`> [!my-type]`) is drawn too — default colour, the word the note
+  wrote as the title.
+- A **table** inside a callout is still drawn as a table, and a callout inside a
+  callout is another box. One `>` comes off per level, exactly as Obsidian reads it.
+
+The content is the part of the callout that is not a card of its own, so a long one
+is previewed like any other block — the expand button on the card shows the whole
+thing.
+
 ---
 
-## 9. Finding a node
+## 9. Pictures and videos
+
+`![[hero.png]]` and `![hero](hero.png)` in a note are **drawn on the card** rather
+than shown as an italic chip carrying the file name.
+
+### Pictures
+
+- A picture is drawn at its **own size**, never enlarged: a 48-pixel icon is 48
+  pixels.
+- Its width is capped by **Maximum card width** and its height by **Maximum media
+  height** (200 pixels by default). Whichever cap it reaches first wins, and the
+  shape never changes.
+- The number in `![[hero.png|120]]` is a width cap: this one is drawn no wider
+  than 120 pixels. When the part after the pipe is a name (`![[hero.png|The
+  bands]]`) it is a label, not a size.
+- A picture written inside a sentence stays inside it — it does not take a line
+  of its own.
+
+### Videos
+
+A video card is a **still frame** with two circles, shown while the pointer is
+over the card:
+
+- **▶** (bottom right) plays it right there, turning the card into a player with
+  a scrubber, volume and full screen.
+- **⧉** (top right) opens the file in Obsidian's own player, in a new tab.
+
+Once it is playing the card is no longer a link — clicking the picture pauses it
+rather than opening the file — and **⧉** is still there.
+
+### Click to enlarge
+
+Clicking a picture or a video **covers the map with it, enlarged** — no trip to
+another tab, and no losing your place in the map you were reading. The backdrop
+goes dark; click it, press `Esc`, or use the ✕ in the corner to close, and the
+map is exactly as you left it.
+
+The preview is drawn at **the largest size that fits**, up to twice the media's
+own size. A picture on a card is capped at 200 pixels tall, so a photograph or a
+screenshot is a good deal bigger here; a 48-pixel icon only reaches 96, because
+beyond that it is just blur.
+
+To **open the file itself** — hand it to Obsidian — hold `Ctrl`/`Cmd` while you
+click. A picture has no button, so that is its only way in; a video also has
+**⧉** in its top right.
+
+### What stays a chip
+
+Only **pictures and videos in the vault** are drawn. Everything below is still the
+italic chip it always was:
+
+- PDFs, notes, audio files and every other kind of embed;
+- a file the vault cannot find;
+- a remote address such as `![](https://…)` — the map never goes to the network on
+  your behalf.
+
+### Export
+
+In an exported SVG, PNG or HTML, pictures are **inlined as data URIs** — the bytes
+are written into the file — so the file shows them anywhere, on any machine.
+Videos are not inlined, because a minute of video is far too much to put inside an
+HTML file; a video becomes a text chip again. Turning **Show pictures and videos**
+off skips the inlining entirely.
+
+### Cost
+
+A picture starts loading only once its card is **near the viewport**. Cards further
+away keep a placeholder box, so a note full of screenshots does not stall when it
+opens.
+
+---
+
+## 10. Finding a node
 
 `Ctrl`/`Cmd`+`F` opens a find bar over the canvas — Obsidian's own editor search
 cannot reach a map, so the map brings its own.
@@ -376,9 +615,34 @@ and content cards (paragraphs, code blocks, tables) are not searched.
 
 ![Find](../assets/search.png)
 
+### Find and replace
+
+`Ctrl`/`Cmd`+`H` opens the same bar with a **replace row** under it — or press the
+⇄ button in the bar to bring the row out. Type what to put in its place, then:
+
+| Control | What it replaces |
+| --- | --- |
+| **Replace in this card** | The occurrences in the card the bar's cursor is on |
+| **Replace all** | The occurrences in every matching card |
+| `Enter` in the replace field | Replace all |
+
+A replacement writes into the note's **source**, not into the rendering, because
+that is where characters can go. So replacing `alpha` with `omega` in a card reading
+`**alpha** two` gives you `**omega** two` — the asterisks stay exactly where the note
+put them. (The one difference worth knowing: a phrase that only exists *after* the
+markup is stripped cannot be replaced, because there is nowhere for it to land.
+Find still finds it.)
+
+Only a card's own title is replaced. An annotation and a text block are lines the
+card owns rather than lines it *is*, and the find bar does not search them either —
+a replacement that reached further than the search did would change text you were
+never shown.
+
+However many cards one replacement touches, it is **one undo step**.
+
 ---
 
-## 10. Export
+## 11. Export
 
 Four commands write the map out as a file of its own — **Export mind map as
 Canvas**, **as SVG**, **as PNG** and **as HTML**. They are in the command palette
@@ -411,7 +675,7 @@ has.
 
 ---
 
-## 11. Settings reference
+## 12. Settings reference
 
 The settings window has four groups. The window itself can be **dragged by its
 title bar** to any position, and is a fixed size, so you can keep the map visible
@@ -436,8 +700,11 @@ while you change something.
 | **Branch connectors** | Curved reads as a mind map; right-angled as a hierarchy — see the table below. |
 | **Card style** | Bordered / rounded card / minimal — see the table below. |
 | **Colour branches** | Give each top-level branch its own colour. |
-| **Show note content** | Paragraphs, code blocks and tables become their own cards; a block holding a table is drawn as a table. |
+| **Branch palette** | Which ten colours those are: **Classic** is the map's own set, **Follow the theme** reads the vault's `--color-*` so the map sits in the same key as the rest of the interface. |
+| **Show note content** | Paragraphs, code blocks, tables and callouts become their own cards; a block holding a table is drawn as a table. |
 | **Inline annotations** | Render `: text` lines as annotations rather than cards of their own. |
+| **Show pictures and videos** | Draw images and videos from the vault on the card rather than as a chip. |
+| **Maximum media height** | 80–480, step 20. The height cap for a picture or a video. |
 | **Corner toolbar** | Only while a card is selected, or always. |
 | **Corner toolbar position** | Bottom right / bottom centre / right edge / wherever I dragged it. |
 | **Maximum card width** | 140–520, step 20. |
@@ -472,6 +739,7 @@ below that. With **Colour branches** on, a connector takes its branch's colour t
 | Setting | What it does |
 | --- | --- |
 | **Mouse wheel** | Zooms (hold `Shift` to pan) or pans (hold `Ctrl` to zoom). |
+| **Drag mode** | What a plain drag on blank canvas does — see [Drag mode](#drag-mode). Off, it sweeps the selection box and the map is moved with `Space`+drag; on, it moves the map and the box moves to `Shift`+drag. |
 | **Remember fold state** | Reopen a note to the shape you left it in, focus included. The state is kept in the plugin's own data, never in the note. |
 | **Reopen as a mind map** | Never / until Obsidian is closed / always. |
 | **Button in the note header** | Adds a mind map toggle beside the other view actions. |
@@ -484,7 +752,7 @@ See [the shortcuts settings page](#6-the-shortcuts-settings-page) above.
 
 ---
 
-## 12. View memory and fold state
+## 13. View memory and fold state
 
 Two different things, both in the *Preferences* group:
 
@@ -510,7 +778,7 @@ Two different things, both in the *Preferences* group:
 
 ---
 
-## 13. Inserting an annotation line from the markdown editor
+## 14. Inserting an annotation line from the markdown editor
 
 In the markdown editor, `Ctrl`/`Cmd`+`Enter` inserts a newline followed by the `: `
 prefix — the syntax the map reads as an annotation.
@@ -535,7 +803,7 @@ so you can rebind it under *Settings → Hotkeys*.
 
 ---
 
-## 14. Undo and redo
+## 15. Undo and redo
 
 **One note, one history.** Whether you changed something in the markdown editor or
 on the map, it goes into the same undo stack, in the order you wrote it.
@@ -547,9 +815,13 @@ last thing the map did".
 The stack survives a view switch, because it is parked on the plugin rather than
 held by the view.
 
+Press the key with nothing left to undo and the map says so — and **a run of
+presses leaves up to three of those notices**, gone together a moment after you
+let go: not a column of them, and not so few that one goes unnoticed.
+
 ---
 
-## 15. Known limits
+## 16. Known limits
 
 - **Setext headings** (`Title` underlined with `===` or `---`) are treated as body
   content, not nodes. They are preserved untouched; ATX (`#`) headings are what the
@@ -565,10 +837,21 @@ held by the view.
 - Moving a checkbox item into heading position keeps `[x]` as literal text
   (headings cannot hold checkboxes). Moving it back restores a real checkbox.
 - Content cards (paragraphs, code blocks, tables) are not searched.
+- **Only pictures and videos in the vault are drawn.** A remote address such as
+  `![](https://…)`, a PDF, an audio file, an embedded note, or a file the vault
+  cannot find all stay the italic chip they were.
+- **A video is a text chip in an exported file**, not an inlined one — a video is
+  far too large to put inside an HTML file.
+- A picture that has never been on screen waits for its load, so the card is laid
+  out around a placeholder box first and measured again once the picture lands.
+  That is **one** visible adjustment, and the same picture never costs another.
+- **The preview enlarges up to twice the media's own size** — past that it only
+  stretches pixels. A very small picture, a 48-pixel icon for instance, does not
+  fill the pane.
 
 ---
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 **`Ctrl+Enter` does nothing.**
 

@@ -24,6 +24,10 @@ as a minimal line edit. Toggle back and your note is still your note.
   open right on the card.
 - **Annotations.** A line written as `: text` under a heading or a bullet hangs under
   that node's card in muted text instead of becoming a card of its own.
+- **Pictures and videos drawn on the card.** `![[hero.png]]` is the picture itself,
+  and a video is a still frame with two buttons on it — one plays it in place, the
+  other hands it to Obsidian's own player. In an exported SVG, PNG or HTML the
+  pictures are inlined, so the file shows them anywhere.
 - **Three card styles.** Bordered, rounded, or minimal — the last draws nothing at
   rest and frames a card only while you are editing it.
 - **Curved or right-angled connectors**, four toolbar dock positions, and a corner
@@ -79,6 +83,9 @@ hotkey to make it feel like switching reading mode.
 | `Ctrl`/`Cmd`+`Z` | Undo |
 | `Ctrl`/`Cmd`+`F` | Find in the map |
 
+**Hold `Space` and drag** to pan the canvas from anywhere — over a card and the text
+on it included, without selecting a word of it.
+
 Every key is rebindable, and the settings page warns when two actions end up on the
 same one. **The full list, the editing gestures, the settings reference and the
 export formats are in the [usage guide](docs/Usage.md).**
@@ -108,7 +115,14 @@ types natively — no build step, no test framework).
 npm install
 npm run dev      # watch build, straight into the plugin folder
 npm run build    # typecheck + production bundle
-npm run check    # version + changelog + typecheck + 401 tests + build
+npm run check    # version + changelog + typecheck + 555 tests + build
+```
+
+Before a release, also run the review's own rule set:
+
+```bash
+npm --prefix tools/obsidian-lint install   # once; it keeps its own dependencies
+npm run lint:obsidian                      # see docs/Development.md §9
 ```
 
 **See [docs/Development.md](docs/Development.md) for the architecture, the core

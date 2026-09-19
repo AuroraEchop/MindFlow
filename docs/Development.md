@@ -63,6 +63,10 @@ undo, search, popovers and export all hang off one `TextFileView` lifecycle.
 | `releveling.ts` | Rewrite a subtree's markers for a new parent (used when crossing the heading/list boundary) |
 | `annotations.ts` | Recognising and splitting `: text` lines |
 | `inlineText.ts` | Tokenising inline markdown (bold, code, links, formulas…) |
+| `media.ts` | Which kind of media an embed names, and the path, alias and `\|300` size inside `![[…]]` |
+| `blocks.ts` | A body range as the blocks it is made of — paragraph, code, table, callout — and which of them a card cannot draw as a run of text |
+| `replace.ts` | Find and replace over the tree: a plan, then the whole plan written as one edit |
+| `noteName.ts` | A node's text as a legal note name, and a `[[link]]` read back into its target and label |
 | `search.ts` | Substring / regex matching over the tree, plus fold bookkeeping |
 
 **`spliceLines` is the single exit for every write.** To change the file you must
@@ -92,11 +96,16 @@ between the two sides of the root by weight.
 | `culling.ts` | Viewport culling: which cards need to be in the DOM |
 | `interactions.ts` | All pointer and keyboard interaction. `attachInteractions(controller)` returns a teardown function |
 | `shortcuts.ts` | **The single source of truth for key bindings** (see [§5](#5-adding-a-shortcut)) |
-| `searchBar.ts` | The find bar over the canvas |
+| `searchBar.ts` | The find bar over the canvas, replace row included |
+| `inlineEditor.ts` | The in-place editor. `inlineIntent()` — which key means save, cancel, newline — is pure and tested; the DOM half is not |
+| `noteLink.ts` | The note picker, and creating a note beside the one being mapped |
+| `palette.ts` | The branch-palette names, and which of them `styles.css` has to draw |
 | `math.ts` / `mathCache.ts` / `mathSyntax.ts` | MathJax integration and `$…$` syntax rules |
+| `inline.ts` | One line of text → DOM. The emitter table for every `InlineKind`; the rules themselves are in `model/inlineText.ts` |
+| `media.ts` | Drawing `![[hero.png]]` as a picture or a video, and the path that re-measures the card once it lands |
+| `lightbox.ts` | The enlarged preview a click opens: backdrop, dismissal, and why it lives outside the camera's transform and outside every export |
 | `perf.ts` | Render-timing instrumentation |
 | `settingsModal.ts` | The standalone settings window |
-| `annotationDialog.ts` / `blockDialog.ts` | Legacy modal editors (the main flow now edits in place) |
 | `branchButton.ts` / `frame.ts` / `motion.ts` / `nodeWidth.ts` | Small view utilities |
 
 ### Cross-cutting
@@ -109,12 +118,14 @@ between the two sides of the root by weight.
 | `foldStore.ts` | Fold-state persistence, keyed by note path, stored in `data.json` |
 | `undoPark.ts` | The undo-stack "parking" mechanism that lets history survive a view switch |
 | `updateNotice.ts` | The one-time notice shown after a version update |
+| `dragMode.ts` | The one-time explanation of what the drag mode moved, and the rule for when it is owed |
 
 ### `src/export/`
 
 `canvasFile.ts` (Canvas), `documents.ts` (HTML), `raster.ts` (PNG), `snapshot.ts`
-(snapshotting the live DOM), `paths.ts` (collision-free filenames), `xmlText.ts`
-(XML escaping), `run.ts` (command registration and format dispatch).
+(snapshotting the live DOM), `media.ts` (swapping pictures for data URIs before an
+export), `paths.ts` (collision-free filenames), `xmlText.ts` (XML escaping),
+`run.ts` (command registration and format dispatch).
 
 ---
 
@@ -253,17 +264,27 @@ These are deliberate choices, not oversights. Read the reasoning before changing
 | **Text blocks carry no blank line** | Earlier versions put a blank line before the block for CommonMark compatibility (a paragraph directly after a list item is a lazy continuation, and other tools might swallow the block into the title). The user asked for it gone — this project's parser is lenient enough to tell them apart, and Obsidian's reading view handles it correctly. |
 | **`$…$` is stricter than Obsidian's** | The body may not begin or end on whitespace, and a closing `$` may not be followed by a digit. That keeps `$5-$10` a price at the cost of `$x$2` staying literal. The rules live in their own dependency-free module so they can be tested the same way. |
 | **Content cards cannot be renamed, dragged or deleted** | They stand for lines the note owns; the map is only showing them. Selecting one and pressing `Delete` is the exception — that does remove the lines. |
-| **Top-level branches are not reorderable** | The layout splits them between the two sides of the root by weight, so their order is the layout's to decide. A drop on a top-level card always reparents. |
+| **One key, two meanings, on `Space`** | Held with the left button it pans the canvas, the way every graphics tool has it; tapped and **released** it folds. The fold waits for the release only to leave the hold free; once a mouse press has happened in that hold the fold is dropped, because that press was a pan. The key does not follow the binding — a pan key is a modifier, the same kind of thing as `Shift`, and the map does not offer "rebind the modifier". |
+| **A reorder past the halfway point changes sides** | The note's order is the reading order — down the right column of the root, then down the left — and the layout cuts that order in half by subtree weight. So the order is the user's and the side follows from it. Refusing to reorder top-level branches was tried, and the price was that a drop on one of them could only ever mean "reparent". |
 | **Fold state is found again by heading path** | Which means renaming a node forgets where it was folded. Keying by line number or by id would mis-match worse after an edit. |
 | **`Ctrl+Z` in the markdown editor is not taken over** | Doing so needs `undoDepth` from `@codemirror/commands` to tell when the editor has nothing left to undo, and that is not part of Obsidian's public API. Failing to resolve it makes the plugin fail to load, and it could not be verified in this environment — so it is not done. |
 | **The undo stack is parked on the plugin** | A view switch goes through `leaf.setViewState()`, and Obsidian destroys the old view instance. A stack living only in the view dies with it. `undoPark.ts` parks it on the plugin to fix that. |
+| **Only pictures in the vault are drawn** | `![](https://…)` stays a chip. Drawing a remote picture means the map goes to the network on the note's behalf, and it cannot be inlined into an export anyway — the bytes are not readable across origins. |
+| **Videos are not inlined into an export** | A minute of 1080p is a hundred megabytes of base64, which is not an export. A video falls back to the text chip it used to be. |
+| **A picture's box is written in pixels** | The card is `max-content`, so a picture left to `max-width` would have its intrinsic width counted into the card's own width and then clamped, and the two would disagree by exactly the clamp. |
+| **Media sizes are cached across paints** | Every paint rebuilds every card. Without the cache a picture would arrive empty on every keystroke and cost a second measurement each time. It is thrown away with the math cache, in the same two places. |
+| **A culled card does not load its pictures** | A culled card is `display: none` rather than absent from the document, so an eager `src` would re-fetch every picture in the note on every keystroke. `activateMedia()` starts a card's media when the card actually reaches the screen. |
+| **Clicking a picture previews it, it does not open the file** | Opening the file leaves the map for another tab, and "let me see that picture" should not cost that. The file itself is still behind `Ctrl`/`Cmd`+click — and behind a video's `⧉` — it is just no longer what a plain click does. |
+| **A preview enlarges at most twice** | A card caps a picture at 200 pixels tall, so a photograph or a screenshot is a real enlargement here whatever this says. The cap binds only on something genuinely small, where filling the pane would be blurrier rather than clearer. |
+| **A drop carries a selection or nothing** | Half a drag is worse than none. A slot that would leave part of a run behind is not offered as a slot at all, so the drag falls back to the one that takes all of it rather than quietly moving what it can — and one node that cannot make the trip refuses the whole group. |
+| **A plain drag on blank canvas bands by default** | The habit a canvas tool teaches (Figma, Miro) is that the left button selects and `Space` moves the view, and the pan key is the one people already reach for. The way this map worked before — plain drag pans, `Shift` bands — is one switch away, and `Space`+drag and `Shift`+click hold in both, so trying it costs nothing. |
 
 ---
 
 ## 8. Tests
 
 ```bash
-npm test          # 401 tests across 29 files
+npm test          # 555 tests across 37 files
 npm run check     # version + changelog + typecheck + tests + build
 ```
 
@@ -317,6 +338,44 @@ npm run check     # the full version of the above
 
 The artifacts are `main.js` (esbuild bundle, with a banner), `manifest.json` and
 `styles.css`.
+
+### The plugin review's own rules
+
+```bash
+npm run lint:obsidian            # the review's rule set, over `src/`
+npm run lint:obsidian:locales    # ...plus the English-locale checks
+```
+
+These are `eslint-plugin-obsidianmd`'s rules — the set the community-plugin
+review applies to a submission, which is a different question from "does it
+compile". `no-static-styles-assignment` and `no-console` are **Errors** there and
+perfectly valid TypeScript here, so a release should not go out without this
+having been run.
+
+It is deliberately **not** a dependency of the plugin: it exists to check a
+submission rather than to build one, and it brings a second ESLint and a handful
+of other linters with it. It keeps its own manifest and its own `node_modules`
+under `tools/obsidian-lint/`, installed once:
+
+```bash
+npm --prefix tools/obsidian-lint install
+```
+
+Run it through the npm script, never directly: ESLint has to start with the
+plugin root as its working directory, because the rules read `manifest.json`
+relative to the process. With `tools/obsidian-lint` not installed the script
+exits `2` and prints that install line, rather than failing obscurely.
+
+**Errors block a submission; warnings do not.** The two warnings it reports today
+are deliberate and left standing — both are the rule being unable to tell a
+considered read from a careless one:
+
+- `i18n.ts` reads `globalThis.localStorage` inside a `try`, because the property
+  may be absent (Node, a test) or throw (a hardened renderer). `localStorage` is
+  per-origin, so the popout window the rule is worried about sees the same one;
+- `settings.ts` still calls `display()`, which `getSettingDefinitions` replaced in
+  1.13.0 — and `minAppVersion` here is 1.5.7, where `display()` is the only one of
+  the two that exists.
 
 ### Version agreement
 
