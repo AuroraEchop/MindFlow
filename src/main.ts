@@ -5,6 +5,7 @@ import { MINDMAP_VIEW_TYPE, MindmapView } from "./view/MindmapView.ts";
 import { SettingsModal } from "./view/settingsModal.ts";
 import { EXPORT_COMMANDS } from "./export/run.ts";
 import { resolveLanguage, setLanguage, t } from "./i18n.ts";
+import type { I18nKey } from "./i18n.ts";
 import { DEFAULT_SETTINGS, MindmapSettingTab } from "./settings.ts";
 import type { MindmapSettings } from "./settings.ts";
 import {
@@ -55,6 +56,15 @@ const MAP_NOTES_LIMIT = 200;
 const VERSION_KEY = "lastSeenVersion";
 
 /**
+ * Whether this vault has been told what the drag mode changes.
+ *
+ * One-time user state rather than a setting, so it sits beside the version
+ * rather than in `settings` -- nowhere in the interface reads it, and a setting
+ * nobody can see is a setting somebody will eventually write a row for.
+ */
+const DRAG_MODE_KEY = "dragModeExplained";
+
+/**
  * How long a fold change waits before it reaches disk.
  *
  * Every toggle, expand-all and selection move asks to be saved, and a user
@@ -62,6 +72,22 @@ const VERSION_KEY = "lastSeenVersion";
  * burst into one write, short enough that a crash loses a click, not an hour.
  */
 const FOLD_SAVE_DELAY = 800;
+
+/**
+ * The file a leaf is showing, or null.
+ *
+ * `WorkspaceLeaf.view` is typed as `View`, and only the file-backed views
+ * (`MarkdownView`, this plugin's own view, the Canvas view) carry a `file`.
+ * Asking with a narrowing predicate rather than an inline assertion keeps the
+ * three call sites honest: a cast would let a typo in the field name through,
+ * and this is the one place that decides.
+ */
+function leafFile(leaf: WorkspaceLeaf): TFile | null {
+	const view: unknown = leaf.view;
+	if (typeof view !== "object" || view === null) return null;
+	const file: unknown = (view as { file?: unknown }).file;
+	return file instanceof TFile ? file : null;
+}
 
 export default class MindmapPlugin extends Plugin {
 	override settings: MindmapSettings = { ...DEFAULT_SETTINGS };
@@ -71,6 +97,9 @@ export default class MindmapPlugin extends Plugin {
 
 	/** The version of the plugin this vault last loaded, or null if none is kept. */
 	private lastSeenVersion: string | null = null;
+
+	/** Whether the drag mode has ever been explained here -- see `dragMode.ts`. */
+	private dragModeExplained = false;
 
 	/** Whether `data.json` held no settings, which is a first install. */
 	private freshInstall = false;
@@ -182,6 +211,21 @@ export default class MindmapPlugin extends Plugin {
 			},
 		});
 
+		// The same bar with its replace row showing. No default hotkey for the
+		// same reason as the search above: Mod+H belongs to whatever else is
+		// listening until this map has the keyboard, and the map's own key is
+		// registered in `view/shortcuts.ts` rather than globally.
+		this.addCommand({
+			id: "replace-mindmap",
+			name: t("command.replace"),
+			checkCallback: (checking) => {
+				const view = this.app.workspace.getActiveViewOfType(MindmapView);
+				if (!view) return false;
+				if (!checking) view.openReplace();
+				return true;
+			},
+		});
+
 		// No default hotkeys: the map answers Ctrl/Cmd+Up and Ctrl/Cmd+Down itself
 		// while it holds the keyboard, and a command bound to the same pair would
 		// run on the same keypress -- moving the node two places instead of one.
@@ -195,6 +239,49 @@ export default class MindmapPlugin extends Plugin {
 					const view = this.app.workspace.getActiveViewOfType(MindmapView);
 					if (!view?.canMoveSelection(direction)) return false;
 					if (!checking) view.moveSelection(direction);
+					return true;
+				},
+			});
+		}
+
+		// The three that turn a card into a door. Gated the same way the move
+		// commands are, and each offered only where it means something: a node
+		// that is already a link is not offered "link to a note" a second time,
+		// and a node with no usable words is not offered a note named after it.
+		const linkCommands: ReadonlyArray<{
+			id: string;
+			nameKey: I18nKey;
+			applies: (view: MindmapView, id: string) => boolean;
+			run: (view: MindmapView, id: string) => void;
+		}> = [
+			{
+				id: "link-node-to-note",
+				nameKey: "command.linkToNote",
+				applies: (view, id) => view.canLink(id),
+				run: (view, id) => view.linkNodeToNote(id),
+			},
+			{
+				id: "create-note-from-node",
+				nameKey: "command.createNote",
+				applies: (view, id) => view.canCreateNote(id),
+				run: (view, id) => view.createNoteFromNode(id),
+			},
+			{
+				id: "unlink-node",
+				nameKey: "command.unlink",
+				applies: (view, id) => view.canUnlink(id),
+				run: (view, id) => view.unlinkNode(id),
+			},
+		];
+		for (const entry of linkCommands) {
+			this.addCommand({
+				id: entry.id,
+				name: t(entry.nameKey),
+				checkCallback: (checking) => {
+					const view = this.app.workspace.getActiveViewOfType(MindmapView);
+					const id = view?.selectedId() ?? null;
+					if (!view || id === null || !entry.applies(view, id)) return false;
+					if (!checking) entry.run(view, id);
 					return true;
 				},
 			});
@@ -405,7 +492,7 @@ export default class MindmapPlugin extends Plugin {
 				if (!file || !this.markedAsMap(file.path)) return;
 				const leaf = this.app.workspace.getMostRecentLeaf();
 				if (!leaf || leaf.view.getViewType() !== "markdown") return;
-				if ((leaf.view as { file?: TFile }).file?.path !== file.path) return;
+				if (leafFile(leaf)?.path !== file.path) return;
 				void this.setMindmapView(leaf);
 			}),
 		);
@@ -460,10 +547,16 @@ export default class MindmapPlugin extends Plugin {
 		// beside them under one reserved key. Lifting it out before the spread is
 		// what stops it riding into `this.settings` as an unrecognised setting --
 		// which the next save would then write back inside itself, once per save.
-		const { [FOLD_STATE_KEY]: folds, [VERSION_KEY]: seen, [MAP_NOTES_KEY]: maps, ...rest } =
-			stored ?? {};
+		const {
+			[FOLD_STATE_KEY]: folds,
+			[VERSION_KEY]: seen,
+			[MAP_NOTES_KEY]: maps,
+			[DRAG_MODE_KEY]: dragMode,
+			...rest
+		} = stored ?? {};
 		this.foldStore = readStore(folds);
 		this.lastSeenVersion = typeof seen === "string" ? seen : null;
+		this.dragModeExplained = dragMode === true;
 		this.storedMapNotes = Array.isArray(maps)
 			? maps.filter((path): path is string => typeof path === "string")
 			: [];
@@ -501,6 +594,23 @@ export default class MindmapPlugin extends Plugin {
 	 * write that knew only about the settings would drop every note's fold state
 	 * the first time somebody moved a slider.
 	 */
+	/**
+	 * Whether the drag mode has already been explained in this vault.
+	 *
+	 * Read by the settings panel when the toggle goes on: the explanation is for
+	 * the person meeting the new gesture, and there is only ever one of those.
+	 */
+	get dragModeWasExplained(): boolean {
+		return this.dragModeExplained;
+	}
+
+	/** Remember that it has been, so no later switch explains it again. */
+	markDragModeExplained(): void {
+		if (this.dragModeExplained) return;
+		this.dragModeExplained = true;
+		this.queueSave();
+	}
+
 	private async savePluginData(): Promise<void> {
 		// Whatever the timer was going to write is in this write already, so a
 		// settings change spends the pending fold save rather than racing it.
@@ -511,6 +621,9 @@ export default class MindmapPlugin extends Plugin {
 			[FOLD_STATE_KEY]: this.foldStore,
 			[MAP_NOTES_KEY]: this.storedMapNotes,
 			...version,
+			// Written only once it is true: a `false` here would be a line in the
+			// file saying nothing happened.
+			...(this.dragModeExplained ? { [DRAG_MODE_KEY]: true } : {}),
 		});
 	}
 
@@ -697,7 +810,7 @@ export default class MindmapPlugin extends Plugin {
 	 */
 	async setMindmapView(leaf: WorkspaceLeaf): Promise<void> {
 		const state = leaf.getViewState();
-		const file = (leaf.view as { file?: TFile }).file;
+		const file = leafFile(leaf);
 		if (!file || file.extension !== "md") {
 			new Notice(t("main.notice.onlyMarkdown"));
 			return;
@@ -723,7 +836,7 @@ export default class MindmapPlugin extends Plugin {
 	 * note, not a decision to stop opening that note as a map.
 	 */
 	async setMarkdownView(leaf: WorkspaceLeaf, remember = true): Promise<void> {
-		const file = (leaf.view as { file?: TFile }).file;
+		const file = leafFile(leaf);
 		if (remember && file) this.rememberView(file.path, false);
 		const remembered = this.previousState.get(leaf);
 

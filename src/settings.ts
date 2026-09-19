@@ -1,4 +1,4 @@
-import { Platform, PluginSettingTab, Setting } from "obsidian";
+import { Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type {
 	App,
 	ButtonComponent,
@@ -12,7 +12,10 @@ import { t } from "./i18n.ts";
 import type { I18nKey, LanguagePreference } from "./i18n.ts";
 import type { CardStyle } from "./view/cardStyle.ts";
 import { CARD_STYLES } from "./view/cardStyle.ts";
+import type { Palette } from "./view/palette.ts";
+import { PALETTES } from "./view/palette.ts";
 import type { EdgeStyle } from "./view/edges.ts";
+import { DRAG_MODE_NOTICE_MS, dragModeNotice, shouldExplainDragMode } from "./dragMode.ts";
 
 /**
  * How cards are drawn -- see `cardStyle.ts` for what each style is. The list the
@@ -80,12 +83,34 @@ export interface MindmapSettings {
 	cardStyle: CardStyle;
 	indentUnit: "auto" | "two" | "four" | "tab";
 	wheel: WheelMode;
+	/**
+	 * Whether dragging blank canvas with no modifier pans it.
+	 *
+	 * Off, the camera waits for the pan key: a plain press draws the band, which
+	 * is what a canvas tool does. On, a plain press is the camera's and the band
+	 * moves to the modifier -- how this map worked before the setting existed.
+	 *
+	 * Either way the pan key pans, and `Shift` is what adds to a selection.
+	 */
+	dragToPan: boolean;
 	rememberFolds: boolean;
 	/** Whether a note left as a map opens as one again. */
 	rememberView: RememberViewMode;
 	branchColors: boolean;
+	/** Which ten hues the branches are drawn in -- see `view/palette.ts`. */
+	palette: Palette;
 	showBodyNodes: boolean;
 	inlineAnnotations: boolean;
+	/**
+	 * Whether `![[hero.png]]` is drawn as the picture rather than as its name.
+	 *
+	 * On by default, because a map of a note full of screenshots is a map
+	 * nobody can read -- but a note with a hundred photographs in it is a note
+	 * somebody may want the light version of, and this is that.
+	 */
+	renderMedia: boolean;
+	/** The tallest a picture or video may be drawn, in CSS pixels. */
+	mediaMaxHeight: number;
 	maxNodeWidth: number;
 	horizontalGap: number;
 	verticalGap: number;
@@ -124,11 +149,15 @@ export const DEFAULT_SETTINGS: MindmapSettings = {
 	cardStyle: "bordered",
 	indentUnit: "auto",
 	wheel: "zoom",
+	dragToPan: false,
 	rememberFolds: true,
 	rememberView: "session",
 	branchColors: true,
+	palette: "classic",
 	showBodyNodes: true,
 	inlineAnnotations: true,
+	renderMedia: true,
+	mediaMaxHeight: 200,
 	maxNodeWidth: 340,
 	horizontalGap: 64,
 	verticalGap: 14,
@@ -163,6 +192,9 @@ const HEADER_BUTTON_KEY: SettingKey = "addHeaderButton";
 
 /** The one setting that changes the words on every surface at once. */
 const LANGUAGE_KEY: SettingKey = "language";
+
+/** The one setting that moves a gesture, and so has to explain itself once. */
+const DRAG_TO_PAN_KEY: SettingKey = "dragToPan";
 
 /**
  * A row's description.
@@ -297,6 +329,11 @@ const GROUPS: SettingGroup[] = [
 				},
 			},
 			{
+				name: "settings.dragToPan.name",
+				desc: "settings.dragToPan.desc",
+				control: { type: "toggle", key: "dragToPan" },
+			},
+			{
 				name: "settings.rememberFolds.name",
 				desc: "settings.rememberFolds.desc",
 				control: { type: "toggle", key: "rememberFolds" },
@@ -386,6 +423,20 @@ const GROUPS: SettingGroup[] = [
 				control: { type: "toggle", key: "branchColors" },
 			},
 			{
+				name: "settings.palette.name",
+				desc: "settings.palette.desc",
+				control: {
+					type: "dropdown",
+					key: "palette",
+					options: Object.fromEntries(
+						PALETTES.map((palette) => [
+							palette,
+							`settings.palette.option.${palette}` as I18nKey,
+						]),
+					),
+				},
+			},
+			{
 				name: "settings.showBodyNodes.name",
 				desc: "settings.showBodyNodes.desc",
 				control: { type: "toggle", key: "showBodyNodes" },
@@ -394,6 +445,16 @@ const GROUPS: SettingGroup[] = [
 				name: "settings.inlineAnnotations.name",
 				desc: annotationDesc,
 				control: { type: "toggle", key: "inlineAnnotations" },
+			},
+			{
+				name: "settings.renderMedia.name",
+				desc: "settings.renderMedia.desc",
+				control: { type: "toggle", key: "renderMedia" },
+			},
+			{
+				name: "settings.mediaMaxHeight.name",
+				desc: "settings.mediaMaxHeight.desc",
+				control: { type: "slider", key: "mediaMaxHeight", min: 80, max: 480, step: 20 },
 			},
 			{
 				name: "settings.toolbarVisibility.name",
@@ -864,6 +925,17 @@ export class SettingsPanel {
 			// them, the dialog redraws the page it is on.
 			this.repaint();
 			return;
+		}
+		if (key === DRAG_TO_PAN_KEY) {
+			// This one moves a gesture the user already has in their fingers --
+			// the press that drew a selection box now moves the whole canvas --
+			// so the first time it is turned on the map says what moved. Once
+			// per vault: an explanation that comes back is one people learn to
+			// dismiss without reading.
+			if (shouldExplainDragMode(this.read(key) === true, this.plugin.dragModeWasExplained)) {
+				this.plugin.markDragModeExplained();
+				new Notice(dragModeNotice(), DRAG_MODE_NOTICE_MS);
+			}
 		}
 		this.plugin.refreshAllViews();
 	}

@@ -29,8 +29,14 @@ export class SettingsModal extends Modal {
 		super(app);
 		this.panel = new SettingsPanel(plugin);
 		// A change of language has to redraw the page on screen, and this is the
-		// only thing that knows which page that is.
-		this.panel.repaint = () => this.show(this.page);
+		// only thing that knows which page that is. The title rides along: it is
+		// set once in `onOpen`, so a repaint that left it alone would leave the
+		// window speaking the language it opened in over content that no longer
+		// does.
+		this.panel.repaint = () => {
+			this.setTitle(t("dialog.settings.title"));
+			this.show(this.page);
+		};
 	}
 
 	override onOpen(): void {

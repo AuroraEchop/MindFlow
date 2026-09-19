@@ -39,6 +39,34 @@
 	contain: layout paint;
 }
 
+/*
+ * The ten branch hues, when the setting asks the vault rather than the map.
+ *
+ * Obsidian defines a `--color-*` for each of these and every theme is expected
+ * to keep them, so reading them is what makes a map in a warm vault warm. The
+ * fallbacks are the classic hues: a theme that dropped one is a reason to draw
+ * the colour the map has always drawn, not a reason to draw nothing.
+ *
+ * The last two are the interface's own accent rather than a named hue, which is
+ * what keeps the tenth branch from looking like a second red.
+ *
+ * On `.mm-content` rather than on the view root, because that is the element
+ * the palette is written on -- and it is the ancestor of every edge and every
+ * card, so the ten variables reach all of them.
+ */
+.mm-content[data-palette="theme"] {
+	--mm-b0: var(--color-blue, #4f9df7);
+	--mm-b1: var(--color-orange, #f2994a);
+	--mm-b2: var(--color-green, #56c271);
+	--mm-b3: var(--color-purple, #b57bee);
+	--mm-b4: var(--color-pink, #ef6b8a);
+	--mm-b5: var(--color-cyan, #38b6c4);
+	--mm-b6: var(--color-yellow, #d9a91f);
+	--mm-b7: var(--interactive-accent, #7c8cf8);
+	--mm-b8: var(--color-red, #ef6b8a);
+	--mm-b9: var(--text-accent, #5aa98a);
+}
+
 /* --- viewport ------------------------------------------------------------ */
 
 .mm-viewport {
@@ -59,6 +87,25 @@
 	   thousands of pixels wide and every card in it is written on a frame, and
 	   none of that may reach the layout of anything outside this box. */
 	contain: layout paint;
+}
+
+/*
+ * The pan key is held, so a press anywhere grabs the canvas instead of the card
+ * under it. Both declarations are aimed at the descendants rather than at the
+ * viewport, because a card is text and the text is where the browser looks: a
+ * note's prose asks for `cursor: text` and `user-select: text` on itself, and
+ * nothing inherited from an ancestor reaches past a declaration of its own. The
+ * `*` does.
+ *
+ * It costs the subtree one style recalculation at each end of the hold, which is
+ * the same price `is-panning` pays for `pointer-events` below -- and this one is
+ * also what keeps a drag across a card from turning into a drag-select of its
+ * words, now that the drag starts on the card.
+ */
+.mm-viewport.is-pan-ready,
+.mm-viewport.is-pan-ready .mm-content * {
+	cursor: grab;
+	user-select: none;
 }
 
 .mm-viewport.is-panning {
@@ -138,6 +185,22 @@
 	transform-origin: 0 0;
 }
 
+/* The box a shift-drag draws over blank canvas.
+ *
+ * A sibling of the viewport rather than a child of it: the viewport is the
+ * transformed surface, and a rectangle drawn inside it would be in map
+ * coordinates -- so the box would drift away from the pointer the moment the
+ * map was zoomed. `pointer-events: none` because the drag is captured by the
+ * viewport and a box that could be hovered would steal the move events. */
+.mm-band {
+	position: absolute;
+	z-index: 5;
+	pointer-events: none;
+	border: 1px solid var(--interactive-accent);
+	border-radius: 2px;
+	background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+
 /*
  * The one compositor-promotion hint in this file, and it is only on while the
  * camera is actually moving.
@@ -210,6 +273,43 @@
 .mm-edge[data-branch="7"] { stroke: var(--mm-b7); }
 .mm-edge[data-branch="8"] { stroke: var(--mm-b8); }
 .mm-edge[data-branch="9"] { stroke: var(--mm-b9); }
+
+/* --- the branch palette --------------------------------------------------- */
+
+/*
+ * The ten hues again, read from the vault's own palette instead of written
+ * down here.
+ *
+ * `--color-*` are RGB triples in Obsidian's base stylesheet and a theme is free
+ * to have tuned any of them, which is the point: a map drawn in a warm vault is
+ * warm. The fallbacks are the classic hues, so a theme that defines none of
+ * them -- or an Obsidian old enough not to -- still draws a map rather than
+ * nothing.
+ *
+ * The accent leads because it is the one colour the user picked by hand, and
+ * the tenth hue is mixed from two of the others: Obsidian names eight, and two
+ * branches sharing a colour is worse than one hue nobody chose.
+ *
+ * On `.mm-content` rather than on the view root: the root is the box
+ * Obsidian's workspace observes for resizes, and this is the layer every card
+ * already inherits the branch variables through.
+ */
+.mm-content[data-palette="theme"] {
+	--mm-b0: rgb(var(--color-accent, 79, 157, 247));
+	--mm-b1: rgb(var(--color-orange, 242, 153, 74));
+	--mm-b2: rgb(var(--color-green, 86, 194, 113));
+	--mm-b3: rgb(var(--color-purple, 181, 123, 238));
+	--mm-b4: rgb(var(--color-red, 239, 107, 138));
+	--mm-b5: rgb(var(--color-cyan, 56, 182, 196));
+	--mm-b6: rgb(var(--color-yellow, 217, 169, 31));
+	--mm-b7: rgb(var(--color-blue, 124, 140, 248));
+	--mm-b8: rgb(var(--color-pink, 210, 105, 143));
+	--mm-b9: color-mix(
+		in srgb,
+		rgb(var(--color-cyan, 56, 182, 196)) 55%,
+		rgb(var(--color-blue, 124, 140, 248))
+	);
+}
 
 /* --- nodes --------------------------------------------------------------- */
 
@@ -807,6 +907,16 @@
 	background: var(--background-modifier-border);
 }
 
+/* A tag, drawn as the badge Obsidian draws it as. Padding rather than a
+   `text-decoration`, for the reason the link below spells out -- and unlike the
+   link it is not clickable, because the map has nothing to do with it. */
+.mm-text .mm-tag {
+	padding: 0 5px;
+	border-radius: var(--radius-s, 4px);
+	color: var(--tag-color, var(--text-accent));
+	background: var(--tag-background, var(--background-modifier-hover));
+}
+
 /* The dotted underline is a bottom border rather than a decoration: the plugin
    validator reports every `text-decoration-*` longhand as only partially
    supported, and a border on an inline box adds no height, so a link never
@@ -817,9 +927,11 @@
 }
 
 /* Only in note content. A title is something you select and drag, so its links
-   stay text; the view wires the click for these alone. */
+   stay text; the view wires the click for these alone. A picture is the same
+   contract as the chip it replaced, and gets the same pointer. */
 .mm-node[data-kind="body"] .mm-link[data-href],
-.mm-node[data-kind="body"] .mm-embed[data-href] {
+.mm-node[data-kind="body"] .mm-embed[data-href],
+.mm-node[data-kind="body"] .mm-media[data-href] {
 	cursor: pointer;
 }
 
@@ -831,6 +943,135 @@
 .mm-text .mm-embed {
 	color: var(--text-muted);
 	font-style: italic;
+}
+
+/* --- pictures and videos -------------------------------------------------- */
+
+/* The wrapper is what the layout sees, and it is `inline-block` rather than
+   `block` on purpose: a picture written inside a sentence sits in that
+   sentence, and a picture alone on a line is the whole card either way. Its
+   size is written in pixels by `view/media.ts` -- the card is `max-content`, so
+   anything left to size itself would have its intrinsic width counted into the
+   card's own width and then clamped, and the two would disagree. */
+.mm-text .mm-media {
+	display: inline-block;
+	vertical-align: middle;
+	max-width: 100%;
+}
+
+.mm-text .mm-media-el {
+	display: block;
+	border-radius: 4px;
+	object-fit: contain;
+}
+
+/* A picture that has not loaded, or that the vault could not read, is an empty
+   box rather than nothing at all -- it is what the card was measured around. */
+.mm-text .mm-media-image {
+	background: var(--background-modifier-border);
+}
+
+.mm-text .mm-media-video {
+	position: relative;
+	background: #000;
+}
+
+.mm-text .mm-media-video .mm-media-el {
+	width: 100%;
+	height: 100%;
+}
+
+/* Hover-only, like the card's own add button: a map of videos is a map of
+   pictures until the pointer arrives, and two circles on every one of them is
+   furniture the map does not need. */
+.mm-media-button {
+	position: absolute;
+	right: 6px;
+	bottom: 6px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.6);
+	color: #fff;
+	cursor: pointer;
+	opacity: 0;
+}
+
+.mm-media-button:hover {
+	background: rgba(0, 0, 0, 0.85);
+}
+
+/* The opposite corner from the play button, and deliberately so: once the
+   native controls come up they own the bottom of the frame, and a second
+   circle sitting beside them is one too many. */
+.mm-media-open {
+	top: 6px;
+	right: 6px;
+	bottom: auto;
+}
+
+.mm-media-video:hover .mm-media-button,
+.mm-media-video:focus-within .mm-media-button {
+	opacity: 1;
+}
+
+/* Once the native controls are up they own the bottom-right corner, which is
+   where the play button sits. The other one stays: it is how a reader gets to
+   the full player, and that is exactly when they may want it. */
+.mm-media-video.is-playing .mm-media-play {
+	opacity: 0;
+	pointer-events: none;
+}
+
+/* --- the enlarged preview ------------------------------------------------ */
+
+/* A child of the view's own element rather than of `.mm-content`, which is
+   what keeps it out of the camera's transform and out of every export --
+   `snapshotMap` clones `.mm-content` and nothing else. It sits above the
+   toolbar (10), the search bar (15) and the popover (20): while a preview is
+   up, it is the only thing in the view that answers to the pointer. */
+.mm-lightbox {
+	position: absolute;
+	inset: 0;
+	z-index: 30;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0.8);
+}
+
+/* `view/lightbox.ts` writes an explicit pixel size so that the element is only
+   as big as the picture inside it -- the space around it has to stay part of
+   the backdrop, or a click meant to dismiss would land on the element instead.
+   These two are the guard for the one thing that size cannot know about: the
+   pane shrinking under a preview that is already open. */
+.mm-lightbox-el {
+	max-width: 92%;
+	max-height: 92%;
+	object-fit: contain;
+	border-radius: 4px;
+}
+
+.mm-lightbox-close {
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border-radius: 50%;
+	color: #fff;
+	background: rgba(0, 0, 0, 0.6);
+	cursor: pointer;
+}
+
+.mm-lightbox-close:hover {
+	background: rgba(0, 0, 0, 0.9);
 }
 
 /* --- math ---------------------------------------------------------------- */
@@ -953,40 +1194,6 @@
 	user-select: text;
 }
 
-/* Opens the block whole, in the dialog. Absolutely positioned so it stays out
-   of flow: the view measures these cards with offsetWidth/offsetHeight, and a
-   button in the flow would push the layout around. */
-.mm-expand {
-	position: absolute;
-	top: 4px;
-	right: 4px;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 18px;
-	height: 18px;
-	border-radius: 4px;
-	color: var(--text-faint);
-	cursor: pointer;
-	opacity: 0.5;
-	user-select: none;
-}
-
-.mm-expand .svg-icon {
-	width: 12px;
-	height: 12px;
-}
-
-.mm-row:hover .mm-expand {
-	opacity: 1;
-}
-
-.mm-expand:hover {
-	background: var(--background-modifier-hover);
-	color: var(--text-normal);
-	opacity: 1;
-}
-
 /* Code and tables only: prose keeps the reading face. */
 .mm-node[data-block="pre"] .mm-text {
 	font-family: var(--font-monospace);
@@ -1038,6 +1245,7 @@
 
 /* A sample keeps its own shape, down to the line it breaks at. */
 .mm-text .mm-code-block {
+	position: relative;
 	margin: 0;
 	padding: 4px 6px;
 	border-radius: 4px;
@@ -1046,6 +1254,134 @@
 	font-size: 0.9em;
 	white-space: pre;
 	overflow-x: auto;
+}
+
+/* The corner of a sample: the language the fence named, and the button that
+   takes the sample away. Absolutely positioned, so neither can change the box
+   the card is measured by -- a card's size comes from its text, and a control
+   that widened the sample would widen the card with it.
+
+   The language is always there, because it is a fact about the sample. The
+   button waits for the pointer or the keyboard, the way every other control on
+   a card does, so a map full of samples is not a map full of buttons. */
+.mm-text .mm-code-corner {
+	position: absolute;
+	top: 3px;
+	right: 4px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.mm-text .mm-code-lang {
+	color: var(--text-faint);
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-smaller);
+	line-height: 1;
+}
+
+.mm-text .mm-code-copy {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	border-radius: 4px;
+	color: var(--text-muted);
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 120ms ease;
+}
+
+.mm-text .mm-code-block:hover .mm-code-copy,
+.mm-text .mm-code-copy:focus-visible,
+.mm-text .mm-code-copy.is-done {
+	opacity: 1;
+}
+
+.mm-text .mm-code-copy:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.mm-text .mm-code-copy.is-done {
+	color: var(--interactive-accent);
+}
+
+.mm-text .mm-code-copy .svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+/* A callout, drawn as the box the note asked for rather than as the `>` and
+   `[!type]` it was written with.
+
+   One colour drives all three pieces -- the rule down the side, the tint
+   behind, and the icon -- so a type is named once and the box follows. The
+   values are Obsidian's own callout palette, and they are written here rather
+   than read from `--callout-*` because a theme is free not to define those,
+   while a card still has to be a box. */
+.mm-text .mm-callout {
+	--mm-callout-color: var(--text-muted);
+	margin: 0;
+	padding: 3px 8px 4px;
+	border-left: 3px solid var(--mm-callout-color);
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--mm-callout-color) 10%, var(--background-primary));
+	white-space: normal;
+}
+
+.mm-text .mm-callout[data-callout="note"] { --mm-callout-color: #448aff; }
+.mm-text .mm-callout[data-callout="abstract"] { --mm-callout-color: #00bfa5; }
+.mm-text .mm-callout[data-callout="info"] { --mm-callout-color: #00b8d4; }
+.mm-text .mm-callout[data-callout="todo"] { --mm-callout-color: #00b8d4; }
+.mm-text .mm-callout[data-callout="tip"] { --mm-callout-color: #00bfa5; }
+.mm-text .mm-callout[data-callout="success"] { --mm-callout-color: #00c853; }
+.mm-text .mm-callout[data-callout="question"] { --mm-callout-color: #ecc400; }
+.mm-text .mm-callout[data-callout="warning"] { --mm-callout-color: #ff9100; }
+.mm-text .mm-callout[data-callout="failure"] { --mm-callout-color: #ff5252; }
+.mm-text .mm-callout[data-callout="danger"] { --mm-callout-color: #ff1744; }
+.mm-text .mm-callout[data-callout="bug"] { --mm-callout-color: #f50057; }
+.mm-text .mm-callout[data-callout="example"] { --mm-callout-color: #7c4dff; }
+.mm-text .mm-callout[data-callout="quote"] { --mm-callout-color: #9e9e9e; }
+
+/* The icon and the title on one line. A flex row rather than inline layout, so
+   a title long enough to wrap wraps under itself instead of under the icon. */
+.mm-text .mm-callout-head {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	color: var(--mm-callout-color);
+	font-weight: 600;
+}
+
+/* `setIcon` puts an SVG in here, and it takes its colour from the text around
+   it -- which is the one the head above just set. */
+.mm-text .mm-callout-icon {
+	display: flex;
+	flex: 0 0 auto;
+}
+
+.mm-text .mm-callout-icon svg {
+	width: 1em;
+	height: 1em;
+}
+
+/* The title in the card's own colour again: the accent belongs to the icon and
+   the rule, and a whole line of it reads as an alarm about nothing. */
+.mm-text .mm-callout-title {
+	color: var(--text-normal);
+}
+
+/* The body, stacked the way the card's own blocks are. `flow-root` so a nested
+   callout's margins stay inside this box rather than reaching the card's. */
+.mm-text .mm-callout-body {
+	display: flow-root;
+	margin-top: 2px;
+}
+
+.mm-text .mm-callout-body > * + * {
+	margin-top: 6px;
 }
 
 /* --- the card's branch-side furniture ------------------------------------ */
@@ -1095,6 +1431,28 @@
 	right: 100%;
 	padding-right: 9px;
 	flex-direction: row-reverse;
+}
+
+/* A note-content card keeps its fold button on the parent's side, on the
+   connector line the card hangs from -- the one edge a body card has, and the
+   one place a button before the card can claim to live. Hover shows the
+   collapse button; a folded block keeps its expand button out in the open
+   (the `[data-kind="body"].is-collapsed` rule below). Pressing and holding
+   the button is also the one way to pick the block up and move it. */
+.mm-node[data-kind="body"][data-side="right"] .mm-tools {
+	left: auto;
+	right: 100%;
+	padding-left: 0;
+	padding-right: 9px;
+	flex-direction: row-reverse;
+}
+
+.mm-node[data-kind="body"][data-side="left"] .mm-tools {
+	right: auto;
+	left: 100%;
+	padding-right: 0;
+	padding-left: 9px;
+	flex-direction: row;
 }
 
 .mm-toggle {
@@ -1175,6 +1533,28 @@
 	pointer-events: auto;
 }
 
+/* A folded note-content card keeps its button out in the open.
+
+   A branch's count is a number the user reads while the pointer is elsewhere,
+   which is why it is not on the hover-only button. A block has no branch under
+   it to count, and the one thing a folded block still needs is the way back
+   out -- so its button stands where the count would have been, and the row
+   under it goes solid for the same reason the count's does.
+
+   Keyed on the body kind as well as the fold: a folded *branch* keeps the
+   count instead, and its button stays hover-only. */
+.mm-node[data-kind="body"].is-collapsed .mm-add {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+/* The row under it goes solid for the same reason the count's does: a button
+   has to be pressable without a hover to find it, and the row is the bridge
+   between the card and the button. */
+.mm-node[data-kind="body"].is-collapsed .mm-tools {
+	pointer-events: auto;
+}
+
 /* The corner keeps out of the way until a card is picked. Faded rather than
    removed: it holds its place in the stack, so nothing shifts when it comes
    back, and the transition is what makes it read as arriving rather than
@@ -1195,6 +1575,12 @@
 	opacity: 0.6;
 	transform: translate(-50%, -50%);
 	transition: left 90ms ease, top 90ms ease, opacity 120ms ease;
+}
+
+/* The company a group drag carries: the same copies, faded, so the card under
+   the pointer stays the one that reads as leading. */
+.mm-drag-ghost-extra {
+	opacity: 0.3;
 }
 
 /* The copy a drag carries is a clone of the row, so it is drawn as a card
@@ -1411,15 +1797,16 @@
 
 /* --- search --------------------------------------------------------------- */
 
-/* Above the toolbar (10) and below the popovers and the block dialog (20): the
-   bar floats over the canvas, never over a panel. */
+/* Above the toolbar (10) and below the popovers (20): the bar floats over the
+   canvas, never over a panel. */
 .mm-search {
 	position: absolute;
 	top: 12px;
 	right: 12px;
 	z-index: 15;
 	display: flex;
-	align-items: center;
+	flex-direction: column;
+	align-items: stretch;
 	gap: 2px;
 	padding: 3px;
 	border-radius: 8px;
@@ -1428,10 +1815,37 @@
 	box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
 }
 
+/* One row of the bar. Two of them when the replace row is showing, and they
+   stretch to the same width, so the two fields line up on their left edge and
+   the buttons on their right. */
+.mm-search-row {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
+/* The replace row is built with the bar and hidden, rather than created when
+   the toggle is pressed: a box that changed shape under the pointer that
+   pressed it would move the button away from the cursor. */
+.mm-replace-row {
+	display: none;
+}
+
+.mm-search.is-replacing .mm-replace-row {
+	display: flex;
+}
+
 .mm-search-input {
 	width: min(220px, 40vw);
 	height: 28px;
 	font-size: var(--font-ui-small);
+}
+
+/* The replace field takes up whatever the find row's width left over, so the
+   two rows end at the same edge whatever the buttons in them are. */
+.mm-replace-input {
+	flex: 1 1 auto;
+	min-width: 120px;
 }
 
 /* A pattern is incomplete for most of the time it is being typed, so this says
@@ -1454,6 +1868,15 @@
 	width: 24px;
 	height: 24px;
 	font-size: var(--font-ui-smaller);
+}
+
+/* The replace row's two actions are words rather than glyphs -- no icon says
+   "replace in this card" -- so these take the room a word needs. */
+.mm-search .mm-replace-button {
+	width: auto;
+	height: 24px;
+	padding: 0 8px;
+	white-space: nowrap;
 }
 
 /* --- popovers ------------------------------------------------------------ */
@@ -1497,81 +1920,7 @@
 	margin-top: 4px;
 }
 
-/* --- the block dialog ----------------------------------------------------- */
-
-/* A modal, not a popover: `.mindflow` is `overflow: hidden`, so a panel big
-   enough to read a long block would be clipped by the viewport it hangs in.
-   It also mounts outside `.mindflow`, which is why none of the map's own
-   scoped rules -- the `.mm-text .mm-math` display override in particular --
-   reach the rendered markdown in here. */
-.mm-block-dialog {
-	width: min(760px, 90vw);
-	max-height: 85vh;
-}
-
-.mm-dialog-hint {
-	margin: 0 0 10px;
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
-}
-
-.mm-dialog-modes {
-	display: flex;
-	gap: 4px;
-	margin-bottom: 10px;
-}
-
-.mm-dialog-mode {
-	padding: 4px 12px;
-	font-size: var(--font-ui-smaller);
-	box-shadow: none;
-}
-
-.mm-dialog-mode.is-active {
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
-}
-
-.mm-dialog-body {
-	max-height: 60vh;
-	overflow: auto;
-}
-
-.mm-dialog-actions {
-	display: flex;
-	justify-content: flex-end;
-	gap: 8px;
-	margin-top: 12px;
-}
-
-.mm-body-block {
-	margin-bottom: 10px;
-}
-
-.mm-body-lines {
-	margin-bottom: 3px;
-	color: var(--text-faint);
-	font-size: var(--font-ui-smaller);
-	font-variant-numeric: tabular-nums;
-}
-
-.mm-body-input {
-	width: 100%;
-	font-family: var(--font-monospace);
-	font-size: var(--font-ui-smaller);
-	resize: vertical;
-	white-space: pre;
-}
-
-/* Obsidian's own reading-view CSS does the work; this only keeps the block from
-   inheriting the dialog's own margins at its edges. */
-.mm-body-render > :first-child {
-	margin-top: 0;
-}
-
-.mm-body-render > :last-child {
-	margin-bottom: 0;
-}
+/* --- the body card's own furniture ---------------------------------------- */
 
 .mm-shortcuts table {
 	border-collapse: collapse;
@@ -1622,6 +1971,30 @@ kbd.mm-shortcut-key {
 .mm-shortcut-unbound {
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
+}
+
+/* --- toasts / notices -------------------------------------------------- */
+
+/*
+ * The toast stack: short-lived messages in the view's top-right corner.
+ *
+ * Positioned below the window controls (which live at the very top of the
+ * pane in Obsidian's title bar area) so they never cover the minimise /
+ * maximise / close buttons or the view switcher.
+ */
+.mm-toasts {
+	position: absolute;
+	top: 40px;
+	right: 12px;
+	z-index: 25;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	pointer-events: none;
+}
+
+.mm-toasts .mm-toast {
+	pointer-events: auto;
 }
 
 /* The row is waiting for a key, so say so where the keys would be. */

@@ -51,7 +51,7 @@ const EN = {
 		"Open the selected node's paragraphs and code blocks whole, rendered, in their own dialog. Unbound by default; the expand button on a content card does the same thing.",
 	"shortcut.indent.name": "Indent",
 	"shortcut.indent.description":
-		"Make the selected node a child of the sibling above it.",
+		"Make the selected node a child of the sibling above it. Ctrl/Cmd+Shift+Tab, pairing the Shift+Tab outdent; it shipped on `]` once, a key that never arrives through an input method.",
 	"shortcut.outdent.name": "Outdent",
 	"shortcut.outdent.description":
 		"Make the selected node a sibling of its own parent.",
@@ -62,7 +62,8 @@ const EN = {
 	"shortcut.move-down.description":
 		"Swap the selected node, subtree and all, with the sibling below it.",
 	"shortcut.toggle-fold.name": "Fold or unfold",
-	"shortcut.toggle-fold.description": "Hide or show the selected node's children.",
+	"shortcut.toggle-fold.description":
+		"Hide or show the selected node's children. The same key held down is the pan modifier — held and dragged it moves the map instead, and the fold waits for the release, so it fires only when the key was tapped.",
 	"shortcut.navigate-up.name": "Select the node above",
 	"shortcut.navigate-up.description": "Move the selection to the nearest card above.",
 	"shortcut.navigate-down.name": "Select the node below",
@@ -77,6 +78,9 @@ const EN = {
 	"shortcut.close-search.name": "Close the find bar",
 	"shortcut.close-search.description":
 		"Only the map's while a find bar is open; with no bar up the key keeps whatever meaning Obsidian gives it.",
+	"shortcut.replace.name": "Find and replace",
+	"shortcut.replace.description":
+		"Open the find bar with the replace row already showing. Enter in the replace field changes every match; the row's two buttons change one card or all of them.",
 	"shortcut.undo.name": "Undo",
 	"shortcut.undo.description": "Undo the last edit made on the map.",
 	"shortcut.redo.name": "Redo",
@@ -141,6 +145,12 @@ const EN = {
 	"settings.branchColors.name": "Colour branches",
 	"settings.branchColors.desc": "Give each top-level branch its own colour.",
 
+	"settings.palette.name": "Branch palette",
+	"settings.palette.desc":
+		"Which ten colours the branches are drawn in. The theme palette reads the vault's own colours, so the map matches the rest of the interface.",
+	"settings.palette.option.classic": "Classic",
+	"settings.palette.option.theme": "Follow the theme",
+
 	"settings.showBodyNodes.name": "Show note content",
 	"settings.showBodyNodes.desc":
 		"Paragraphs, code blocks and tables become their own cards, so they fold and unfold with the branch they belong to. Use the expand button on a card to see the whole block rendered, or double-click it to edit.",
@@ -153,6 +163,14 @@ const EN = {
 	"settings.inlineAnnotations.desc.4": " lines keep their line breaks, and a lone ",
 	"settings.inlineAnnotations.desc.5":
 		" is a blank line between them. Obsidian's own editing and reading views show such a line as an ordinary paragraph that starts with a colon. Double-click an annotation on the map, or pick Add annotation from a node's context menu, to edit one — the colon prefixes are written back to the note for you. Turn this off to read those lines as ordinary body cards again.",
+
+	"settings.renderMedia.name": "Show pictures and videos",
+	"settings.renderMedia.desc":
+		"Draw an embedded image or video on the card instead of a chip carrying its name. Only files in the vault are drawn — a remote address in a note stays the chip it has always been — and the chip is still what a PDF, a note or an audio file becomes.",
+
+	"settings.mediaMaxHeight.name": "Maximum media height",
+	"settings.mediaMaxHeight.desc":
+		"The tallest a picture or a video may be drawn, in pixels. A picture narrower than the card is never stretched to fill it.",
 
 	"settings.toolbarVisibility.name": "Corner toolbar",
 	"settings.toolbarVisibility.desc":
@@ -175,6 +193,10 @@ const EN = {
 	"settings.wheel.name": "Mouse wheel",
 	"settings.wheel.option.zoom": "Zooms (hold Shift to pan)",
 	"settings.wheel.option.pan": "Pans (hold Ctrl to zoom)",
+
+	"settings.dragToPan.name": "Drag mode",
+	"settings.dragToPan.desc":
+		"Off, a drag on blank canvas draws a selection box, and the map is moved with the pan key (hold Space and drag), with Shift and the wheel, or with the middle button. On, a drag moves the map and the selection box moves to Shift and drag. Shift and a click adds a card to the selection either way.",
 
 	"settings.rememberFolds.name": "Remember fold state",
 	"settings.rememberFolds.desc":
@@ -232,15 +254,38 @@ const EN = {
 	// --- the furniture on a card, read out by a screen reader ---------------
 	"view.node.expand": "Expand",
 	"view.node.collapse": "Collapse",
+	"view.body.expand": "Show the whole block",
+	"view.body.collapse": "Collapse the block to its first line",
+	"view.code.copy": "Copy the code",
+	"view.code.copied": "Copied",
 	"view.node.annotationAria": "Annotation (double-click to edit)",
+	"view.media.play": "Play here",
+	"view.media.open": "Open in Obsidian's player",
+	"view.media.preview": "Preview",
+	"view.lightbox.close": "Close the preview",
+
+	// --- a callout's title, when the note wrote none ------------------------
+	// Obsidian's own list of types, which is also the set that gets an icon.
+	// A type outside it is drawn with the word the note wrote instead.
+	"view.callout.note": "Note",
+	"view.callout.abstract": "Abstract",
+	"view.callout.info": "Info",
+	"view.callout.todo": "Todo",
+	"view.callout.tip": "Tip",
+	"view.callout.success": "Success",
+	"view.callout.question": "Question",
+	"view.callout.warning": "Warning",
+	"view.callout.failure": "Failure",
+	"view.callout.danger": "Danger",
+	"view.callout.bug": "Bug",
+	"view.callout.example": "Example",
+	"view.callout.quote": "Quote",
 
 	// --- the shortcut panel -------------------------------------------------
 	"view.shortcuts.title": "Mind map shortcuts",
 	"view.shortcuts.footer": "Every key above can be changed in the plugin's settings.",
 	"view.shortcuts.mouse.edit.keys": "Double-click a card",
 	"view.shortcuts.mouse.edit.what": "Edit the node",
-	"view.shortcuts.mouse.expand.keys": "⤢ on a content card",
-	"view.shortcuts.mouse.expand.what": "Show the whole block, rendered",
 	"view.shortcuts.mouse.link.keys": "Click a link in a content card",
 	"view.shortcuts.mouse.link.what": "Open it",
 	"view.shortcuts.mouse.reveal.keys": "Ctrl/Cmd+click a card",
@@ -254,7 +299,18 @@ const EN = {
 	"view.shortcuts.mouse.reorder.keys": "Drag onto a card's top / bottom edge",
 	"view.shortcuts.mouse.reorder.what": "Reorder it beside that card",
 	"view.shortcuts.mouse.zoom.keys": "Wheel / pinch",
-	"view.shortcuts.mouse.zoom.what": "Zoom; drag blank space to pan",
+	"view.shortcuts.mouse.zoom.what": "Zoom",
+	"view.shortcuts.mouse.pan.keys": "Space + drag",
+	"view.shortcuts.mouse.pan.plainKeys": "Drag blank space",
+	"view.shortcuts.mouse.pan.what": "Move the map",
+	"view.shortcuts.mouse.band.keys": "Drag blank space",
+	"view.shortcuts.mouse.band.shiftKeys": "Shift + drag blank space",
+	"view.shortcuts.mouse.band.what": "Draw a box; every card it covers joins the selection",
+	"view.shortcuts.mouse.multi.keys": "Shift + click a card",
+	"view.shortcuts.mouse.multi.what": "Add it to the selection, or drop it again",
+	"view.shortcuts.mouse.dragGroup.keys": "Drag one of several selected cards",
+	"view.shortcuts.mouse.dragGroup.what":
+		"Move all of them, keeping the order they are written in",
 
 	// --- a node's context menu ----------------------------------------------
 	"view.menu.showBlock": "Show the whole block",
@@ -270,6 +326,10 @@ const EN = {
 	"view.menu.unfold": "Unfold",
 	"view.menu.rename": "Rename",
 	"view.menu.delete": "Delete",
+	"view.menu.linkToNote": "Link to a note…",
+	"view.menu.createNote": "New note from this node",
+	"view.menu.unlink": "Remove the link",
+	"view.menu.openLink": "Open the linked note",
 
 	// --- what the map says when it will not do something --------------------
 	"view.notice.rootRename": "This node is the file name. Rename the note to change it.",
@@ -279,23 +339,14 @@ const EN = {
 	"view.notice.nothingToUndo": "Nothing to undo on the map.",
 	"view.notice.annotationChanged":
 		"This annotation changed while the editor was open. Copy your draft and reopen it before saving.",
+	"view.notice.cannotLink": "Only a node the note owns can hold a link.",
+	"view.notice.noteCreated": "Created {name}",
+	"view.notice.noteCreateFailed": "Could not create that note. See the console for the reason.",
 
-	// --- the dialogs --------------------------------------------------------
-	"dialog.cancel": "Cancel",
-	"dialog.save": "Save",
-	"dialog.close": "Close",
-	"dialog.annotation.title": "Annotation — {title}",
-	"dialog.annotation.aria": "Annotation",
-	"dialog.annotation.intro":
-		"Enter inserts a line break. Blank lines are preserved. No colon prefixes needed. Clear the text and save to remove the annotation.",
-	"dialog.annotation.hint.1": "Saved into the note as ",
-	"dialog.annotation.hint.2": " lines beneath the node. Ctrl/Cmd+Enter saves.",
-	"dialog.block.intro":
-		"This content stays in the note exactly where it is. Editing here rewrites only these lines.",
-	"dialog.block.title": "Note content",
-	"dialog.block.preview": "Preview",
-	"dialog.block.source": "Source",
-	"dialog.block.lines": "Lines {from}–{to}",
+	// --- linking a node to another note -------------------------------------
+	"view.link.pick": "Link this node to which note?",
+
+	// --- the settings window ------------------------------------------------
 	"dialog.settings.title": "Mind map settings",
 
 	// --- the find bar -------------------------------------------------------
@@ -303,21 +354,33 @@ const EN = {
 	"search.previous": "Previous match",
 	"search.next": "Next match",
 	"search.close": "Close search",
+	"search.replace": "Show the replace row",
+	"search.replaceWith": "Replace with",
+	"search.replaceOne": "Replace in this card",
+	"search.replaceAll": "Replace all",
+	"search.replaced": "Replaced {count}",
 
 	// --- the commands the plugin registers ----------------------------------
 	"command.forgetFold": "Forget the saved fold state for this note",
 	"command.search": "Find in the mind map",
+	"command.replace": "Find and replace in the mind map",
 	"command.moveUp": "Move the selected node up among its siblings",
 	"command.moveDown": "Move the selected node down among its siblings",
 	"command.openAsMindmap": "Open current note as a mind map",
 	"command.revealLineOnMap": "Reveal the line at the cursor on the map",
 	"command.settings": "Open the mind map settings",
 	"command.insertAnnotation": "Insert an annotation line (in markdown editor)",
+	"command.linkToNote": "Link the selected node to a note",
+	"command.createNote": "Create a note from the selected node",
+	"command.unlink": "Remove the link from the selected node",
 
 	// --- what the plugin says at load ---------------------------------------
 	"main.notice.onlyMarkdown": "Only markdown notes can be shown as a mind map.",
 	"main.notice.update":
 		"MindFlow was updated. A line written as \": text\" under a heading or list item now hangs under that node's card as an annotation instead of becoming a card of its own. Settings → MindFlow → Appearance → Inline annotations turns it off.",
+
+	"main.notice.dragMode":
+		"Drag mode is on: a drag on blank canvas now moves the map, and the selection box has moved to Shift and drag. With it off it was the other way round — a drag drew the box, and holding Space moved the map. Settings → MindFlow → Preferences → Drag mode turns it back off.",
 
 	// --- the export, one pair of keys per format ----------------------------
 	"export.canvas.name": "Export mind map as Canvas",
@@ -366,7 +429,8 @@ const ZH: Record<I18nKey, string> = {
 	"shortcut.expand-body.description":
 		"在独立对话框中完整渲染选中节点的段落与代码块。默认未绑定快捷键；正文卡片上的展开按钮效果相同。",
 	"shortcut.indent.name": "降级",
-	"shortcut.indent.description": "把选中节点变成上方同级节点的子节点。",
+	"shortcut.indent.description":
+		"把选中节点变成上方同级节点的子节点。Ctrl/Cmd+Shift+Tab，与 Shift+Tab 升级成对；早期版本曾用「]」，但那个键在输入法开启时根本到不了导图。",
 	"shortcut.outdent.name": "升级",
 	"shortcut.outdent.description": "把选中节点变成其父节点的同级节点。",
 	"shortcut.move-up.name": "在同级中上移",
@@ -374,7 +438,8 @@ const ZH: Record<I18nKey, string> = {
 	"shortcut.move-down.name": "在同级中下移",
 	"shortcut.move-down.description": "把选中节点连同整棵子树，与下方同级节点互换位置。",
 	"shortcut.toggle-fold.name": "折叠或展开",
-	"shortcut.toggle-fold.description": "隐藏或显示选中节点的子节点。",
+	"shortcut.toggle-fold.description":
+		"隐藏或显示选中节点的子节点。同一个键按住不放时是平移修饰键 —— 按住拖动改为移动画面，折叠则推迟到松手时才判定，所以只有「点一下」才会触发。",
 	"shortcut.navigate-up.name": "选中上方节点",
 	"shortcut.navigate-up.description": "把选中状态移到上方最近的卡片。",
 	"shortcut.navigate-down.name": "选中下方节点",
@@ -389,6 +454,9 @@ const ZH: Record<I18nKey, string> = {
 	"shortcut.close-search.name": "关闭查找栏",
 	"shortcut.close-search.description":
 		"仅在查找栏打开时由导图接管；没有查找栏时，该键保持 Obsidian 原本的含义。",
+	"shortcut.replace.name": "查找替换",
+	"shortcut.replace.description":
+		"打开查找栏并直接展开替换行。在替换框里按回车替换全部匹配；这一行的两个按钮分别替换当前卡片和全部卡片。",
 	"shortcut.undo.name": "撤销",
 	"shortcut.undo.description": "撤销在导图上做的上一次修改。",
 	"shortcut.redo.name": "重做",
@@ -451,6 +519,12 @@ const ZH: Record<I18nKey, string> = {
 	"settings.branchColors.name": "分支着色",
 	"settings.branchColors.desc": "让每个顶级分支拥有各自的颜色。",
 
+	"settings.palette.name": "分支配色",
+	"settings.palette.desc":
+		"分支使用哪十种颜色。主题配色会读取仓库自身的颜色，让导图和界面其余部分保持一致。",
+	"settings.palette.option.classic": "经典",
+	"settings.palette.option.theme": "跟随主题",
+
 	"settings.showBodyNodes.name": "显示笔记正文",
 	"settings.showBodyNodes.desc":
 		"段落、代码块和表格会成为独立卡片，随所属分支一起折叠展开。点击卡片上的展开按钮可查看整块的渲染结果，双击可编辑。",
@@ -463,6 +537,14 @@ const ZH: Record<I18nKey, string> = {
 	"settings.inlineAnnotations.desc.4": " 行会保留换行，单独的 ",
 	"settings.inlineAnnotations.desc.5":
 		" 表示它们之间的空行。Obsidian 自身的编辑和阅读视图会把这样的行显示为以冒号开头的普通段落。在导图上双击注解，或从节点右键菜单选择「添加注解」即可编辑 —— 冒号前缀会替你写回笔记。关闭此项后，这些行会重新作为普通正文卡片显示。",
+
+	"settings.renderMedia.name": "显示图片和视频",
+	"settings.renderMedia.desc":
+		"把嵌入的图片或视频直接画在卡片上，而不是显示成一个带文件名的标签。只画笔记库里的文件 —— 笔记里写的远程地址仍然是标签 —— PDF、笔记、音频文件也仍然是标签。",
+
+	"settings.mediaMaxHeight.name": "媒体最大高度",
+	"settings.mediaMaxHeight.desc":
+		"图片和视频最高画多少像素。比卡片还窄的图片不会被拉伸填满。",
 
 	"settings.toolbarVisibility.name": "角落工具栏",
 	"settings.toolbarVisibility.desc":
@@ -485,6 +567,10 @@ const ZH: Record<I18nKey, string> = {
 	"settings.wheel.name": "鼠标滚轮",
 	"settings.wheel.option.zoom": "缩放（按住 Shift 平移）",
 	"settings.wheel.option.pan": "平移（按住 Ctrl 缩放）",
+
+	"settings.dragToPan.name": "拖动模式",
+	"settings.dragToPan.desc":
+		"关闭时，在空白处拖动是框选，平移画布要按住 Space 再拖，或者用 Shift 加滚轮、鼠标中键。开启后，拖动就是平移，框选改成 Shift 加拖动。两种情况里 Shift 加点击都是给选中加一张卡片。",
 
 	"settings.rememberFolds.name": "记住折叠状态",
 	"settings.rememberFolds.desc":
@@ -541,15 +627,38 @@ const ZH: Record<I18nKey, string> = {
 	// --- 卡片上的部件，供读屏软件朗读 -----------------------------------------
 	"view.node.expand": "展开",
 	"view.node.collapse": "折叠",
+	"view.body.expand": "展开整块内容",
+	"view.body.collapse": "把这块内容折成一行",
+	"view.code.copy": "复制代码",
+	"view.code.copied": "已复制",
 	"view.node.annotationAria": "注解（双击编辑）",
+	"view.media.play": "在卡片上播放",
+	"view.media.open": "用 Obsidian 的播放器打开",
+	"view.media.preview": "点击放大预览",
+	"view.lightbox.close": "关闭预览",
+
+	// --- 笔记没写标题时的 callout 标题 ---------------------------------------
+	// 与 Obsidian 内置类型一一对应，也是能拿到图标的那些。列表之外的类型
+	// 直接显示笔记里写的那个词。
+	"view.callout.note": "笔记",
+	"view.callout.abstract": "摘要",
+	"view.callout.info": "信息",
+	"view.callout.todo": "待办",
+	"view.callout.tip": "提示",
+	"view.callout.success": "成功",
+	"view.callout.question": "问题",
+	"view.callout.warning": "警告",
+	"view.callout.failure": "失败",
+	"view.callout.danger": "危险",
+	"view.callout.bug": "错误",
+	"view.callout.example": "示例",
+	"view.callout.quote": "引用",
 
 	// --- 快捷键面板 ----------------------------------------------------------
 	"view.shortcuts.title": "导图快捷键",
 	"view.shortcuts.footer": "以上所有按键都可以在插件设置中修改。",
 	"view.shortcuts.mouse.edit.keys": "双击卡片",
 	"view.shortcuts.mouse.edit.what": "编辑该节点",
-	"view.shortcuts.mouse.expand.keys": "正文卡片上的 ⤢",
-	"view.shortcuts.mouse.expand.what": "完整渲染该块内容",
 	"view.shortcuts.mouse.link.keys": "点击正文卡片中的链接",
 	"view.shortcuts.mouse.link.what": "打开它",
 	"view.shortcuts.mouse.reveal.keys": "Ctrl/Cmd+点击卡片",
@@ -563,7 +672,17 @@ const ZH: Record<I18nKey, string> = {
 	"view.shortcuts.mouse.reorder.keys": "拖拽到卡片的上下边缘",
 	"view.shortcuts.mouse.reorder.what": "在该卡片旁重新排序",
 	"view.shortcuts.mouse.zoom.keys": "滚轮 / 双指捏合",
-	"view.shortcuts.mouse.zoom.what": "缩放；拖拽空白处平移",
+	"view.shortcuts.mouse.zoom.what": "缩放",
+	"view.shortcuts.mouse.pan.keys": "Space + 拖动",
+	"view.shortcuts.mouse.pan.plainKeys": "拖动空白处",
+	"view.shortcuts.mouse.pan.what": "平移画布",
+	"view.shortcuts.mouse.band.keys": "拖动空白处",
+	"view.shortcuts.mouse.band.shiftKeys": "Shift + 拖动空白处",
+	"view.shortcuts.mouse.band.what": "拉出一个选框，框到的卡片都进入选中",
+	"view.shortcuts.mouse.multi.keys": "Shift + 点击卡片",
+	"view.shortcuts.mouse.multi.what": "把它加进选中，再点一次移出",
+	"view.shortcuts.mouse.dragGroup.keys": "拖动多张选中卡片中的一张",
+	"view.shortcuts.mouse.dragGroup.what": "整组一起搬走，保持它们在笔记里的顺序",
 
 	// --- 节点右键菜单 --------------------------------------------------------
 	"view.menu.showBlock": "查看整块内容",
@@ -579,6 +698,10 @@ const ZH: Record<I18nKey, string> = {
 	"view.menu.unfold": "展开",
 	"view.menu.rename": "重命名",
 	"view.menu.delete": "删除",
+	"view.menu.linkToNote": "链接到某篇笔记…",
+	"view.menu.createNote": "由该节点新建笔记",
+	"view.menu.unlink": "移除链接",
+	"view.menu.openLink": "打开链接的笔记",
 
 	// --- 导图拒绝执行某件事时的提示 ------------------------------------------
 	"view.notice.rootRename": "该节点就是文件名。要改名请重命名这篇笔记。",
@@ -587,22 +710,14 @@ const ZH: Record<I18nKey, string> = {
 	"view.notice.nothingToUndo": "导图上没有可撤销的操作。",
 	"view.notice.annotationChanged":
 		"编辑器打开期间该注解已被修改。请先复制你的草稿，重新打开后再保存。",
+	"view.notice.cannotLink": "只有笔记自身拥有的节点才能挂链接。",
+	"view.notice.noteCreated": "已新建 {name}",
+	"view.notice.noteCreateFailed": "无法新建该笔记，原因见控制台。",
 
-	// --- 对话框 --------------------------------------------------------------
-	"dialog.cancel": "取消",
-	"dialog.save": "保存",
-	"dialog.close": "关闭",
-	"dialog.annotation.title": "注解 —— {title}",
-	"dialog.annotation.aria": "注解",
-	"dialog.annotation.intro":
-		"Enter 插入换行。空行会被保留。无需手动输入冒号前缀。清空文本并保存即可删除该注解。",
-	"dialog.annotation.hint.1": "会以 ",
-	"dialog.annotation.hint.2": " 行的形式保存到节点下方。Ctrl/Cmd+Enter 保存。",
-	"dialog.block.intro": "这些内容会原样留在笔记中。在这里编辑只会改写这几行。",
-	"dialog.block.title": "笔记正文",
-	"dialog.block.preview": "预览",
-	"dialog.block.source": "源码",
-	"dialog.block.lines": "第 {from}–{to} 行",
+	// --- 把节点链接到另一篇笔记 ----------------------------------------------
+	"view.link.pick": "把这个节点链接到哪篇笔记？",
+
+	// --- 设置窗口 ------------------------------------------------------------
 	"dialog.settings.title": "思维导图设置",
 
 	// --- 查找栏 --------------------------------------------------------------
@@ -610,21 +725,33 @@ const ZH: Record<I18nKey, string> = {
 	"search.previous": "上一个匹配",
 	"search.next": "下一个匹配",
 	"search.close": "关闭查找",
+	"search.replace": "展开替换行",
+	"search.replaceWith": "替换为",
+	"search.replaceOne": "只替换这张卡片",
+	"search.replaceAll": "全部替换",
+	"search.replaced": "已替换 {count} 处",
 
 	// --- 插件注册的命令 ------------------------------------------------------
 	"command.forgetFold": "清除该笔记已保存的折叠状态",
 	"command.search": "在思维导图中查找",
+	"command.replace": "在思维导图中查找替换",
 	"command.moveUp": "把选中节点在同级中上移",
 	"command.moveDown": "把选中节点在同级中下移",
 	"command.openAsMindmap": "以思维导图打开当前笔记",
 	"command.revealLineOnMap": "在导图中定位光标所在的行",
 	"command.settings": "打开思维导图设置",
 	"command.insertAnnotation": "插入注解行（在 Markdown 编辑器中）",
+	"command.linkToNote": "把选中节点链接到某篇笔记",
+	"command.createNote": "由选中节点新建一篇笔记",
+	"command.unlink": "移除选中节点上的链接",
 
 	// --- 加载时的提示 --------------------------------------------------------
 	"main.notice.onlyMarkdown": "只有 Markdown 笔记可以显示为思维导图。",
 	"main.notice.update":
 		"MindFlow 已更新。在标题或列表项下写成 “: text” 的行，现在会作为注解挂在那个节点的卡片下方，而不是成为独立卡片。可在「设置 → MindFlow → 外观 → 行内注解」中关闭。",
+
+	"main.notice.dragMode":
+		"拖动模式已开启：现在在空白处拖动就是平移画布，框选改成了 Shift 加拖动。关闭时正好相反 —— 拖动画出选框，按住 Space 拖动才平移。可在「设置 → MindFlow → 偏好 → 拖动模式」中关掉。",
 
 	// --- 导出，每种格式一对键 ------------------------------------------------
 	"export.canvas.name": "导出思维导图为 Canvas",
@@ -725,4 +852,93 @@ export function t(key: I18nKey, params?: Record<string, string | number>): strin
 	return template.replace(PLACEHOLDER, (whole, name: string) =>
 		Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : whole,
 	);
+}
+
+/**
+ * A callout's type, as far as the plugin has an opinion about it.
+ *
+ * The aliases are Obsidian's: `hint` and `important` are `tip` written a
+ * different way, and a note that uses one means the same box. Anything outside
+ * this list is a custom type, which Obsidian draws without a title of its own
+ * and so does the map.
+ */
+export type CalloutType =
+	| "note"
+	| "abstract"
+	| "info"
+	| "todo"
+	| "tip"
+	| "success"
+	| "question"
+	| "warning"
+	| "failure"
+	| "danger"
+	| "bug"
+	| "example"
+	| "quote";
+
+const CALLOUT_KEYS: Record<CalloutType, I18nKey> = {
+	note: "view.callout.note",
+	abstract: "view.callout.abstract",
+	info: "view.callout.info",
+	todo: "view.callout.todo",
+	tip: "view.callout.tip",
+	success: "view.callout.success",
+	question: "view.callout.question",
+	warning: "view.callout.warning",
+	failure: "view.callout.failure",
+	danger: "view.callout.danger",
+	bug: "view.callout.bug",
+	example: "view.callout.example",
+	quote: "view.callout.quote",
+};
+
+/**
+ * Every alias Obsidian accepts, spelled out.
+ *
+ * Written as a flat table rather than derived from the list above because the
+ * aliases are not a rule -- `error` is `danger`, `check` is `success`, and
+ * `important` is `tip` -- so the only way to know them is to write them down.
+ */
+const CALLOUT_ALIASES: Record<string, CalloutType> = {
+	note: "note",
+	abstract: "abstract",
+	summary: "abstract",
+	tldr: "abstract",
+	info: "info",
+	todo: "todo",
+	tip: "tip",
+	hint: "tip",
+	important: "tip",
+	success: "success",
+	check: "success",
+	done: "success",
+	question: "question",
+	help: "question",
+	faq: "question",
+	warning: "warning",
+	caution: "warning",
+	attention: "warning",
+	failure: "failure",
+	fail: "failure",
+	missing: "failure",
+	danger: "danger",
+	error: "danger",
+	bug: "bug",
+	example: "example",
+	quote: "quote",
+	cite: "quote",
+};
+
+/**
+ * The built-in type a note's callout name stands for, or null when it is one
+ * of the note's own.
+ */
+export function calloutTypeOf(raw: string): CalloutType | null {
+	return CALLOUT_ALIASES[raw] ?? null;
+}
+
+/** The title Obsidian would give a callout of this type. */
+export function calloutTitle(type: CalloutType): string {
+	return t(CALLOUT_KEYS[type]);
 }
