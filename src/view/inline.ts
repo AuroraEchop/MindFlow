@@ -8,18 +8,32 @@
  * imported it from the node builder would be importing its own caller.
  *
  * Deliberately DOM-based throughout: every value goes in as text, never as
- * HTML, so a note can never inject markup into the map.
+ * HTML, so a note can never inject markup into the map. The one exception is a
+ * picture, which is an element rather than a string by nature; it is built from
+ * a resource URL the vault itself resolved, and it is still not markup.
  */
 
 import { t } from "../i18n.ts";
+import { markdownTarget, parseEmbedTarget } from "../model/media.ts";
 import { nextInlineToken } from "../model/inlineText.ts";
 import type { InlineKind } from "../model/inlineText.ts";
 import { renderMathInto } from "./math.ts";
 import { MATH_DISPLAY, MATH_INLINE } from "./mathSyntax.ts";
+import { renderMedia } from "./media.ts";
+import type { MediaContext } from "./media.ts";
 
 /** Carried through the recursion so nested markup can report what it emitted. */
 export interface InlineContext {
 	sawMath: boolean;
+	sawMedia: boolean;
+	/** Null when the map is not drawing media: every embed stays a chip. */
+	media: MediaContext | null;
+}
+
+/** What one run of text put on the card, so the view knows what to wait for. */
+export interface InlineRender {
+	math: boolean;
+	media: boolean;
 }
 
 type Emit = (m: RegExpExecArray, el: HTMLElement, ctx: InlineContext) => void;
@@ -36,8 +50,28 @@ function linkSpan(el: HTMLElement, cls: string, label: string, target: string): 
 	const span = el.createSpan({ cls, text: label });
 	// `<path>` wrapping and a trailing `"title"` are markdown-link syntax, not
 	// part of what the link points at.
-	const href = target.trim().replace(/^<(.*)>$/, "$1").replace(/\s+"[^"]*"$/, "").trim();
+	const href = markdownTarget(target);
 	if (href !== "") span.dataset.href = href;
+}
+
+/**
+ * An `![[...]]` or an `![...](...)`, drawn as the picture it names.
+ *
+ * Returns false when the target is not something the map draws -- a PDF, a
+ * note, a file that is no longer there -- and the caller falls back to the chip
+ * below, which is what every embed used to be.
+ */
+function mediaInto(
+	el: HTMLElement,
+	target: string,
+	label: string,
+	ctx: InlineContext,
+	maxWidth?: number,
+): boolean {
+	if (ctx.media === null) return false;
+	if (!renderMedia(el, target, label, ctx.media, maxWidth)) return false;
+	ctx.sawMedia = true;
+	return true;
 }
 
 /**
@@ -55,12 +89,36 @@ const EMIT: Record<InlineKind, Emit> = {
 	em: (m, el, ctx) => renderRange(el.createEl("em"), m[1], ctx),
 	wikilink: (m, el) => linkSpan(el, "mm-link", m[2] ?? m[1], m[1]),
 	link: (m, el) => linkSpan(el, "mm-link", m[1], m[2]),
-	// Drawn as the same chip an embedded note gets, and not as an `<img>`: a
-	// card is measured the moment it is built, and a picture that arrives after
-	// that would leave the map laid out around a box that no longer exists. The
-	// chip says the picture is there and opens it; the block dialog shows it.
-	image: (m, el) => linkSpan(el, "mm-embed", m[1] || m[2], m[2]),
-	embed: (m, el) => linkSpan(el, "mm-embed", m[1], m[1]),
+	// The alt text, or the target when the note wrote none -- and the picture
+	// itself when the map is drawing them. A card is measured the moment it is
+	// built, so `media.ts` is what makes a picture arriving later cost one
+	// re-measurement rather than a map laid out around a box that no longer
+	// exists.
+	image: (m, el, ctx) => {
+		const target = markdownTarget(m[2]);
+		if (mediaInto(el, target, m[1] || target, ctx)) return;
+		linkSpan(el, "mm-embed", m[1] || target, m[2]);
+	},
+	embed: (m, el, ctx) => {
+		// `![[a.png|300]]` is a size, not a label, and it caps what the map
+		// would otherwise have drawn the picture at.
+		const parsed = parseEmbedTarget(m[1]);
+		const label = parsed.label ?? parsed.path;
+		if (mediaInto(el, parsed.path, label, ctx, parsed.width ?? undefined)) return;
+		linkSpan(el, "mm-embed", m[1], m[1]);
+	},
+	// A badge rather than a link: a tag is a label, not a destination. The map
+	// does not filter or search by it, and drawing it as something clickable
+	// would promise a click that goes nowhere.
+	//
+	// The rule had to consume the space or the bracket in front of the `#` to
+	// say the `#` was allowed to be there -- a lookbehind would have done it
+	// without eating the character, and Obsidian's review does not allow one.
+	// So the prefix goes back on the card first, as the character it was.
+	tag: (m, el) => {
+		if (m[1] !== "") el.appendText(m[1]);
+		el.createSpan({ cls: "mm-tag", text: `#${m[2]}` });
+	},
 };
 
 const MATH_PATTERNS: Array<[RegExp, Emit]> = [
@@ -132,17 +190,27 @@ function renderRange(el: HTMLElement, text: string, ctx: InlineContext): void {
 	}
 }
 
-/** Returns true when the text contained a formula, so the view knows to
- *  re-measure once MathJax has flushed its stylesheet. */
-export function renderInline(el: HTMLElement, text: string): boolean {
+/**
+ * Draw one run of note text, and report what it contained.
+ *
+ * `media` is the map's licence to draw pictures and videos, or null when it is
+ * not drawing them -- in which case an embed is the chip it has always been.
+ * The math half of the answer is what tells the view to re-measure once MathJax
+ * has flushed its stylesheet; the media half says the same about a picture.
+ */
+export function renderInline(
+	el: HTMLElement,
+	text: string,
+	media: MediaContext | null = null,
+): InlineRender {
 	el.empty();
 	if (text.trim() === "") {
 		el.createSpan({ cls: "mm-placeholder", text: t("view.node.placeholder") });
-		return false;
+		return { math: false, media: false };
 	}
-	const ctx: InlineContext = { sawMath: false };
+	const ctx: InlineContext = { sawMath: false, sawMedia: false, media };
 	renderRange(el, text, ctx);
-	return ctx.sawMath;
+	return { math: ctx.sawMath, media: ctx.sawMedia };
 }
 
 /**
@@ -152,7 +220,11 @@ export function renderInline(el: HTMLElement, text: string): boolean {
  * an empty box; inside a table cell it is simply an empty cell, and a card that
  * said "Empty" in one would be inventing content the note does not have.
  */
-export function renderInlineOrNothing(el: HTMLElement, text: string): boolean {
-	if (text.trim() === "") return false;
-	return renderInline(el, text);
+export function renderInlineOrNothing(
+	el: HTMLElement,
+	text: string,
+	media: MediaContext | null = null,
+): InlineRender {
+	if (text.trim() === "") return { math: false, media: false };
+	return renderInline(el, text, media);
 }
