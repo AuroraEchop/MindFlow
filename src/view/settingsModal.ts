@@ -18,6 +18,17 @@ import type MindmapPlugin from "../main.ts";
  */
 export class SettingsModal extends Modal {
 	private readonly panel: SettingsPanel;
+	/**
+	 * Run once the window is gone, and only then.
+	 *
+	 * A modal takes the focus with it when it closes: whatever held it before
+	 * (`Modal` remembers nothing of its own) has to be handed it back, or the
+	 * pane ends up holding it and every key the map answers -- the pan key
+	 * first among them -- goes quiet until the map is clicked again. The view
+	 * that opened this window is the thing that knows where the keyboard
+	 * belongs, so it passes the answer in.
+	 */
+	private readonly onClosed: () => void;
 
 	/** Both are built in `onOpen`, and neither exists before it runs. */
 	private navEl!: HTMLElement;
@@ -25,9 +36,10 @@ export class SettingsModal extends Modal {
 
 	private page = 0;
 
-	constructor(app: App, plugin: MindmapPlugin) {
+	constructor(app: App, plugin: MindmapPlugin, onClosed: () => void = () => {}) {
 		super(app);
 		this.panel = new SettingsPanel(plugin);
+		this.onClosed = onClosed;
 		// A change of language has to redraw the page on screen, and this is the
 		// only thing that knows which page that is. The title rides along: it is
 		// set once in `onOpen`, so a repaint that left it alone would leave the
@@ -91,6 +103,7 @@ export class SettingsModal extends Modal {
 		// after the window it belongs to has gone.
 		this.panel.endRecording();
 		this.contentEl.empty();
+		this.onClosed();
 	}
 
 	/** Draw one page, and mark it in the navigation. */

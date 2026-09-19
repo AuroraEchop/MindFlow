@@ -322,7 +322,14 @@ export default class MindmapPlugin extends Plugin {
 		this.addCommand({
 			id: "open-settings",
 			name: t("command.settings"),
-			callback: () => new SettingsModal(this.app, this).open(),
+			// Opened from a palette the map may well be the view behind it, and
+			// the focus the window takes has to come back to the map's own keys
+			// rather than to nothing. `focusMap` refuses when this is not the
+			// active view, so the answer is safe to offer from anywhere.
+			callback: () =>
+				new SettingsModal(this.app, this, () => {
+					this.app.workspace.getActiveViewOfType(MindmapView)?.focusMap();
+				}).open(),
 		});
 
 		// The note's half of the round trip Ctrl/Cmd+click starts from the map:
@@ -501,7 +508,16 @@ export default class MindmapPlugin extends Plugin {
 			this.app.workspace.on("layout-change", () => this.refreshHeaderButtons()),
 		);
 		this.registerEvent(
-			this.app.workspace.on("active-leaf-change", () => this.refreshHeaderButtons()),
+			this.app.workspace.on("active-leaf-change", (leaf) => {
+				this.refreshHeaderButtons();
+				// Coming back to a map has to put the keyboard back inside it. Its
+				// own keys are listeners on the viewport -- the pan key, and the
+				// shortcut table besides the actions the scope carries -- and the
+				// focus a leaf is given sits one element above that. `focusMap`
+				// asks the questions: only when this map is the one in front, and
+				// never over an edit. See it for the rest.
+				if (leaf?.view instanceof MindmapView) leaf.view.focusMap();
+			}),
 		);
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshHeaderButtons();

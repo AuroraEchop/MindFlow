@@ -818,6 +818,46 @@ export class MindmapView extends TextFileView implements MapController {
 		this.addAction("file-text", t("view.action.editMarkdown"), () => {
 			void this.plugin.toggleLeaf(this.leaf);
 		});
+		// The keyboard, on the next tick rather than here. The swap that opened
+		// this view is still running, and its `{ focus: true }` lands on the pane
+		// as it finishes -- a focus taken now would be overwritten a line later,
+		// which is exactly how the map came to look half broken until it was
+		// clicked. See `focusMap` for what is at stake.
+		window.setTimeout(() => this.focusMap(), 0);
+	}
+
+	/**
+	 * Take the keyboard, when this map is the one in front.
+	 *
+	 * The map's keys are listeners on the viewport -- the pan key that arms a
+	 * canvas drag, and the whole shortcut table besides the three actions that
+	 * are registered on the scope -- and a key event only reaches an element the
+	 * focus is inside. Obsidian hands the *pane* the focus when a view opens and
+	 * when its leaf comes back to the front, and the pane is one element above
+	 * the map, so a map nobody had clicked answered nothing that needed a key:
+	 * no Space to pan with, no shortcut at all, until the first click moved the
+	 * focus in. That is the whole of "some of it does not work until you touch
+	 * the map".
+	 *
+	 * Three questions before it acts, because a focus that is wrong is worse
+	 * than one that arrives late: this map has to be the active view (a map
+	 * restored into a background tab must not pull the focus off the note
+	 * somebody is typing in), nothing may be being edited (an inline editor
+	 * lives inside the view and has to keep the focus), and the focus must not
+	 * already be inside -- or inside something of Obsidian's that is over the
+	 * map, which is where a menu item that opened a modal has just put it.
+	 */
+	focusMap(): void {
+		if (this.app.workspace.getActiveViewOfType(MindmapView) !== this) return;
+		if (this.isEditing()) return;
+		const doc = this.contentEl.ownerDocument;
+		const active = doc.activeElement;
+		if (active instanceof HTMLElement) {
+			if (this.contentEl.contains(active)) return;
+			// A dialog or a menu is up and holding the focus: not ours to take.
+			if (active.closest(".modal-container, .menu")) return;
+		}
+		this.canvas.viewport.focus({ preventScroll: true });
 	}
 
 	override async onClose(): Promise<void> {
@@ -1034,7 +1074,10 @@ export class MindmapView extends TextFileView implements MapController {
 	 */
 	private openSettings(): void {
 		this.closePopover();
-		new SettingsModal(this.app, this.plugin).open();
+		// Closing the window hands the keyboard back to the map: the focus went
+		// with the modal, and the toolbar button it came from cannot take it --
+		// a plain div is not focusable. See `focusMap`.
+		new SettingsModal(this.app, this.plugin, () => this.focusMap()).open();
 	}
 
 	/**
@@ -3696,6 +3739,12 @@ export class MindmapView extends TextFileView implements MapController {
 
 	showMenu(id: string, ev: MouseEvent): void {
 		const menu = new Menu();
+		// A menu takes the focus while it is up and has nothing to give it back
+		// to when it goes: the card underneath is not focusable, and the pane is
+		// one element above the keys the map answers. So the keyboard comes home
+		// -- except when an entry opened a dialog or started an edit, which
+		// `focusMap` asks about before it acts.
+		menu.onHide(() => this.focusMap());
 
 		// A content card stands for lines the note owns: it can be read and
 		// edited in place, but never renamed, moved or given children.
