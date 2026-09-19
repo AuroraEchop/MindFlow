@@ -1,0 +1,14 @@
+{
+  "name": "obsidian-lint",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Obsidian's community-plugin review rules, kept out of the plugin's own dependencies. Run them from the plugin root with `npm run lint:obsidian`.",
+  "license": "MIT",
+  "dependencies": {
+    "@eslint/js": "^9.39.5",
+    "@eslint/json": "^0.14.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.4.2",
+    "typescript-eslint": "^8.70.0"
+  }
+}

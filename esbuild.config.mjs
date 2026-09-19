@@ -36,7 +36,10 @@ const context = await esbuild.context({
     ...builtinModules.map((name) => `node:${name}`),
   ],
   format: "cjs",
-  target: "es2018",
+  // Kept in step with tsconfig's `target`. The sources already use ES2022
+  // spellings (`.at()`, `replaceChildren`), so an older target here would only
+  // mislead a reader -- esbuild does not polyfill either way.
+  target: "es2022",
   logLevel: "info",
   sourcemap: production ? false : "inline",
   treeShaking: true,

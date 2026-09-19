@@ -15,6 +15,10 @@ CLAUDE.md
 CLAUDE.local.md
 .claude/
 
+# The assistants' own working notes, for the same reason
+.workbuddy/
+.workbuddy-ai/
+
 # Obsidian workspace state inside the bundled test vault
 test-vault/.obsidian/workspace.json
 test-vault/.obsidian/workspace-mobile.json

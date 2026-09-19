@@ -11,6 +11,8 @@
     "test": "node --test \"src/**/*.test.ts\"",
     "check-version": "node scripts/check-version.mjs",
     "check-changelog": "node scripts/check-changelog.mjs",
+    "lint:obsidian": "node scripts/lint-obsidian.mjs",
+    "lint:obsidian:locales": "node scripts/lint-obsidian.mjs --locales",
     "check": "npm run check-version && npm run check-changelog && npm run typecheck && npm test && npm run build",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
