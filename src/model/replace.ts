@@ -28,6 +28,13 @@ import type { MindNode, ParsedDoc } from "./types.ts";
 export interface ReplaceQuery {
 	text: string;
 	regex: boolean;
+	/**
+	 * Whether the case of a letter is part of the word being looked for.
+	 *
+	 * The same switch the find bar's `Aa` is, and kept in step with it: a
+	 * search that only found `api` would be a poor thing to press replace on.
+	 */
+	caseSensitive: boolean;
 	/** The new text. `$1` and friends only mean anything when `regex` is on. */
 	replacement: string;
 }
@@ -65,9 +72,10 @@ function replaceLiteral(
 	text: string,
 	needle: string,
 	replacement: string,
+	caseSensitive: boolean,
 ): { text: string; hits: number } {
-	const haystack = text.toLowerCase();
-	const find = needle.toLowerCase();
+	const haystack = caseSensitive ? text : text.toLowerCase();
+	const find = caseSensitive ? needle : needle.toLowerCase();
 	let out = "";
 	let hits = 0;
 	let from = 0;
@@ -103,11 +111,11 @@ function replaceByRegex(
 	return { text: text.replace(re, replacement), hits: found.length };
 }
 
-/** A global, case-insensitive matcher for the query, or null when it is broken. */
+/** A global matcher for the query, or null when it is broken. */
 function matcherFor(query: ReplaceQuery): RegExp | null | undefined {
 	if (!query.regex) return undefined;
 	try {
-		return new RegExp(query.text, "gi");
+		return new RegExp(query.text, query.caseSensitive ? "g" : "gi");
 	} catch {
 		// A pattern is incomplete for as long as it is being typed, which is
 		// the normal case rather than something to report.
@@ -135,7 +143,7 @@ export function planReplace(root: MindNode, query: ReplaceQuery): ReplacePlan {
 		if (node.virtual || node.kind === "body" || node.lineStart < 0) return;
 		const before = node.text;
 		const result = re === undefined
-			? replaceLiteral(before, query.text, query.replacement)
+			? replaceLiteral(before, query.text, query.replacement, query.caseSensitive)
 			: replaceByRegex(before, re, query.replacement);
 		if (result.hits === 0) return;
 		edits.push({

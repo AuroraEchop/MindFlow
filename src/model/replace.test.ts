@@ -33,7 +33,7 @@ function nodeNamed(parsed: ParsedDoc, text: string): MindNode {
 }
 
 function plan(text: string, replacement: string, regex = false) {
-	return planReplace(doc.root, { text, replacement, regex });
+	return planReplace(doc.root, { text, replacement, regex, caseSensitive: false });
 }
 
 test("every title holding the phrase is planned, in document order", () => {
@@ -62,7 +62,7 @@ test("a title with two occurrences counts as two and changes both", () => {
 	const one = planReplace(parseMarkdown("- alpha alpha alpha\n", { title: "t" }).root, {
 		text: "alpha",
 		replacement: "x",
-		regex: false,
+		regex: false, caseSensitive: false,
 	});
 	assert.equal(one.count, 3);
 	assert.equal(one.edits.length, 1);
@@ -72,7 +72,7 @@ test("a title with two occurrences counts as two and changes both", () => {
 test("matching ignores case, and the replacement is written as typed", () => {
 	const found = planReplace(
 		parseMarkdown("- Alpha\n- ALPHA\n", { title: "t" }).root,
-		{ text: "alpha", replacement: "Omega", regex: false },
+		{ text: "alpha", replacement: "Omega", regex: false, caseSensitive: false },
 	);
 	assert.equal(found.count, 2);
 	assert.deepEqual(
@@ -81,12 +81,39 @@ test("matching ignores case, and the replacement is written as typed", () => {
 	);
 });
 
+test("case is part of the phrase when the search says it is", () => {
+	// The find bar's `Aa` reaches the write as well as the read: a search that
+	// was asked to care about case and a replace that did not would be two
+	// different answers to one question.
+	const doc2 = parseMarkdown("- Alpha\n- ALPHA\n", { title: "t" });
+	const strict = planReplace(doc2.root, {
+		text: "alpha",
+		replacement: "Omega",
+		regex: false,
+		caseSensitive: true,
+	});
+	assert.equal(strict.count, 0);
+	assert.deepEqual(strict.edits, []);
+	// Spelled the way the card spells it, the switch changes nothing.
+	const exact = planReplace(doc2.root, {
+		text: "ALPHA",
+		replacement: "Omega",
+		regex: false,
+		caseSensitive: true,
+	});
+	assert.equal(exact.count, 1);
+	assert.deepEqual(
+		exact.edits.map((edit) => edit.after),
+		["Omega"],
+	);
+});
+
 test("a literal replacement keeps its dollars", () => {
 	// There are no capture groups in the literal mode, so `$1` is two
 	// characters the user typed rather than a backreference to nothing.
 	const found = planReplace(
 		parseMarkdown("- cost\n", { title: "t" }).root,
-		{ text: "cost", replacement: "$1 (cheap)", regex: false },
+		{ text: "cost", replacement: "$1 (cheap)", regex: false, caseSensitive: false },
 	);
 	assert.equal(found.edits[0].after, "$1 (cheap)");
 });
@@ -94,7 +121,7 @@ test("a literal replacement keeps its dollars", () => {
 test("a regex replacement gets its backreferences", () => {
 	const found = planReplace(
 		parseMarkdown("- item 12\n- item 34\n", { title: "t" }).root,
-		{ text: "item (\\d+)", replacement: "number $1", regex: true },
+		{ text: "item (\\d+)", replacement: "number $1", regex: true, caseSensitive: false },
 	);
 	assert.deepEqual(
 		found.edits.map((edit) => edit.after),
@@ -119,7 +146,7 @@ test("the markers, the checkbox and the indent survive the write", () => {
 	const parsed = parseMarkdown("## Head\n\n- [ ] alpha task\n\t- alpha nested\n", {
 		title: "t",
 	});
-	const result = replaceInTree(parsed, { text: "alpha", replacement: "omega", regex: false });
+	const result = replaceInTree(parsed, { text: "alpha", replacement: "omega", regex: false, caseSensitive: false });
 	assert.equal(result.ok, true);
 	assert.equal(result.count, 2);
 	assert.equal(
@@ -132,7 +159,7 @@ test("the whole note comes back byte-identical apart from the replaced words", (
 	const parsed = parseMarkdown("- alpha\n\nsome body text\n\n# Heading\n\n- beta\n", {
 		title: "t",
 	});
-	const result = replaceInTree(parsed, { text: "alpha", replacement: "gamma", regex: false });
+	const result = replaceInTree(parsed, { text: "alpha", replacement: "gamma", regex: false, caseSensitive: false });
 	assert.equal(result.text, "- gamma\n\nsome body text\n\n# Heading\n\n- beta\n");
 });
 
@@ -141,7 +168,7 @@ test("prose the node owns is not replaced, because find never showed it", () => 
 	// Find skips them, so replace does too -- otherwise a replacement would
 	// change text the user was never told about.
 	const parsed = parseMarkdown("# T\n\n- alpha\n\talpha in a body block\n", { title: "t" });
-	const result = replaceInTree(parsed, { text: "alpha", replacement: "x", regex: false });
+	const result = replaceInTree(parsed, { text: "alpha", replacement: "x", regex: false, caseSensitive: false });
 	assert.equal(result.count, 1);
 	assert.equal(result.text, "# T\n\n- x\n\talpha in a body block\n");
 });
@@ -149,7 +176,7 @@ test("prose the node owns is not replaced, because find never showed it", () => 
 test("replacing in one node leaves its siblings alone", () => {
 	const parsed = parseMarkdown("- alpha one\n- alpha two\n", { title: "t" });
 	const target = nodeNamed(parsed, "alpha two");
-	const result = replaceInTree(parsed, { text: "alpha", replacement: "omega", regex: false }, target);
+	const result = replaceInTree(parsed, { text: "alpha", replacement: "omega", regex: false, caseSensitive: false }, target);
 	assert.equal(result.count, 1);
 	assert.equal(result.text, "- alpha one\n- omega two\n");
 });
@@ -157,7 +184,7 @@ test("replacing in one node leaves its siblings alone", () => {
 test("a targeted replace that misses reports nothing done", () => {
 	const parsed = parseMarkdown("- alpha\n- beta\n", { title: "t" });
 	const target = nodeNamed(parsed, "beta");
-	const result = replaceInTree(parsed, { text: "alpha", replacement: "x", regex: false }, target);
+	const result = replaceInTree(parsed, { text: "alpha", replacement: "x", regex: false, caseSensitive: false }, target);
 	assert.equal(result.ok, false);
 	assert.equal(result.count, 0);
 	assert.equal(result.text, "- alpha\n- beta\n");
@@ -165,14 +192,14 @@ test("a targeted replace that misses reports nothing done", () => {
 
 test("a replace that changes nothing reports nothing done", () => {
 	const parsed = parseMarkdown("- alpha\n", { title: "t" });
-	const result = replaceInTree(parsed, { text: "zzz", replacement: "x", regex: false });
+	const result = replaceInTree(parsed, { text: "zzz", replacement: "x", regex: false, caseSensitive: false });
 	assert.equal(result.ok, false);
 	assert.equal(result.text, "- alpha\n");
 });
 
 test("the virtual root's filename is not a title and is never replaced", () => {
 	const parsed = parseMarkdown("- one\n", { title: "Focus Note" });
-	const result = replaceInTree(parsed, { text: "Focus", replacement: "x", regex: false });
+	const result = replaceInTree(parsed, { text: "Focus", replacement: "x", regex: false, caseSensitive: false });
 	assert.equal(result.ok, false);
 	assert.equal(result.text, "- one\n");
 });
@@ -181,7 +208,7 @@ test("a zero-length pattern does not spin", () => {
 	const found = planReplace(parseMarkdown("- ab\n", { title: "t" }).root, {
 		text: "(?:)",
 		replacement: "-",
-		regex: true,
+		regex: true, caseSensitive: false,
 	});
 	// One per character boundary -- before the `a`, between, and after the
 	// `b` -- which is what the pattern asked for. The point is that it ends.
@@ -192,7 +219,7 @@ test("a shared global pattern is re-aimed, so the second call sees everything", 
 	// The pattern lives for one call to `planReplace`; this pins down that
 	// nothing it leaves in `lastIndex` reaches the next title it visits.
 	const parsed = parseMarkdown("- alpha\n- alpha\n- alpha\n", { title: "t" });
-	const query = { text: "alpha", replacement: "x", regex: true };
+	const query = { text: "alpha", replacement: "x", regex: true, caseSensitive: false };
 	assert.equal(planReplace(parsed.root, query).count, 3);
 	assert.equal(planReplace(parsed.root, query).count, 3);
 });

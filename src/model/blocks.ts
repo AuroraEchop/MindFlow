@@ -65,7 +65,80 @@ export interface CalloutBlock {
 	blocks: Block[];
 }
 
-export type Block = TableBlock | CodeBlock | ParagraphBlock | CalloutBlock;
+/**
+ * A blockquote that carries no `[!type]`: a quote, and not a callout.
+ *
+ * The `>` is the note saying "this is somebody else's words", and read as
+ * characters it is a character -- which is the same loss a callout suffers, if
+ * a smaller one: the reader is shown a `>` where the note drew a bar. A quote
+ * is a box whether or not the note named a type for it, and the difference
+ * between the two is the heading a callout has and a quote does not.
+ *
+ * Its content is read exactly as a body range is, so a list inside a quote is a
+ * list and a quote inside a quote is a second bar one step in.
+ */
+export interface QuoteBlock {
+	kind: "quote";
+	blocks: Block[];
+}
+
+/**
+ * One item of a list, and how deep it sits.
+ *
+ * The marker is kept as written rather than as a number, because the card draws
+ * the list the note wrote: `-` and `*` are the same bullet and `3)` is the third
+ * item, and a model that decided here would have decided for every reader of a
+ * block -- the map's own card and another note's preview alike.
+ */
+export interface ListItem {
+	/** The marker alone, as written: `-`, `*`, `+`, `1.`, `3)`. */
+	marker: string;
+	/** Nesting, counted off the markers: 0 for the outermost items. */
+	depth: number;
+	/** What the item says, its continuation lines and all. */
+	text: string;
+}
+
+/**
+ * A run of list items, as the list it is.
+ *
+ * A list is the third construct that cannot be read as a run of text, and the
+ * one that suffers least visibly for it: `1. a` drawn as characters is a
+ * column of digits that happens to be right, and `- a` drawn as characters is a
+ * dash that is nothing at all. What is lost either way is the shape -- that
+ * these lines are a list, that three of them hang under the fourth, that they
+ * are numbered because the note numbered them -- and this is the shape.
+ */
+export interface ListBlock {
+	kind: "list";
+	/** Whether the markers count: `1.` and `3)` do; `-`, `*` and `+` do not. */
+	ordered: boolean;
+	/** The number the note started the list at, so `3)` is drawn as 3. */
+	start: number;
+	items: ListItem[];
+}
+
+/**
+ * A thematic break: the line a note writes when it wants a rule drawn.
+ *
+ * The block with the least to say and the most to lose by being read as text.
+ * `---` read as characters is three hyphens sitting in the middle of a card --
+ * and read as *emphasis* it is worse still, because `---` is not asking for the
+ * words around it to be touched. What the note means is a rule, and a rule has
+ * no text at all.
+ */
+export interface RuleBlock {
+	kind: "rule";
+}
+
+export type Block =
+	| TableBlock
+	| CodeBlock
+	| ParagraphBlock
+	| CalloutBlock
+	| QuoteBlock
+	| ListBlock
+	| RuleBlock;
 
 const FENCE = /^([ \t]*)(`{3,}|~{3,})[ \t]*(.*)$/;
 /** One cell of a delimiter row: dashes, optionally pinned to either edge. */
@@ -80,6 +153,42 @@ const DELIMITER_CELL = /^:?-+:?$/;
 const CALLOUT = /^[ \t]*>[ \t]*\[!([^\]\s]+)\][ \t]*([+-])?[ \t]*(.*)$/;
 /** One line still inside a blockquote, with its `>` and the space after it. */
 const QUOTE_LINE = /^[ \t]*>[ \t]?(.*)$/;
+
+/**
+ * One item's own line: the indent, the marker, and the space after it.
+ *
+ * The space is required, which is what keeps `*emphasis*` and `1.5 kg` out of
+ * this: neither is a list, and a marker rule loose enough to take them would
+ * turn a line of arithmetic into an item. Item text may be empty -- `- ` on its
+ * own is an item with nothing in it, which is how a note writes a blank bullet.
+ */
+const LIST_ITEM = /^([ \t]*)([*+-]|\d+[.)])[ \t]+(.*)$/;
+
+/**
+ * A thematic break: three or more of one of `-`, `_`, `*` and nothing else.
+ *
+ * Asked before the list rule, because `- - -` answers both and markdown reads
+ * it as a rule -- an item it would be is one with `- -` in it, which is not a
+ * thing a note writes. Spaces between the marks are allowed (`* * *` is the
+ * same line), and the indent is capped at three because past that it is a code
+ * sample.
+ *
+ * Only ever asked where a block opens. A `---` on the line under a paragraph is
+ * a setext heading in markdown, not a rule -- that is what `before\n---\nafter`
+ * says, and a rule drawn there would be a rule the note never asked for. After
+ * a blank line there is no heading for it to be, and it is a rule.
+ */
+const THEMATIC_BREAK = /^[ \t]{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+
+/**
+ * A task box on an item, which the map draws as a checkbox on a card.
+ *
+ * A block has no checkbox of its own, and the box is not part of what the item
+ * says: `- [ ] buy milk` says buy milk. A card of the note's own prose is a node
+ * with a checkbox when the note wrote one -- the box is the card's, not the
+ * text's -- and a preview of another note draws the words.
+ */
+const TASK_BOX = /^\[[ xX]\][ \t]*/;
 
 /**
  * The indentation every line shares, removed.
@@ -190,6 +299,77 @@ function readTable(lines: string[], index: number): { block: TableBlock; next: n
 	return { block: { kind: "table", align, header, rows }, next };
 }
 
+/** One item's line read into the pieces the model keeps, or null. */
+function readItem(
+	line: string,
+): { marker: string; indent: number; ordered: boolean; number: number; text: string } | null {
+	const match = LIST_ITEM.exec(line);
+	if (match === null) return null;
+	const ordered = /^\d/.test(match[2]);
+	return {
+		marker: match[2],
+		indent: match[1].length,
+		ordered,
+		number: ordered ? Number.parseInt(match[2], 10) : 1,
+		text: match[3].replace(TASK_BOX, "").trimEnd(),
+	};
+}
+
+/** How far a line is indented, in characters. */
+function indentOf(line: string): number {
+	return /^[ \t]*/.exec(line)?.[0].length ?? 0;
+}
+
+/**
+ * The list starting at `index`, or null when there is not one.
+ *
+ * One run of items and nothing else. A marker of the other kind ends the run,
+ * which is how markdown reads `- a` followed by `1. b` -- two lists, not one --
+ * and a blank line ends it the way it ends every block. A line with no marker
+ * of its own is the item above it still talking, when it is indented past that
+ * item's marker; anything else is the next block's first line.
+ *
+ * Depth comes off the indents alone: an item indented past the one before it is
+ * one level deeper, and an item that skips back out closes as many levels as it
+ * skipped. Nothing here decides what an indent *means*; the note wrote it and
+ * the card draws it, which is the same bargain the table reader makes with the
+ * pipes.
+ */
+function readList(lines: string[], index: number): { block: ListBlock; next: number } | null {
+	const first = readItem(lines[index]);
+	if (first === null) return null;
+
+	const items: ListItem[] = [];
+	/** The indent of each level opened so far, outermost first. */
+	const levels: number[] = [];
+	// The first item decides, and no later item can contradict it: an item of
+	// the other kind ends the list rather than joining it.
+	const ordered = first.ordered;
+	let next = index;
+
+	while (next < lines.length) {
+		const line = lines[next];
+		if (line.trim() === "") break;
+		const item = readItem(line);
+		if (item !== null) {
+			if (item.ordered !== ordered) break;
+			while (levels.length > 0 && item.indent < levels[levels.length - 1]) levels.pop();
+			if (levels.length === 0 || item.indent > levels[levels.length - 1]) levels.push(item.indent);
+			items.push({ marker: item.marker, depth: levels.length - 1, text: item.text });
+			next++;
+			continue;
+		}
+		// Measured against the level the last item opened, not against the
+		// deepest one ever opened: it is that item the line would continue.
+		const open = items[items.length - 1];
+		if (open === undefined || indentOf(line) <= levels[open.depth]) break;
+		open.text += `\n${line.trim()}`;
+		next++;
+	}
+
+	return { block: { kind: "list", ordered, start: first.number, items }, next };
+}
+
 /** A fence's opening line, in the shape `parseMarkdown` accepts. */
 function openingFence(line: string): RegExpExecArray | null {
 	const match = FENCE.exec(line);
@@ -236,6 +416,34 @@ function readCallout(lines: string[], index: number): { block: CalloutBlock; nex
 }
 
 /**
+ * The quote starting at `index`, or null when there is not one.
+ *
+ * The same reader the callout uses, with the type line left out: every
+ * following line that is still quoted, with one `>` taken off, read by this
+ * same function -- so a table inside a quote is a table and a `>>` is a quote
+ * inside a quote. A line that is not quoted ends it, blank or not, which is
+ * what Obsidian does and why the `>` has to be repeated on an empty line to
+ * keep a quote open.
+ */
+function readQuote(lines: string[], index: number): { block: QuoteBlock; next: number } | null {
+	const open = QUOTE_LINE.exec(lines[index]);
+	if (!open) return null;
+
+	const inner: string[] = [open[1]];
+	let next = index + 1;
+	while (next < lines.length) {
+		const quoted = QUOTE_LINE.exec(lines[next]);
+		if (!quoted) break;
+		inner.push(quoted[1]);
+		next++;
+	}
+	// Trailing blank quote lines are the note's spacing, not content.
+	while (inner.length > 0 && inner[inner.length - 1].trim() === "") inner.pop();
+
+	return { block: { kind: "quote", blocks: parseBlocks(inner.join("\n")) }, next };
+}
+
+/**
  * A body range as the blocks it is made of, in order.
  *
  * Blank lines are separators and produce nothing; a run of lines with no blank
@@ -276,10 +484,25 @@ export function parseBlocks(source: string): Block[] {
 			continue;
 		}
 
+		// The rule is asked before the list, and only here: see THEMATIC_BREAK
+		// for why a `---` under a paragraph is left as the paragraph's own line.
+		if (THEMATIC_BREAK.test(lines[i])) {
+			blocks.push({ kind: "rule" });
+			i++;
+			continue;
+		}
+
 		const callout = readCallout(lines, i);
 		if (callout) {
 			blocks.push(callout.block);
 			i = callout.next;
+			continue;
+		}
+
+		const quote = readQuote(lines, i);
+		if (quote) {
+			blocks.push(quote.block);
+			i = quote.next;
 			continue;
 		}
 
@@ -290,19 +513,30 @@ export function parseBlocks(source: string): Block[] {
 			continue;
 		}
 
+		const list = readList(lines, i);
+		if (list) {
+			blocks.push(list.block);
+			i = list.next;
+			continue;
+		}
+
 		// Everything else is prose, up to whatever ends it. A fence ends it --
 		// fenced code is allowed to interrupt a paragraph -- a blank line ends
 		// it, and so does a table, which cannot open here but can start the next
-		// block. A callout ends it the same way a table does: `> [!note]` is a
-		// box of its own, and a paragraph that swallowed it would show the
-		// syntax rather than the box.
+		// block. A quote ends it the way a table does: `>` opens a box of its
+		// own, callout or not, and a paragraph that swallowed it would show the
+		// marker rather than the bar. A list ends it too: a paragraph line that
+		// begins with a marker is an item, and reading it as prose would put a
+		// bullet in the middle of a sentence.
 		const start = i;
 		while (
 			i < lines.length &&
 			lines[i].trim() !== "" &&
 			!openingFence(lines[i]) &&
 			!CALLOUT.test(lines[i]) &&
-			!readTable(lines, i)
+			!QUOTE_LINE.test(lines[i]) &&
+			!readTable(lines, i) &&
+			!LIST_ITEM.test(lines[i])
 		) {
 			i++;
 		}
@@ -316,17 +550,31 @@ export function parseBlocks(source: string): Block[] {
  * Whether a card has to be drawn as these blocks rather than as one run of
  * text.
  *
- * What the view asks before it commits a card to the structured path. Three
+ * What the view asks before it commits a card to the structured path. Four
  * constructs cannot survive being read as characters: a table, whose `|` is
  * only a column edge once something has decided it is one; a callout, whose
- * `>` and `[!type]` are scaffolding the reader is never meant to see; and a
- * fenced sample, whose fences are the note's way of saying "leave this alone"
- * and are the one part of it nobody wants to read. A paragraph reads the same
- * either way, and the plain path is the one every other card is measured and
- * styled by.
+ * `>` and `[!type]` are scaffolding the reader is never meant to see; a quote,
+ * whose `>` is a bar down the edge of somebody else's words and not a
+ * character; and a fenced sample, whose fences are the note's way of saying
+ * "leave this alone" and are the one part of it nobody wants to read. A
+ * paragraph reads the same either way, and the plain path is the one every
+ * other card is measured and styled by.
+ *
+ * A list and a rule are the two that do not force it, and a list is the one
+ * that never will: a note's list items are nodes in this map -- cards of their
+ * own -- so the list is already the tree's shape, and what a body card holds is
+ * the lines that are *not* nodes. A rule does not force it because a card that
+ * is one rule and nothing else is a card nobody writes; drawn as characters it
+ * is three hyphens, which is at least honest about what the note contains. Both
+ * are asked about all the same, because the question is asked of every block
+ * and because a preview of another note has no tree to have drawn its lists as.
  */
 export function needsBlocks(blocks: readonly Block[]): boolean {
 	return blocks.some(
-		(block) => block.kind === "table" || block.kind === "callout" || block.kind === "code",
+		(block) =>
+			block.kind === "table" ||
+			block.kind === "callout" ||
+			block.kind === "quote" ||
+			block.kind === "code",
 	);
 }

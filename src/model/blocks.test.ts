@@ -2,13 +2,27 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { needsBlocks, parseBlocks } from "./blocks.ts";
-import type { Block, CalloutBlock, TableBlock } from "./blocks.ts";
+import type { Block, CalloutBlock, ListBlock, QuoteBlock, TableBlock } from "./blocks.ts";
 
 /** The one table in `blocks`, so a test can read past the union. */
 function onlyTable(blocks: Block[]): TableBlock {
 	const table = blocks.find((block): block is TableBlock => block.kind === "table");
 	assert.ok(table, "expected a table");
 	return table;
+}
+
+/** The one list in `blocks`, so a test can read past the union. */
+function onlyList(blocks: Block[]): ListBlock {
+	const list = blocks.find((block): block is ListBlock => block.kind === "list");
+	assert.ok(list, "expected a list");
+	return list;
+}
+
+/** The one quote in `blocks`, so a test can read past the union. */
+function onlyQuote(blocks: Block[]): QuoteBlock {
+	const quote = blocks.find((block): block is QuoteBlock => block.kind === "quote");
+	assert.ok(quote, "expected a quote");
+	return quote;
 }
 
 test("a two-column table becomes a header and its rows", () => {
@@ -242,11 +256,14 @@ test("a callout is a block of its own, so it does not swallow the prose above it
 	assert.equal(onlyCallout(blocks).type, "note");
 });
 
-test("a `>` that names no type is still a paragraph", () => {
-	// Only the `[!type]` form is a callout. A plain quote has no box to draw,
-	// and inventing one would put a colour on text the note never labelled.
+test("a `>` that names no type is a quote, not a callout and not a paragraph", () => {
+	// Only the `[!type]` form is a callout, and inventing a colour for a quote
+	// would put a label on text the note never labelled. It is still a box: the
+	// `>` is the note saying these are somebody else's words, and a paragraph
+	// that kept the marker would be showing the scaffolding where the note
+	// drew a bar.
 	assert.deepEqual(parseBlocks("> just quoted"), [
-		{ kind: "paragraph", text: "> just quoted" },
+		{ kind: "quote", blocks: [{ kind: "paragraph", text: "just quoted" }] },
 	]);
 });
 
@@ -266,3 +283,201 @@ test("trailing quoted blanks are spacing, not an empty paragraph", () => {
 	assert.deepEqual(callout.blocks, [{ kind: "paragraph", text: "body" }]);
 });
 
+// --- lists --------------------------------------------------------------------
+
+test("a run of bullets is a list, and keeps the markers the note wrote", () => {
+	const list = onlyList(parseBlocks("- one\n* two\n+ three"));
+	assert.equal(list.ordered, false);
+	assert.deepEqual(list.items, [
+		{ marker: "-", depth: 0, text: "one" },
+		{ marker: "*", depth: 0, text: "two" },
+		{ marker: "+", depth: 0, text: "three" },
+	]);
+});
+
+test("numbers make it an ordered list, and it starts where the note started it", () => {
+	const list = onlyList(parseBlocks("1. 跨域通信\n2. 离线存储"));
+	assert.equal(list.ordered, true);
+	assert.equal(list.start, 1);
+	assert.deepEqual(
+		list.items.map((item) => item.text),
+		["跨域通信", "离线存储"],
+	);
+	// A list that begins at three is a list that begins at three: the numbers
+	// are the note's, and renumbering them would be the card correcting it.
+	assert.equal(onlyList(parseBlocks("3) three\n4) four")).start, 3);
+});
+
+test("an indented item is one level deeper, and coming back out closes the level", () => {
+	const list = onlyList(parseBlocks("- one\n    - deep\n- two"));
+	assert.deepEqual(
+		list.items.map((item) => item.depth),
+		[0, 1, 0],
+	);
+	assert.deepEqual(
+		list.items.map((item) => item.text),
+		["one", "deep", "two"],
+	);
+});
+
+test("a line indented under an item is that item still talking", () => {
+	// The wrapped half of a long item. It has no marker, so it is not an item
+	// of its own -- and a list that dropped it would drop half a sentence.
+	const list = onlyList(parseBlocks("- one\n  wrapped\n- two"));
+	assert.deepEqual(list.items, [
+		{ marker: "-", depth: 0, text: "one\nwrapped" },
+		{ marker: "-", depth: 0, text: "two" },
+	]);
+});
+
+test("the other kind of marker starts a second list rather than joining the first", () => {
+	// How markdown reads it, and how the note draws it: two lists, one bulleted
+	// and one numbered, with no blank line between them.
+	const blocks = parseBlocks("- one\n1. two");
+	assert.equal(blocks.length, 2);
+	assert.equal(onlyList(blocks).ordered, false);
+	assert.equal((blocks[1] as ListBlock).ordered, true);
+});
+
+test("a task box comes off the item's words", () => {
+	// Where the line is a node the box is the card's checkbox; a block has no
+	// checkbox at all, so `- [ ] buy milk` is an item that says buy milk.
+	assert.deepEqual(onlyList(parseBlocks("- [ ] buy milk")).items, [
+		{ marker: "-", depth: 0, text: "buy milk" },
+	]);
+	assert.equal(onlyList(parseBlocks("- [x] done")).items[0].text, "done");
+});
+
+test("emphasis and arithmetic are not lists", () => {
+	// The space after the marker is what decides, and it is the whole reason
+	// the rule asks for one: `*one*` is a word and `1.5 kg` is a weight.
+	assert.deepEqual(parseBlocks("*one* and 1.5 kg"), [
+		{ kind: "paragraph", text: "*one* and 1.5 kg" },
+	]);
+});
+
+test("a list ends the paragraph above it", () => {
+	const blocks = parseBlocks("prose first\n- item");
+	assert.deepEqual(blocks[0], { kind: "paragraph", text: "prose first" });
+	assert.equal(onlyList(blocks).items[0].text, "item");
+});
+
+test("a list quoted inside a callout is a list", () => {
+	const callout = onlyCallout(parseBlocks("> [!note] Steps\n> 1. first\n> 2. second"));
+	assert.deepEqual(
+		onlyList(callout.blocks).items.map((item) => item.text),
+		["first", "second"],
+	);
+});
+
+test("a list never forces the structured path, because the map has already drawn it", () => {
+	// A note's list items are nodes -- cards of their own -- so a body card
+	// holding a list run is not a shape a note produces. The answer is still
+	// answered rather than skipped: a card drawn as blocks for another reason
+	// draws its list as a list.
+	assert.equal(needsBlocks(parseBlocks("- one\n- two")), false);
+	assert.equal(needsBlocks(parseBlocks("- one\n\n| a |\n| --- |\n| 1 |")), true);
+});
+
+// --- quotes ----------------------------------------------------------------
+
+test("a quote is a box, and the `>` is not part of what it says", () => {
+	// The same loss a callout suffers: `>` read as characters is a character,
+	// where the note drew a bar down the edge of somebody else's words.
+	const quote = onlyQuote(parseBlocks("> 别人的话\n> 第二行"));
+	assert.deepEqual(quote.blocks, [{ kind: "paragraph", text: "别人的话\n第二行" }]);
+});
+
+test("what a quote holds is read as blocks, as a callout's is", () => {
+	const list = onlyList(onlyQuote(parseBlocks("> - one\n> - two")).blocks);
+	assert.deepEqual(
+		list.items.map((item) => item.text),
+		["one", "two"],
+	);
+	// A table inside a quote is a table.
+	const quote = onlyQuote(parseBlocks("> | a | b |\n> | --- | --- |\n> | 1 | 2 |"));
+	assert.equal(quote.blocks[0].kind, "table");
+});
+
+test("a quote inside a quote is one step in", () => {
+	// One `>` comes off per level, exactly as Obsidian reads it, so what is
+	// left of `>> deep` inside the outer quote is `> deep` -- a quote.
+	const outer = onlyQuote(parseBlocks("> out\n> > deep"));
+	assert.deepEqual(onlyQuote(outer.blocks).blocks, [{ kind: "paragraph", text: "deep" }]);
+});
+
+test("a line that is not quoted ends the quote, blank or not", () => {
+	// What Obsidian does, and why the `>` has to be repeated on an empty line
+	// to keep a quote open.
+	const blocks = parseBlocks("> quoted\nnot quoted");
+	assert.deepEqual(onlyQuote(blocks).blocks, [{ kind: "paragraph", text: "quoted" }]);
+	assert.deepEqual(blocks[1], { kind: "paragraph", text: "not quoted" });
+});
+
+test("a quote ends the paragraph above it, and a `>` mid-line does not start one", () => {
+	const blocks = parseBlocks("prose first\n> quoted");
+	assert.deepEqual(blocks[0], { kind: "paragraph", text: "prose first" });
+	assert.equal(blocks[1].kind, "quote");
+	// `5 > 3` is arithmetic and `a > b` is a comparison: the marker only opens
+	// a box at the start of a line.
+	assert.deepEqual(parseBlocks("5 > 3"), [{ kind: "paragraph", text: "5 > 3" }]);
+});
+
+test("a quote forces the structured path, as a callout does", () => {
+	// The `>` is the note's scaffolding, and a card that answered with the
+	// character would be answering with the scaffolding.
+	assert.equal(needsBlocks(parseBlocks("> quoted")), true);
+});
+
+test("a rule is a rule and not three hyphens", () => {
+	// The line that used to arrive on the card as `---`: the block model had
+	// nowhere to put it, so it fell through to the paragraph that swallows
+	// everything and was drawn as the characters the note typed.
+	assert.deepEqual(parseBlocks("before\n\n---\n\nafter"), [
+		{ kind: "paragraph", text: "before" },
+		{ kind: "rule" },
+		{ kind: "paragraph", text: "after" },
+	]);
+});
+
+test("a rule is any of the three marks, three or more, spaces allowed", () => {
+	// `* * *` is the same line as `***`, and the marks may not be mixed.
+	for (const line of ["---", "----", "***", "___", "- - -", "* * *", "  ---"]) {
+		assert.deepEqual(parseBlocks(line), [{ kind: "rule" }], line);
+	}
+	// Two is not a rule, and neither is a mixture: `--` is a dash someone
+	// typed and `-*-` is nothing at all.
+	for (const line of ["--", "-*-", "**", "__"]) {
+		assert.deepEqual(parseBlocks(line), [{ kind: "paragraph", text: line }], line);
+	}
+});
+
+test("a `---` under a paragraph is that paragraph's line, not a rule", () => {
+	// Setext: `before\n---` is an h2 in markdown, and the map does not read
+	// setext headings -- but it is certainly not a rule, and drawing one
+	// there would be drawing a line the note never asked for. A `---` is only
+	// a rule where a block opens, which is to say after a blank line.
+	assert.deepEqual(parseBlocks("before\n---"), [{ kind: "paragraph", text: "before\n---" }]);
+});
+
+test("a rule wins over the list it could also be", () => {
+	// `- - -` answers both rules: an item whose text is `- -`, or a rule.
+	// Markdown reads it as a rule, and an item of `- -` is not a thing a note
+	// writes, so the rule is asked first.
+	assert.deepEqual(parseBlocks("- - -"), [{ kind: "rule" }]);
+});
+
+test("a rule inside a quote is a rule", () => {
+	// The `>` comes off first and what is left is parsed as the note's own
+	// content, so `> ---` is a rule inside a quote.
+	const quote = onlyQuote(parseBlocks("> ---"));
+	assert.deepEqual(quote.blocks, [{ kind: "rule" }]);
+});
+
+test("a rule does not force the structured path on its own", () => {
+	// A card that is one rule and nothing else is a card nobody writes; read
+	// as characters it is three hyphens, which is at least honest. A card
+	// drawn as blocks for another reason still draws its rule as a rule.
+	assert.equal(needsBlocks(parseBlocks("---")), false);
+	assert.equal(needsBlocks(parseBlocks("---\n\n| a |\n| --- |\n| 1 |")), true);
+});

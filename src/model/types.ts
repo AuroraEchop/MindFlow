@@ -8,6 +8,17 @@ import type { LineDoc } from "./lines.ts";
  */
 export type NodeKind = "root" | "heading" | "listitem" | "body";
 
+/**
+ * Separates a body card's id from the node that owns the lines it draws.
+ *
+ * Never appears in a parsed id, which is what makes the two kinds of key tell
+ * themselves apart anywhere they meet. The view synthesises those cards and the
+ * parser never does, so the model needs the mark as well: a search that finds a
+ * note-content card names one the same way the card's own id does, or the name
+ * would be a key nothing can be looked up by.
+ */
+export const BODY_ID_MARK = "$body";
+
 /** `null` when the item has no checkbox at all. */
 export type CheckboxState = " " | "x" | "X" | null;
 
