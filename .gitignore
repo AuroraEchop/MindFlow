@@ -19,6 +19,9 @@ CLAUDE.local.md
 .workbuddy/
 .workbuddy-ai/
 
+# Design pages and their screenshots — local only, on purpose
+docs/design/
+
 # Obsidian workspace state inside the bundled test vault
 test-vault/.obsidian/workspace.json
 test-vault/.obsidian/workspace-mobile.json
