@@ -17,7 +17,15 @@
 import { setIcon } from "obsidian";
 import { calloutTitle, calloutTypeOf, t } from "../i18n.ts";
 import type { CalloutType, I18nKey } from "../i18n.ts";
-import type { Block, BlockAlign, CalloutBlock, CodeBlock, TableBlock } from "../model/blocks.ts";
+import type {
+	Block,
+	BlockAlign,
+	CalloutBlock,
+	CodeBlock,
+	ListBlock,
+	QuoteBlock,
+	TableBlock,
+} from "../model/blocks.ts";
 import { renderInlineOrNothing } from "./inline.ts";
 import type { InlineRender } from "./inline.ts";
 import type { MediaContext } from "./media.ts";
@@ -212,6 +220,79 @@ function renderCallout(
 	return either(drawn, renderBlocks(box.createDiv({ cls: "mm-callout-body" }), block.blocks, media));
 }
 
+/**
+ * A quote, drawn as the quote the note wrote.
+ *
+ * A `<blockquote>`, which is the element that means it and the one whose bar
+ * the stylesheet draws: `>` is the note's way of saying these are somebody
+ * else's words, and a card that answered with the character would be answering
+ * with the note's scaffolding. The content goes through `renderBlocks` like a
+ * callout's, because what a quote holds is whatever the note put under the
+ * marker -- a list, a table, a second quote one step in.
+ */
+function renderQuote(host: HTMLElement, block: QuoteBlock, media: MediaContext | null): InlineRender {
+	const box = host.createEl("blockquote", { cls: "mm-quote" });
+	return renderBlocks(box, block.blocks, media);
+}
+
+/**
+ * A list, drawn as the list the note wrote.
+ *
+ * The markers are the whole of it. `1. a` read as characters is a column of
+ * digits that happens to be right; `- a` read as characters is a dash that says
+ * nothing, and a run of them says a dash column where the note said a list. So
+ * the items go into the real thing and the browser draws the numbers and the
+ * bullets, which is also what makes a nested level arrive indented without
+ * anything here working out what an indent is worth.
+ *
+ * Nesting is a list inside the item above it, because that is what the depth
+ * meant: the item was written under another item, and a list is what hangs
+ * under an item. Depths only ever grow by one, but the loop does not assume it
+ * -- a block whose items skip a level is drawn at the depth it has, hung under
+ * the item that is there, rather than dropped.
+ */
+function renderList(host: HTMLElement, block: ListBlock, media: MediaContext | null): InlineRender {
+	const list = host.createEl(block.ordered ? "ol" : "ul", { cls: "mm-list" });
+	// `3.` starts a list at three, and the note's own numbering is the one
+	// thing about a list a reader may be counting on.
+	if (block.ordered && block.start !== 1) list.setAttribute("start", String(block.start));
+
+	/** The list drawn at each depth so far, outermost first. */
+	const lists: HTMLElement[] = [list];
+	/** The item drawn last at each depth, which is where a deeper list hangs. */
+	const items: HTMLElement[] = [];
+	let drawn = NOTHING;
+
+	for (const item of block.items) {
+		const depth = Math.max(0, item.depth);
+		while (lists.length > depth + 1) lists.pop();
+		while (items.length > depth + 1) items.pop();
+		while (lists.length < depth + 1) {
+			const parent = items[items.length - 1] ?? list;
+			lists.push(parent.createEl(block.ordered ? "ol" : "ul", { cls: "mm-list" }));
+		}
+		const li = lists[depth].createEl("li");
+		items[depth] = li;
+		drawn = either(drawn, renderInlineOrNothing(li, item.text, media));
+	}
+	return drawn;
+}
+
+/**
+ * A thematic break, drawn as the rule it is.
+ *
+ * An `<hr>`, which is the element that means it and the one the stylesheet
+ * draws as a hairline instead of three hyphens. It holds no text, so it draws
+ * no inline content either -- nothing about it can be a formula or a picture.
+ *
+ * The one block that ends a paragraph without being asked to: a `---` under a
+ * line is a heading in markdown and is left as the paragraph's own line, so by
+ * the time a rule reaches here it is a rule the note asked for on its own line.
+ */
+function renderRule(host: HTMLElement): void {
+	host.createEl("hr", { cls: "mm-rule" });
+}
+
 /** Returns what the blocks drew, so the view knows what to wait for: formulas
  *  for MathJax's stylesheet, pictures and videos for their own load. */
 export function renderBlocks(
@@ -224,6 +305,9 @@ export function renderBlocks(
 		if (block.kind === "table") drawn = either(drawn, renderTable(host, block, media));
 		else if (block.kind === "code") renderCode(host, block);
 		else if (block.kind === "callout") drawn = either(drawn, renderCallout(host, block, media));
+		else if (block.kind === "quote") drawn = either(drawn, renderQuote(host, block, media));
+		else if (block.kind === "list") drawn = either(drawn, renderList(host, block, media));
+		else if (block.kind === "rule") renderRule(host);
 		else {
 			drawn = either(
 				drawn,

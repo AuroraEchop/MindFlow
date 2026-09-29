@@ -171,8 +171,9 @@ export class Lightbox {
 		const button = root.createDiv({ cls: "mm-lightbox-close" });
 		button.setAttribute("role", "button");
 		button.setAttribute("tabindex", "0");
+		// No `title` beside the label: Obsidian draws its own tooltip from the
+		// label, and a `title` too is the browser's grey box on top of it.
 		button.setAttribute("aria-label", label);
-		button.setAttribute("title", label);
 		setIcon(button, "x");
 		// `setIcon` is silent when the id is not in the bundled set, which
 		// would leave a circle with nothing in it to click.

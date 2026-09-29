@@ -1,4 +1,5 @@
 import type { LayoutNode } from "../layout/tidyTree.ts";
+import { isEmbedId } from "../model/embedTree.ts";
 import { edgeInView } from "./culling.ts";
 import type { ViewBox } from "./culling.ts";
 
@@ -119,6 +120,11 @@ export function renderEdges(
 		path.setAttribute("stroke-width", String(strokeWidth(child.depth)));
 		path.setAttribute("stroke-linecap", "round");
 		path.addClass("mm-edge");
+		// The connector into a projected card is dashed: everything past this
+		// line comes from another note, and this line is where that starts.
+		// Asked of the child and not of the parent, so it is the crossing that
+		// is marked rather than the whole branch a link card happens to sit on.
+		if (isEmbedId(child.node.id)) path.addClass("mm-edge-projected");
 		if (branchColors && child.branch >= 0) {
 			path.dataset.branch = String(child.branch % 10);
 		}

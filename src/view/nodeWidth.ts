@@ -16,21 +16,23 @@ export interface NodeMaxWidth {
 /**
  * How wide a node may run.
  *
- * A title wraps at **Maximum card width** and note content at that times
- * `BODY_WIDTH_FACTOR`. An annotation is set in the width of note content, so an
- * annotated title node is capped at the wider of the two and the card's text
- * carries the title's cap itself -- otherwise a title would start wrapping
- * later merely because something was written underneath it. The node's cap is
- * the one the card is drawn at: `.mm-node` is `max-content` and the card fills
- * it, so card and strip are always exactly as wide as each other.
+ * A title wraps at **Maximum card width** and prose at that times
+ * `BODY_WIDTH_FACTOR`. Prose means note content, an annotation, or the preview
+ * an open link card shows -- anything under the title that is written to be
+ * read rather than to be scanned. An annotated title node is capped at the
+ * wider of the two and the card's text carries the title's cap itself --
+ * otherwise a title would start wrapping later merely because something was
+ * written underneath it. The node's cap is the one the card is drawn at:
+ * `.mm-node` is `max-content` and the card fills it, so card and strip are
+ * always exactly as wide as each other.
  */
 export function nodeMaxWidth(
 	kind: NodeKind,
-	hasAnnotation: boolean,
+	hasProse: boolean,
 	maxNodeWidth: number,
 ): NodeMaxWidth {
 	const body = Math.round(maxNodeWidth * BODY_WIDTH_FACTOR);
 	if (kind === "body") return { node: body, text: null };
-	if (!hasAnnotation) return { node: maxNodeWidth, text: null };
+	if (!hasProse) return { node: maxNodeWidth, text: null };
 	return { node: body, text: maxNodeWidth };
 }

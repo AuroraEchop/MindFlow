@@ -107,9 +107,10 @@ const EMIT: Record<InlineKind, Emit> = {
 		if (mediaInto(el, parsed.path, label, ctx, parsed.width ?? undefined)) return;
 		linkSpan(el, "mm-embed", m[1], m[1]);
 	},
-	// A badge rather than a link: a tag is a label, not a destination. The map
-	// does not filter or search by it, and drawing it as something clickable
-	// would promise a click that goes nowhere.
+	// A badge rather than a link -- a tag is a label, not a destination -- and
+	// a press on one filters the map by it rather than going anywhere. The
+	// target rides along as data, exactly as a link's does, and the view is what
+	// decides what a press means.
 	//
 	// The rule had to consume the space or the bracket in front of the `#` to
 	// say the `#` was allowed to be there -- a lookbehind would have done it
@@ -117,7 +118,11 @@ const EMIT: Record<InlineKind, Emit> = {
 	// So the prefix goes back on the card first, as the character it was.
 	tag: (m, el) => {
 		if (m[1] !== "") el.appendText(m[1]);
-		el.createSpan({ cls: "mm-tag", text: `#${m[2]}` });
+		el.createSpan({
+			cls: "mm-tag",
+			text: `#${m[2]}`,
+			attr: { "data-tag": m[2], role: "button" },
+		});
 	},
 };
 

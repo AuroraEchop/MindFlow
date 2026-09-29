@@ -217,8 +217,10 @@ function wrapFor(el: HTMLElement, cls: string, href: string, path: string): HTML
 	wrap.dataset.mediaPath = path;
 	// A click is a preview now rather than a trip to another tab, and nothing
 	// drawn on the card says so. The tooltip is the cheapest place to say it --
-	// and the only affordance that costs no room on a map.
-	wrap.setAttribute("title", t("view.media.preview"));
+	// and the only affordance that costs no room on a map. `aria-label` rather
+	// than `title`, so it is Obsidian's own tooltip the way every other control
+	// on the map has, and not the browser's grey box.
+	wrap.setAttribute("aria-label", t("view.media.preview"));
 	return wrap;
 }
 
@@ -371,8 +373,9 @@ function mediaButton(
 ): HTMLElement {
 	const button = wrap.createDiv({ cls: `mm-media-button ${cls}` });
 	button.setAttribute("role", "button");
+	// No  beside the label: Obsidian draws its own tooltip from the
+	// label, and a  too is the browser's grey box on top of it.
 	button.setAttribute("aria-label", label);
-	button.setAttribute("title", label);
 	setIcon(button, icon);
 	// `setIcon` is silent when the id is not in the bundled set, which would
 	// leave an invisible but clickable circle over the picture.
