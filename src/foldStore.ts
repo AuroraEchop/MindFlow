@@ -21,6 +21,24 @@ export interface NoteViewState {
 	 * change how the restored map behaves, not just how much it stores.
 	 */
 	collapsed: string[];
+	/**
+	 * `node.key` for every link card with its card open -- the preview showing.
+	 *
+	 * Its own field rather than another entry in `collapsed`, because it is the
+	 * opposite of a fold: a card in `collapsed` is one the user shut, and a card
+	 * here is one they opened. The two sets never hold the same key, and a store
+	 * that merged them would have to guess which of its own entries it was
+	 * reading.
+	 */
+	previews?: string[];
+	/**
+	 * `node.key` for every link card with the other note's outline under it.
+	 *
+	 * Separate from `previews` because the two are separate decisions: a card
+	 * can show what the note says without showing its shape, and the shape
+	 * without the words.
+	 */
+	embeds?: string[];
 	/** Text path of the node in focus when the map was last left. */
 	focusKey?: string;
 	/**
@@ -54,16 +72,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function readKeys(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value.filter((key): key is string => typeof key === "string");
+}
+
 function readEntry(value: unknown): NoteViewState | null {
 	if (!isRecord(value)) return null;
 	if (!Array.isArray(value.collapsed)) return null;
 
 	const state: NoteViewState = {
-		collapsed: value.collapsed.filter((key): key is string => typeof key === "string"),
+		collapsed: readKeys(value.collapsed),
 		at: typeof value.at === "number" && Number.isFinite(value.at) ? value.at : 0,
 	};
 	if (typeof value.focusKey === "string") state.focusKey = value.focusKey;
 	if (typeof value.focusId === "string") state.focusId = value.focusId;
+	// Absent on everything written before these existed, which is the ordinary
+	// case rather than the exception: an older `data.json` opens with nothing
+	// expanded, which is what it looked like when it was written.
+	const previews = readKeys(value.previews);
+	if (previews.length > 0) state.previews = previews;
+	const embeds = readKeys(value.embeds);
+	if (embeds.length > 0) state.embeds = embeds;
 	return state;
 }
 
@@ -129,6 +159,15 @@ export function putNoteState(
 	const state: NoteViewState = { collapsed: [...entry.collapsed], at: now };
 	if (entry.focusKey !== undefined) state.focusKey = entry.focusKey;
 	if (entry.focusId !== undefined) state.focusId = entry.focusId;
+	// Left off when empty rather than written as an empty list: a map with no
+	// link card open is the ordinary map, and the entry it produces should look
+	// like the entry a build that had never heard of these would have written.
+	if (entry.previews !== undefined && entry.previews.length > 0) {
+		state.previews = [...entry.previews];
+	}
+	if (entry.embeds !== undefined && entry.embeds.length > 0) {
+		state.embeds = [...entry.embeds];
+	}
 	return prune({ ...store, [path]: state });
 }
 
@@ -145,16 +184,22 @@ export const RESTAMP_AFTER = 60_000;
 /**
  * Whether the store already says what `entry` says.
  *
- * `at` is a stamp, not a fact, so it is not compared. The collapsed list is
- * compared in order: the view hands over a Set's iteration order, which is
- * stable between paints, and a reordered list that means the same thing costs
- * one write, never a wrong answer.
+ * `at` is a stamp, not a fact, so it is not compared. Every list is compared in
+ * order: the view hands over a Set's iteration order, which is stable between
+ * paints, and a reordered list that means the same thing costs one write, never
+ * a wrong answer.
  */
 function sameEntry(before: NoteViewState, entry: NoteViewEntry): boolean {
 	if (before.focusKey !== entry.focusKey || before.focusId !== entry.focusId) return false;
-	if (before.collapsed.length !== entry.collapsed.length) return false;
-	for (let i = 0; i < before.collapsed.length; i++) {
-		if (before.collapsed[i] !== entry.collapsed[i]) return false;
+	if (!sameKeys(before.collapsed, entry.collapsed)) return false;
+	if (!sameKeys(before.previews ?? [], entry.previews ?? [])) return false;
+	return sameKeys(before.embeds ?? [], entry.embeds ?? []);
+}
+
+function sameKeys(before: readonly string[], after: readonly string[]): boolean {
+	if (before.length !== after.length) return false;
+	for (let i = 0; i < before.length; i++) {
+		if (before[i] !== after[i]) return false;
 	}
 	return true;
 }

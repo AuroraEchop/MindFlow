@@ -205,3 +205,68 @@ test("renaming a folder holding nothing remembered changes nothing", () => {
 	const store = putNoteState({}, "Notes/a.md", { collapsed: [] }, 1);
 	assert.equal(renameFolder(store, "Archive", "Attic"), store);
 });
+
+// --- link cards left open -----------------------------------------------------
+
+test("a card left open is remembered, one list per kind of opening", () => {
+	const store = putNoteState(
+		{},
+		"a.md",
+		{ collapsed: [], previews: ["h:link"], embeds: ["h:link"] },
+		1,
+	);
+	assert.deepEqual(store["a.md"], {
+		collapsed: [],
+		previews: ["h:link"],
+		embeds: ["h:link"],
+		at: 1,
+	});
+});
+
+test("a map with no card open is written as if these fields did not exist", () => {
+	const store = putNoteState({}, "a.md", { collapsed: [], previews: [], embeds: [] }, 1);
+	assert.deepEqual(store["a.md"], { collapsed: [], at: 1 });
+});
+
+test("an older store's entry, with neither field on it, still reads", () => {
+	const store = readStore({ "a.md": { collapsed: ["h:x"], at: 5 } });
+	assert.deepEqual(store, { "a.md": { collapsed: ["h:x"], at: 5 } });
+});
+
+test("both fields survive a trip through the file", () => {
+	const written = putNoteState(
+		{},
+		"a.md",
+		{ collapsed: ["h:x"], previews: ["h:p"], embeds: ["h:e"] },
+		1,
+	);
+	const read = readStore(JSON.parse(JSON.stringify(written)));
+	assert.deepEqual(read, written);
+});
+
+test("junk in either field is dropped rather than repaired", () => {
+	const store = readStore({
+		"a.md": { collapsed: [], previews: ["h:p", 7, null], embeds: "not a list", at: 1 },
+	});
+	assert.deepEqual(store["a.md"], { collapsed: [], previews: ["h:p"], at: 1 });
+});
+
+test("opening a card is a change, so it is not deduplicated away", () => {
+	const before = putNoteState({}, "a.md", { collapsed: [] }, 1);
+	const after = putNoteState(before, "a.md", { collapsed: [], previews: ["h:link"] }, 2);
+	assert.notEqual(after, before);
+	assert.deepEqual(after["a.md"].previews, ["h:link"]);
+});
+
+test("closing the last card is a change too, and empties the field", () => {
+	const before = putNoteState({}, "a.md", { collapsed: [], previews: ["h:link"] }, 1);
+	const after = putNoteState(before, "a.md", { collapsed: [], previews: [] }, 2);
+	assert.notEqual(after, before);
+	assert.equal("previews" in after["a.md"], false);
+});
+
+test("an unchanged pair of lists is not rewritten", () => {
+	const entry = { collapsed: ["h:x"], previews: ["h:p"], embeds: ["h:e"] };
+	const before = putNoteState({}, "a.md", entry, 1);
+	assert.equal(putNoteState(before, "a.md", entry, 1), before);
+});

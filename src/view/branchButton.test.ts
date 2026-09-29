@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { branchAction, branchIcon, showsPlus } from "./branchButton.ts";
+import { branchAction, branchIcon, projectedBranchAction, showsPlus } from "./branchButton.ts";
 
 /**
  * The branch button is one circle that says what a press does right now: the
@@ -52,6 +52,25 @@ test("the picked card shows the plus, branch or not", () => {
 	assert.equal(branchAction(state({ hasChildren: true, selected: true })), "add");
 	assert.equal(branchIcon(branchAction(state({ hasChildren: true, selected: true }))), "plus");
 	assert.equal(showsPlus(branchAction(state({ hasChildren: true, selected: true }))), true);
+});
+
+// --- the cards that came out of another note ---------------------------------
+
+test("a projected branch can be closed and never grown", () => {
+	// Growing it would write a line into the note it came from. The plus is not
+	// on offer whatever the selection says.
+	assert.equal(projectedBranchAction(state({ hasChildren: true })), "fold");
+	assert.equal(projectedBranchAction(state({ hasChildren: true, selected: true })), "fold");
+	assert.equal(showsPlus(projectedBranchAction(state({ hasChildren: true })) ?? "fold"), false);
+});
+
+test("a projected card with nothing to close gets no button at all", () => {
+	// Null rather than a plus: the one thing the button must not do here is
+	// offer to grow a branch the card cannot grow.
+	assert.equal(projectedBranchAction(state({ hasChildren: false })), null);
+	assert.equal(projectedBranchAction(state({ hasChildren: true, collapsed: true })), null);
+	// A closed branch shows its count instead, which is the way back out.
+	assert.equal(projectedBranchAction(state({ collapsed: true, selected: true })), null);
 });
 
 test("a leaf and a closed branch offer the plus", () => {

@@ -54,6 +54,23 @@ export function branchAction(state: BranchButtonState): BranchAction {
 	return "add";
 }
 
+/**
+ * What a projected card's button does: close the branch, or nothing at all.
+ *
+ * A projected card stands for a node of another note, and growing it a child
+ * would mean writing a line into that note -- which this map does not do, to
+ * that note or to any file other than the one being mapped. So the plus is not
+ * on offer whatever the selection says, and `branchAction`'s rule that a picked
+ * card offers one has nothing to say about a card that could never honour it.
+ *
+ * Null means no button is drawn at all, and that is the state a projected card
+ * is in whenever it has nothing to close: a leaf, or a branch already shut and
+ * carrying its count instead.
+ */
+export function projectedBranchAction(state: BranchButtonState): BranchAction | null {
+	return state.hasChildren && !state.collapsed ? "fold" : null;
+}
+
 /** The icon the action is drawn with. */
 export function branchIcon(action: BranchAction): string {
 	if (action === "collapse") return "chevrons-down-up";
