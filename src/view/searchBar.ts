@@ -26,11 +26,15 @@ export interface SearchBarOptions {
 	query: SearchQuery;
 	/** What the session was last replacing with, or "". */
 	replacement: string;
+	/** Whether the session was marking every match, or only the current one. */
+	highlightAll: boolean;
 	onQuery: (query: SearchQuery) => void;
 	/** +1 for the next match, -1 for the previous. */
 	onStep: (delta: number) => void;
 	/** `replacement` is read off the field at the moment the button is pressed. */
 	onReplace: (scope: ReplaceScope, replacement: string) => void;
+	/** Marking everything is a display choice, so nothing is searched again. */
+	onHighlightAll: (on: boolean) => void;
 	onClose: () => void;
 }
 
@@ -51,16 +55,24 @@ export class SearchBar {
 	private readonly replaceInput: HTMLInputElement;
 	private readonly count: HTMLElement;
 	private readonly regexToggle: HTMLElement;
+	private readonly caseToggle: HTMLElement;
+	private readonly titlesToggle: HTMLElement;
+	private readonly allToggle: HTMLElement;
 	private readonly replaceToggle: HTMLElement;
 	private readonly opts: SearchBarOptions;
 	private readonly submit: Debouncer<[], void>;
 	private regex: boolean;
+	private caseSensitive: boolean;
+	private titlesOnly: boolean;
+	private highlightAll: boolean;
 	/** True between compositionstart and compositionend. */
 	private composing = false;
 
 	constructor(parent: HTMLElement, opts: SearchBarOptions) {
 		this.opts = opts;
 		this.regex = opts.query.regex;
+		this.caseSensitive = opts.query.caseSensitive;
+		this.titlesOnly = opts.query.titlesOnly;
 
 		this.el = parent.createDiv({ cls: "mm-search" });
 		const findRow = this.el.createDiv({ cls: "mm-search-row" });
@@ -79,10 +91,42 @@ export class SearchBar {
 		});
 
 		this.regexToggle = this.button(findRow, null, ".*", t("search.regex"), () =>
-			this.toggleRegex(),
+			this.toggle("regex"),
 		);
 		this.regexToggle.toggleClass("is-active", this.regex);
 		this.regexToggle.setAttribute("aria-pressed", String(this.regex));
+
+		// The two switches beside it narrow the search rather than widen it.
+		// `Aa` asks whether case is part of a word; `¶` asks whether the walk
+		// goes past a card's own line at all, and a search that reads the whole
+		// note is the one it starts in -- the word being looked for is as likely
+		// to be in a paragraph as in a heading. Both are written as characters
+		// rather than drawn as icons, because neither is a thing an icon is for.
+		this.caseToggle = this.button(findRow, null, "Aa", t("search.case"), () =>
+			this.toggle("caseSensitive"),
+		);
+		this.caseToggle.toggleClass("is-active", this.caseSensitive);
+		this.caseToggle.setAttribute("aria-pressed", String(this.caseSensitive));
+
+		this.titlesToggle = this.button(findRow, null, "\u00b6", t("search.titlesOnly"), () =>
+			this.toggle("titlesOnly"),
+		);
+		this.titlesToggle.toggleClass("is-active", this.titlesOnly);
+		this.titlesToggle.setAttribute("aria-pressed", String(this.titlesOnly));
+
+		// Not a switch on the query like the three before it: nothing is
+		// searched again when this one is pressed, because the answer would be
+		// the same one. It decides how much of the answer is drawn.
+		this.highlightAll = opts.highlightAll;
+		this.allToggle = this.button(
+			findRow,
+			"highlighter",
+			"\u25a4",
+			t("search.highlightAll"),
+			() => this.toggleAll(),
+		);
+		this.allToggle.toggleClass("is-active", this.highlightAll);
+		this.allToggle.setAttribute("aria-pressed", String(this.highlightAll));
 
 		this.count = findRow.createDiv({ cls: "mm-search-count", text: "0/0" });
 		this.button(findRow, "chevron-up", "↑", t("search.previous"), () => opts.onStep(-1));
@@ -267,18 +311,50 @@ export class SearchBar {
 		this.openReplace();
 	}
 
-	private toggleRegex(): void {
-		this.regex = !this.regex;
-		this.regexToggle.toggleClass("is-active", this.regex);
-		this.regexToggle.setAttribute("aria-pressed", String(this.regex));
-		// A button press is not typing; there is nothing left to wait for.
+	/**
+	 * Flip one of the three switches and search again at once.
+	 *
+	 * A button press is not typing, so there is nothing left to wait for: the
+	 * debounce is cancelled rather than waited out, or a query queued by the
+	 * keystrokes before the press would land after it and search the old way.
+	 */
+	private toggle(which: "regex" | "caseSensitive" | "titlesOnly"): void {
+		this[which] = !this[which];
+		const el =
+			which === "regex"
+				? this.regexToggle
+				: which === "caseSensitive"
+					? this.caseToggle
+					: this.titlesToggle;
+		el.toggleClass("is-active", this[which]);
+		el.setAttribute("aria-pressed", String(this[which]));
 		this.submit.cancel();
 		this.emit();
 		this.input.focus();
 	}
 
+	/**
+	 * Mark every match, or only the one the cursor is on.
+	 *
+	 * The one switch on this bar that does not search again: the match list is
+	 * the same list either way, and re-running the query to draw more of it
+	 * would move the camera for a decoration.
+	 */
+	private toggleAll(): void {
+		this.highlightAll = !this.highlightAll;
+		this.allToggle.toggleClass("is-active", this.highlightAll);
+		this.allToggle.setAttribute("aria-pressed", String(this.highlightAll));
+		this.opts.onHighlightAll(this.highlightAll);
+		this.input.focus();
+	}
+
 	private emit(): void {
-		this.opts.onQuery({ text: this.input.value, regex: this.regex });
+		this.opts.onQuery({
+			text: this.input.value,
+			regex: this.regex,
+			caseSensitive: this.caseSensitive,
+			titlesOnly: this.titlesOnly,
+		});
 	}
 
 	private replace(scope: ReplaceScope): void {
