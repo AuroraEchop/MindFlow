@@ -6,19 +6,28 @@ the buttons that grow the tree.
 
 ## Links in note content
 
-The paragraph below is a body card. Click any link on the card itself, or open
-the card with ⤢ and click it there — both go to the same place, and a vault link
-closes the dialog on its way so what it opened is actually visible.
+The paragraph below is a body card. A plain click on a link here shows where it
+goes **on the card itself** — hold `Ctrl`/`Cmd` to actually open it, which is
+the one gesture that leaves the map. A card whose text is one link (like the
+bullet below) carries two buttons on its title line instead: **≡** shows what
+that note says, **›** pulls its outline in, and **Collapse** at the top of the
+preview puts it away again. Pressing the card itself only picks it — it never
+opens or closes anything.
 
 Vault links: [[Mindmap Demo]], a heading inside it
 [[Mindmap Demo#Goals]], an attachment [[Link Fixture.pdf]], and the markdown
 spelling of the same thing [the fixture](Link%20Fixture.pdf).
 
-Web links: [obsidian.md](https://obsidian.md) and a bare
+Web links: [obsidian.md](https://obsidian.md) — click it and the card names the
+site and offers the browser — and a bare
 https://example.com/one, which the map draws but does not linkify.
 
 - Links in a *title* stay plain text: [[Mindmap Demo]] here is not clickable,
   because a title is something you select and drag
+- () [[Mindmap Demo]] — punctuation beside a link does not stop the card being
+  about it, so this one carries both buttons: **≡** for what the note says
+  (rendered as markdown — samples, tables and pictures included) and **›** for
+  its outline under the card
 
 ## Reordering
 
