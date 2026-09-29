@@ -2,10 +2,46 @@ import type { Canvas } from "./canvas.ts";
 import { CARD_STYLE_CLASSES } from "./cardStyle.ts";
 import { edgePath } from "./edges.ts";
 import type { EdgeStyle } from "./edges.ts";
+import { attachLiftPress } from "./liftPress.ts";
+import type { Lift } from "./liftPress.ts";
 import { comboFromEvent, resolveAction } from "./shortcuts.ts";
 import type { KeyCombo, ShortcutBindings } from "./shortcuts.ts";
 
 export type Direction = "up" | "down" | "left" | "right";
+
+/**
+ * Where in a card a link or a picture is read as itself rather than as a title.
+ *
+ * One string for one question, because two branches ask it -- a press on a link
+ * and a press on a picture -- and they have to agree about where a title ends.
+ * A note-content card, an annotation strip, and a link card's preview, which is
+ * another note's words drawn on this card: all three are somebody's prose, and
+ * a title is the one place prose is not.
+ */
+const CONTENT_BOX = '.mm-node[data-kind="body"], .mm-annotation, .mm-preview';
+
+/**
+ * A link or a picture, as the card carries it: a target in `data-href`.
+ *
+ * One string for one question, because three branches ask it -- the rule for
+ * prose, the one for a link on a card's own title line, and the picture rule --
+ * and they have to agree about what counts as one. `inline.ts` never writes an
+ * `href`, which is what keeps a note from putting a scheme in front of the
+ * renderer.
+ */
+const LINK_TARGET = ".mm-link[data-href], .mm-embed[data-href], .mm-media[data-href]";
+
+/**
+ * The things a card's own line may carry that are gestures in their own right,
+ * and so are not the line's switch either.
+ *
+ * The card's button, a checkbox, a picture's button, a sample's copy button,
+ * and a video that is playing -- which is a player, scrubber and all. Each is
+ * either asked before the line is or answered here, but none of them may be
+ * read as a press on the line.
+ */
+const LINE_CONTROLS =
+	".mm-link-tools, .mm-checkbox, .mm-media-button, .mm-code-copy, .mm-media-video.is-playing";
 
 /**
  * Where a dragged node lands relative to the card it was dropped on: inside it
@@ -95,10 +131,42 @@ export interface MapController {
 	moveDown(id: string): void;
 	toggleFold(id: string): void;
 	toggleCheck(id: string): void;
+	/**
+	 * Filter the map by a tag, or put the filter back.
+	 *
+	 * `Ctrl`/`Cmd` is not this press: it adds the tag to the filter rather than
+	 * replacing it, which is what narrowing means -- a reader who has asked for
+	 * `#work` and then for `#urgent` wants the cards that are either.
+	 */
+	toggleTagFilter(tag: string, additive?: boolean): void;
 	/** Open a note-content block whole, rendered, in its own dialog. */
 	expandBody(id: string): void;
-	/** Follow a link written in a note-content card. */
-	openLink(href: string, ev: MouseEvent): void;
+	/** Follow a link written in a note-content card, or show it where it is. */
+	openLink(href: string, ev: MouseEvent, id: string | null): void;
+	/**
+	 * Open the note a link card names, in place.
+	 *
+	 * The card's own door: the same trip the card's menu has always offered, on
+	 * the one surface that says what is behind it. An address rather than a note
+	 * goes to the browser from here, which is the only place it can be read.
+	 */
+	openLinkedNote(id: string): void;
+	/**
+	 * Show or hide what the card says about the link it is.
+	 *
+	 * A state rather than a hover -- what a note says is worth reading, and
+	 * reading takes longer than a pointer stays still -- so the press toggles it
+	 * and the card remembers. It is a no-op on every card that is not a link
+	 * card, which is why the click handler can call it on all of them.
+	 */
+	toggleCardPreview(id: string): void;
+	/**
+	 * Open or close that note's own outline under the card.
+	 *
+	 * The arrow's press. What appears is a reading of the other file: this map
+	 * writes to exactly one note, and that one is the one being mapped.
+	 */
+	toggleEmbed(id: string): void;
 	/**
 	 * Enlarge a picture or a video over the map.
 	 *
@@ -116,6 +184,11 @@ export interface MapController {
 	openReplace(): void;
 	/** False when there was no search bar to close, so Escape stays free. */
 	closeSearch(): boolean;
+	/**
+	 * Take the tag filter off the map. False when there was none, so Escape
+	 * stays free for whatever else wants it.
+	 */
+	clearFilter(): boolean;
 
 	canDrop(id: string, targetId: string, mode: DropMode): boolean;
 	move(id: string, targetId: string, mode: DropMode): void;
@@ -286,15 +359,101 @@ export function attachInteractions(controller: MapController): () => void {
 		}
 		const target = ev.target as HTMLElement;
 
+		// The link card's own controls, ahead of every rule below: a press on any
+		// of them is about the note the card names rather than about the card, and
+		// none may fall through to the selection. The one in the title sits on the
+		// title's line, which is itself a switch -- and a press that both opened
+		// the block and turned the arrow would do two things with one press.
+		//
+		// Nothing else on a link card opens or closes anything. What a press on
+		// the card itself means is picking it, which is what a press on a card
+		// means everywhere else in this map.
+		const arrow = target.closest<HTMLElement>(".mm-link-arrow");
+		if (arrow) {
+			const id = nodeIdFrom(arrow);
+			if (id) controller.toggleEmbed(id);
+			ev.preventDefault();
+			ev.stopPropagation();
+			viewport.focus({ preventScroll: true });
+			return;
+		}
+		const whole = target.closest<HTMLElement>(".mm-link-open");
+		if (whole) {
+			const id = nodeIdFrom(whole);
+			if (id) controller.openLinkedNote(id);
+			ev.preventDefault();
+			ev.stopPropagation();
+			return;
+		}
+
+		// A tag, ahead of every rule below and for the same reason the two
+		// controls above are: it is about what the card is *about* rather than
+		// about the card, and a press that both filtered the map and opened a
+		// preview would be two answers to one press. A link card can carry a tag
+		// on its title line, which is itself a switch, so this has to be read
+		// before that line is.
+		const tag = target.closest<HTMLElement>(".mm-tag");
+		if (tag) {
+			ev.preventDefault();
+			ev.stopPropagation();
+			const name = tag.dataset.tag;
+			// `Ctrl`/`Cmd` adds rather than replaces; see the interface.
+			if (name) controller.toggleTagFilter(name, ev.ctrlKey || ev.metaKey);
+			viewport.focus({ preventScroll: true });
+			return;
+		}
+
+		// The line a preview hangs under is the switch that opens and shuts it --
+		// the whole of the line, its own words included, and nothing on it that
+		// is a gesture of its own. See `mm-opens-preview` in `nodes.ts`.
+		//
+		// Read ahead of the two rules below because of one case: a card that
+		// *is* one link has that link written on its title line, and a press on
+		// it would otherwise be handed to the rule for links in prose -- which
+		// shows the target where it stands, so a press on a card already
+		// showing it would answer with the same note and fold nothing away.
+		// `mm-one-link` is how the builder marks which of the two a card is;
+		// the words on a card of prose are its own links, and a press on one of
+		// those goes below, where it can show that one instead.
+		//
+		// `Ctrl`/`Cmd` is not this press. It is how the map says "take me to
+		// what this is", the same as it does on every other card, and the rules
+		// below are what answer it -- on a link written here, that is
+		// `openLink`, which leaves the map for the note.
+		//
+		// It picks the card as well, because a press on a card picks it
+		// everywhere else in this map, and because the block, the buttons and
+		// the annotation are all spoken for besides.
+		const line = target.closest<HTMLElement>(".mm-card.mm-opens-preview");
+		if (
+			line &&
+			!target.closest(LINE_CONTROLS) &&
+			!(ev.ctrlKey || ev.metaKey) &&
+			(line.classList.contains("mm-one-link") || target.closest(LINK_TARGET) === null)
+		) {
+			const id = nodeIdFrom(line);
+			if (id) {
+				controller.toggleCardPreview(id);
+				controller.select(id, ev.shiftKey);
+			}
+			ev.stopPropagation();
+			if (!controller.isEditing()) viewport.focus({ preventScroll: true });
+			return;
+		}
+
 		// Links, but only in note content: a title is something you select and
 		// drag, and a link filling one would leave no way to grab the node.
 		// A picture or a video is the one target in there whose plain click is
 		// not the link's -- it is a preview, and `Ctrl`/`Cmd`+click is what
 		// still reaches the file. Spoken for here rather than by a listener on
 		// the element, of which there is none.
+		//
+		// A preview counts as note content for this: it is another note's words
+		// drawn on this card, pictures and all, and a picture there answers a
+		// press the way every other picture on the map does.
 		const media = target.closest<HTMLElement>(".mm-media[data-href]");
 		if (
-			media?.closest('.mm-node[data-kind="body"], .mm-annotation') &&
+			media?.closest(CONTENT_BOX) &&
 			!(ev.ctrlKey || ev.metaKey) &&
 			controller.previewMedia(media)
 		) {
@@ -303,12 +462,12 @@ export function attachInteractions(controller: MapController): () => void {
 			return;
 		}
 
-		const link = target.closest<HTMLElement>(
-			".mm-link[data-href], .mm-embed[data-href], .mm-media[data-href]",
-		);
-		if (link?.closest('.mm-node[data-kind="body"], .mm-annotation')) {
+		const link = target.closest<HTMLElement>(LINK_TARGET);
+		if (link?.closest(CONTENT_BOX)) {
 			const href = link.dataset.href;
-			if (href) controller.openLink(href, ev);
+			// The card the link was written on, so the map can show the target
+			// where the reader is rather than taking them somewhere else.
+			if (href) controller.openLink(href, ev, nodeIdFrom(link));
 			ev.preventDefault();
 			ev.stopPropagation();
 			return;
@@ -361,11 +520,23 @@ export function attachInteractions(controller: MapController): () => void {
 			viewport.focus({ preventScroll: true });
 			return;
 		}
+		// The block under a link card is not part of this: it is another note's
+		// words, and a press in there is a press on text, so it neither opens
+		// nor closes what it is part of. The line above it is the whole of the
+		// switch, which is why the block needs no word of its own to put it
+		// away.
+
 		const id = nodeIdFrom(target);
 		// Shift and Ctrl/Cmd both add, because both are what a list uses for
 		// this and neither is spoken for here. Shift is the one the band below
 		// asks for too, so a shift-drag that ends on a card behaves like the
 		// shift-click it looks like.
+		//
+		// And that is the whole of what a press on a card does. It used to open a
+		// link card as well, which meant that picking one up to move it -- or the
+		// first press of the double-click that renames it -- could shut the note
+		// the reader had just opened, with nothing on the card saying so. That is
+		// what the line above is for, and it is the reason the line says it.
 		controller.select(id, ev.shiftKey || ev.ctrlKey || ev.metaKey);
 		if (!controller.isEditing()) viewport.focus({ preventScroll: true });
 	});
@@ -552,6 +723,11 @@ export function attachInteractions(controller: MapController): () => void {
 		for (const node of viewport.querySelectorAll<HTMLElement>(".mm-node")) {
 			const id = node.dataset.id;
 			if (!id || carryingIds.has(id)) continue;
+			// A projected card is another note's, and nothing can be moved to one:
+			// `canDrop` refuses every slot. Left in the list it would win the
+			// distance comparison and leave the guide pointing at a place the
+			// node cannot go.
+			if (node.classList.contains("is-projected")) continue;
 			// Which way this card's own half faces -- see `modeFor`.
 			const side: 1 | -1 = node.dataset.side === "left" ? -1 : 1;
 			// The card, not the row. `.mm-row` is the drawn box the annotation
@@ -887,7 +1063,7 @@ export function attachInteractions(controller: MapController): () => void {
 		return el;
 	};
 
-	const startGhost = (node: HTMLElement, ev: PointerEvent): void => {
+	const startGhost = (node: HTMLElement, x: number, y: number): void => {
 		const row = node.querySelector<HTMLElement>(".mm-row");
 		if (!row) return;
 		const rect = row.getBoundingClientRect();
@@ -906,7 +1082,7 @@ export function attachInteractions(controller: MapController): () => void {
 		};
 
 		ghost = buildGhost(row, rect);
-		moveGhost(ev.clientX, ev.clientY);
+		moveGhost(x, y);
 
 		// One faded copy per card the drag carries besides the one under the
 		// pointer, parked at the offset its original holds from the leader.
@@ -922,8 +1098,8 @@ export function attachInteractions(controller: MapController): () => void {
 			const dx = otherRect.left + otherRect.width / 2 - centerX;
 			const dy = otherRect.top + otherRect.height / 2 - centerY;
 			ghostExtras.push({ el: extra, dx, dy });
-			extra.style.left = `${ev.clientX + dx}px`;
-			extra.style.top = `${ev.clientY + dy}px`;
+			extra.style.left = `${x + dx}px`;
+			extra.style.top = `${y + dy}px`;
 		}
 	};
 
@@ -980,6 +1156,12 @@ export function attachInteractions(controller: MapController): () => void {
 			return;
 		}
 		if (target.closest(".mm-tools, .mm-checkbox")) return;
+		// A link card's button is a control, and the same argument as the two
+		// below: a press that drifts a few pixels is a press on the button, not
+		// the start of a drag that would carry the card away instead. The wrapper
+		// is the button's own box on the title's line, which is a switch of its
+		// own -- see the click handler.
+		if (target.closest(".mm-link-tools")) return;
 		// The two circles on a video card are controls, not card surface: a
 		// press that drifts by a few pixels would otherwise be read as the
 		// start of a drag and the pointer would be captured before the click
@@ -997,13 +1179,20 @@ export function attachInteractions(controller: MapController): () => void {
 		if (!card) return;
 		const id = nodeIdFrom(card);
 		if (!id) return;
-		// A body card's surface is never a handle, whatever the block holds.
-		// The note owns that text -- a press there is selection, preview and
-		// edit, and the one way to move the block is its button, which sits
-		// on the connector line for exactly this reason. Before the button
-		// existed this read the block's shape (`canDragBody`), which is why
-		// some blocks dragged from the card and some did not.
+		// A body card's surface is not a handle for a press that moves: the note
+		// owns that text, so a press there is selection, preview and edit. What
+		// moves such a block by hand is either its button, which sits on the
+		// connector line, or a press that rests on the card -- and the second is
+		// not read here at all. It is `attachLiftPress`'s, below, which is why
+		// this returns rather than arming anything.
 		if (card.closest('.mm-node[data-kind="body"]') !== null) return;
+		// Nor is a projected card one. It belongs to another note, and every
+		// slot it could be dropped on refuses it -- `canDrop` looks the node up
+		// in this note and misses. A card that lifted and then refused
+		// everything would be a card that lied about being movable, so it does
+		// not lift. Pressing it is still a press: it picks the card, which is
+		// how the keyboard and the ring get to it.
+		if (card.closest(".mm-node.is-projected") !== null) return;
 
 		dragId = id;
 		carryingBody = false;
@@ -1034,7 +1223,7 @@ export function attachInteractions(controller: MapController): () => void {
 			// it goes with the pointer -- which is what says the card is being
 			// carried rather than the map being panned.
 			if (node) {
-				startGhost(node, ev);
+				startGhost(node, ev.clientX, ev.clientY);
 				// Every card it could land on, measured once, before the pointer
 				// has gone anywhere.
 				measureCards();
@@ -1075,6 +1264,91 @@ export function attachInteractions(controller: MapController): () => void {
 	};
 	on(viewport, "pointerup", finishDrag);
 	on(viewport, "pointercancel", () => endDrag());
+
+	// --- the press that rests on a block --------------------------------------
+	//
+	// A note-content card is the one card in this map with nothing to grab. Its
+	// text is the note's, so a press on it is selection and a double press is
+	// editing, and the block's one handle has always been the small button on
+	// the card's edge -- which is exactly the handle that a long card, the card
+	// worth moving, makes hardest to find: forty lines of listing are mostly
+	// surface, and the surface is spoken for. So the surface answers to time
+	// instead. Rest on it for a second and the block comes up off the map the
+	// way a branch does when it is dragged.
+	//
+	// `liftPress.ts` owns the reading of the press -- how still, how long, and
+	// the three ways it can end without a lift. What follows is what a lift is,
+	// and it is the drag the rest of this module already runs: the same dashed
+	// place left behind, the same copy in the pointer's hand, the same drop.
+	const liftBody = (node: HTMLElement, lift: Lift): void => {
+		dragId = lift.id;
+		carryingBody = true;
+		carryingIds = new Set(controller.carriedBy(lift.id));
+		dragPointer = lift.pointer;
+		origin = { x: lift.x, y: lift.y };
+		dragging = true;
+		viewport.addClass("is-dragging-node");
+		for (const carried of carryingIds) {
+			nodeElement(carried)?.addClass("is-dragging");
+		}
+		startGhost(node, lift.x, lift.y);
+		// Measured and drawn here rather than on the first movement, because the
+		// wait has already taken a second: the slot a drop would use is worth
+		// having in hand before the pointer goes anywhere. Nothing is resolved
+		// from the pointer yet, though -- a card that has not been moved has not
+		// been aimed anywhere, and a drop needs a slot somebody chose.
+		measureCards();
+		startGuide();
+		// The press may have begun a text selection before it became a lift, and
+		// what is being carried is the card rather than the words on it.
+		window.getSelection()?.removeAllRanges();
+		try {
+			viewport.setPointerCapture(lift.pointer);
+		} catch {
+			// The pointer came up between the wait ending and this line. There
+			// is nothing left to capture, and the release that follows ends a
+			// drag that never moved.
+		}
+	};
+
+	cleanups.push(
+		attachLiftPress(viewport, {
+			/**
+			 * Which presses the gesture may take: a body card's own surface, and
+			 * nothing that is a control of its own.
+			 *
+			 * The controls are refused for the reason they are refused above --
+			 * a press that drifts a few pixels is a press on the button -- and
+			 * the surfaces are the whole of what a lift is for: the card, and
+			 * the two parts of it that are not the card, which are the preview
+			 * of another note and the annotation strip. A topic card's title is
+			 * a handle already, so it is left to the drag above; a projected
+			 * card cannot move at all, and `canDragBody` is what says so.
+			 */
+			liftable: (target) => {
+				if (canvas.panKeyHeld || controller.isEditing()) return null;
+				if (target.closest(".mm-tools, .mm-checkbox, .mm-link-tools")) return null;
+				if (target.closest(".mm-media-button, .mm-code-copy")) return null;
+				if (target.closest(".mm-media-video.is-playing")) return null;
+				const box = target.closest<HTMLElement>(".mm-card, .mm-preview, .mm-annotation");
+				if (!box) return null;
+				const node = box.closest<HTMLElement>('.mm-node[data-kind="body"]');
+				if (!node || node.classList.contains("is-projected")) return null;
+				const id = node.dataset.id;
+				if (id === undefined) return null;
+				return controller.canDragBody(id) ? id : null;
+			},
+			/** The wait is shown on the card itself: the outline it will wear. */
+			waiting: (id) => nodeElement(id)?.addClass("is-lifting"),
+			released: (id) => nodeElement(id)?.removeClass("is-lifting"),
+			lifted: (lift) => {
+				const node = nodeElement(lift.id);
+				if (!node) return;
+				node.removeClass("is-lifting");
+				liftBody(node, lift);
+			},
+		}),
+	);
 
 	// --- the node menu ---------------------------------------------------------
 	on(viewport, "contextmenu", (ev) => {
@@ -1158,11 +1432,12 @@ export function attachInteractions(controller: MapController): () => void {
 				controller.openReplace();
 				return;
 			case "close-search":
-				// Only ours while a search is open; otherwise Escape keeps
-				// whatever meaning Obsidian gives it. The view's scope registers
-				// the same key on the same terms; whichever sees it first, the
-				// second call finds no bar left to close.
-				if (!controller.closeSearch()) return;
+				// Only ours while a search is open, and failing that while the map
+				// is filtered; otherwise Escape keeps whatever meaning Obsidian
+				// gives it. The view's scope registers the same key on the same
+				// terms; whichever sees it first, the second call finds nothing
+				// left to close.
+				if (!controller.closeSearch() && !controller.clearFilter()) return;
 				ev.preventDefault();
 				return;
 			case "navigate-up":

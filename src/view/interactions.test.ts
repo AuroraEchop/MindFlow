@@ -164,9 +164,16 @@ class FakeEl {
 }
 
 /** Everything the module reaches for on `document` / `window` / globals. */
-function installDom(): { bodies: FakeEl[]; under: { el: FakeEl | null } } {
+function installDom(): {
+	bodies: FakeEl[];
+	under: { el: FakeEl | null };
+	/** The clock the lift's wait is measured with, as a queue a test drains. */
+	timers: { count(): number; fire(): void };
+} {
 	const bodies: FakeEl[] = [];
 	const under: { el: FakeEl | null } = { el: null };
+	const pending = new Map<number, () => void>();
+	let nextTimer = 1;
 
 	const body = new FakeEl();
 	body.createDiv = (options?: { cls?: string | string[] }): FakeEl => {
@@ -187,6 +194,21 @@ function installDom(): { bodies: FakeEl[]; under: { el: FakeEl | null } } {
 			return 1;
 		},
 		cancelAnimationFrame: () => {},
+		// A press that rests on a block is the one gesture here that is waited
+		// for rather than fired, and a real second is not a second a test can
+		// spend -- so the clock is a queue, and `fire` is the wait ending.
+		setTimeout: (cb: () => void): number => {
+			const id = nextTimer++;
+			pending.set(id, cb);
+			return id;
+		},
+		clearTimeout: (id: number): void => {
+			pending.delete(id);
+		},
+		// Asked for when a lift takes over a press that may have begun a
+		// selection. Nothing in these tests is selected, so the answer is only
+		// ever asked for.
+		getSelection: () => ({ removeAllRanges: () => {} }),
 	};
 	g.CSS = { escape: (value: string) => value };
 	// The drag's guide is built the way `edges.ts` builds the connectors, with
@@ -197,17 +219,38 @@ function installDom(): { bodies: FakeEl[]; under: { el: FakeEl | null } } {
 	// so the stub has to be what it checks against.
 	g.HTMLElement = FakeEl;
 	g.getComputedStyle = () => ({ getPropertyValue: () => "" });
-	return { bodies, under };
+	return {
+		bodies,
+		under,
+		timers: {
+			count: () => pending.size,
+			// Emptied before it runs, so a handler that arms another timer
+			// cannot make this pass run that one too.
+			fire: () => {
+				const due = [...pending.values()];
+				pending.clear();
+				for (const cb of due) cb();
+			},
+		},
+	};
 }
 
 function harness(): {
 	viewport: FakeEl;
 	/** The dragged node's row: what the copy is cloned from and sized by. */
 	row: FakeEl;
+	/**
+	 * The node the map looks up by id, which is where a lift's own marks land:
+	 * the wait showing on the card, and the slot it leaves behind. Nobody else
+	 * can reach it, because a real node is not handed to these tests either.
+	 */
+	node: FakeEl;
 	/** The camera, as the layer under test drives it -- see the stub below. */
 	canvas: { viewport: FakeEl; panKeyHeld: boolean; holdPan(held: boolean): void };
 	under: { el: FakeEl | null };
 	bodies: FakeEl[];
+	/** The lift's clock: what a wait is armed on, and how a test ends it. */
+	timers: { count(): number; fire(): void };
 	calls: string[];
 	/** Slots this map refuses, written `"targetId:mode"`. */
 	refuses: string[];
@@ -328,9 +371,11 @@ function harness(): {
 	return {
 		viewport,
 		row,
+		node,
 		canvas,
 		under: dom.under,
 		bodies: dom.bodies,
+		timers: dom.timers,
 		calls,
 		refuses,
 		carried,
@@ -1026,13 +1071,58 @@ test("the branch button presses through to the action its icon is showing", () =
 	assert.deepEqual(h.calls, ["toggleBranch(n1)"]);
 });
 
+/**
+ * A click on `.mm-toggle`, the number a folded branch shows.
+ *
+ * The badge is not the button, and it is not the line either: it sits in
+ * `.mm-tools`, on the row but outside the title, which is what leaves it a
+ * gesture of its own. Pressing the number is what opens what is under it --
+ * the count is the only thing on a folded card that says anything is there.
+ */
+function countBadge(id: string): FakeEl {
+	const node = new FakeEl();
+	node.dataset.id = id;
+	const badge = new FakeEl();
+	badge.ancestors.set(".mm-toggle", badge);
+	badge.ancestors.set(".mm-node", node);
+	return badge;
+}
+
+test("the count on a folded branch opens it, and does nothing else", () => {
+	const h = harness();
+	clickOn(h, countBadge("n1"), false);
+	// One call: not a selection, and not a preview. A badge press that answered
+	// with anything else would be two answers to one press.
+	assert.deepEqual(h.calls, ["toggleFold(n1)"]);
+});
+
+test("the same count on a card out of another note is read the same way", () => {
+	const h = harness();
+	// A projected card's id and its key both carry the link's, and the routing
+	// does not care either way -- the id travels whole. What the fold then does
+	// with a card this note's parse has never heard of is `MindmapView`'s
+	// business; this is the half that lives here.
+	const badge = countBadge("n1$embed0");
+	badge.ancestors.set(".mm-node.is-projected", badge.ancestors.get(".mm-node") as FakeEl);
+	clickOn(h, badge, false);
+	assert.deepEqual(h.calls, ["toggleFold(n1$embed0)"]);
+});
+
 // --- pictures and videos ----------------------------------------------------------
+/**
+ * Where in a card a link or a picture is read as itself rather than as a title.
+ *
+ * One string, because the module asks with one: a note-content card, an
+ * annotation strip, and a link card's preview, which is another note's words
+ * drawn on this card and answers a press the same way.
+ */
+const CONTENT = '.mm-node[data-kind="body"], .mm-annotation, .mm-preview';
 
 /**
  * A click on a picture in a content card, as the viewport sees it.
  *
  * The wrapper is its own closest match for the media selector and hangs under a
- * body card -- the two questions the routing asks before it decides that this
+ * content box -- the two questions the routing asks before it decides that this
  * click belongs to the preview and not to the link.
  */
 function mediaCard(href?: string): FakeEl {
@@ -1047,16 +1137,39 @@ function mediaCard(href?: string): FakeEl {
 		".mm-link[data-href], .mm-embed[data-href], .mm-media[data-href]",
 		wrap,
 	);
-	wrap.ancestors.set('.mm-node[data-kind="body"], .mm-annotation', body);
+	wrap.ancestors.set(CONTENT, body);
 	return wrap;
 }
 
-function clickOn(h: ReturnType<typeof harness>, target: FakeEl, mod: boolean): void {
-	h.viewport.fire("click", {
+/** A link written inside a note-content card, and the card it sits on. */
+function linkInCard(id: string, href = "Guide"): FakeEl {
+	const body = new FakeEl();
+	const node = new FakeEl();
+	node.dataset.id = id;
+	const link = new FakeEl();
+	link.dataset.href = href;
+	link.ancestors.set(
+		".mm-link[data-href], .mm-embed[data-href], .mm-media[data-href]",
+		link,
+	);
+	link.ancestors.set(CONTENT, body);
+	link.ancestors.set(".mm-node", node);
+	return link;
+}
+
+function clickOn(
+	h: ReturnType<typeof harness>,
+	target: FakeEl,
+	mod: boolean,
+	detail = 1,
+): void {	h.viewport.fire("click", {
 		target,
 		ctrlKey: mod,
 		metaKey: false,
 		shiftKey: false,
+		// Which press of a run this is. The card's own open-and-close reads it,
+		// because the second press of a double-click is the rename's.
+		detail,
 		preventDefault: () => {},
 		stopPropagation: () => {},
 	});
@@ -1091,6 +1204,27 @@ test("Ctrl/Cmd+click still reaches the file itself", () => {
 	assert.match(h.calls[0], /^openLink\(hero\.png,/);
 });
 
+test("a picture in a preview is previewed like any other", () => {
+	// A preview is another note's words drawn on this card, pictures and all --
+	// and a picture the reader can see is a picture the reader will press. The
+	// node around it is a topic card rather than a content card, which is the
+	// whole of what changed here.
+	const h = harness();
+	const node = new FakeEl();
+	const wrap = new FakeEl();
+	wrap.dataset.href = "hero.png";
+	wrap.ancestors.set(".mm-media[data-href]", wrap);
+	wrap.ancestors.set(
+		".mm-link[data-href], .mm-embed[data-href], .mm-media[data-href]",
+		wrap,
+	);
+	wrap.ancestors.set(CONTENT, new FakeEl());
+	wrap.ancestors.set(".mm-node", node);
+
+	clickOn(h, wrap, false);
+	assert.deepEqual(h.calls, ["previewMedia(el)"]);
+});
+
 test("a picture outside note content is not previewed", () => {
 	const h = harness();
 	const wrap = new FakeEl();
@@ -1101,6 +1235,17 @@ test("a picture outside note content is not previewed", () => {
 	// routing asks where it is before it answers.
 	clickOn(h, wrap, false);
 	assert.ok(!h.calls.some((call) => call.startsWith("previewMedia(")));
+});
+
+test("a press on a link inside a card carries the card it was written on", () => {
+	// The map shows what the link says on the card the link is written on, and
+	// without the card there is nowhere to put it. Prose is where links are
+	// written, and a note-content card is not a node the map can look up later.
+	const h = harness();
+	clickOn(h, linkInCard("nb"), false);
+	assert.equal(h.calls.length, 1, h.calls.join("; "));
+	assert.match(h.calls[0], /^openLink\(Guide,/);
+	assert.match(h.calls[0], /,nb\)$/);
 });
 
 // --- carrying a whole selection -----------------------------------------------
@@ -1360,6 +1505,10 @@ test("a block's card surface is not a handle: only its button picks it up", () =
 	card.ancestors.set(".mm-card", card);
 	card.ancestors.set(".mm-node", node);
 	card.ancestors.set('.mm-node[data-kind="body"]', node);
+	// The box a lift reads as well, so that what this press is not -- a drag --
+	// is told apart from what it is: a wait, which the movement above ends. See
+	// the resting-press tests at the foot of this file.
+	card.ancestors.set(".mm-card, .mm-preview, .mm-annotation", card);
 	h.viewport.all.push(node, cardAt("n2", { left: 300, top: 100, width: 120, height: 30 }));
 	h.under.el = null;
 
@@ -1405,4 +1554,507 @@ test("a topic card's fold button folds, it never drags", () => {
 	});
 
 	assert.deepEqual(h.calls, []);
+});
+
+// --- the card that points at another note -------------------------------------
+
+/** One part of a link card, with the node around it as the map draws it. */
+function linkPart(part: string, id = "n1"): FakeEl {
+	const node = new FakeEl();
+	node.dataset.id = id;
+	const el = new FakeEl();
+	el.ancestors.set(part, el);
+	el.ancestors.set(".mm-node", node);
+	return el;
+}
+
+test("the arrow opens the other note's outline, and nothing else", () => {
+	const h = harness();
+	clickOn(h, linkPart(".mm-link-arrow"), false);
+	// One call, and it is the arrow's. A press that also picked the card would
+	// leave the keyboard aimed at something the press did not ask for.
+	assert.deepEqual(h.calls, ["toggleEmbed(n1)"]);
+});
+
+test("the footer's sentence follows the link", () => {
+	const h = harness();
+	clickOn(h, linkPart(".mm-link-open"), false);
+	assert.deepEqual(h.calls, ["openLinkedNote(n1)"]);
+});
+
+test("the title line of a card that carries a preview is the switch", () => {
+	const h = harness();
+	// `.mm-opens-preview` is what the builder puts on the line, and it is what
+	// says there is a block under it to open.
+	clickOn(h, linkPart(".mm-card.mm-opens-preview"), false);
+	// Both, and in this order: the block first, because a press that opened it
+	// and then handed the keyboard somewhere else would leave the card picked
+	// but the press unexplained. Picking is what a press on a card means
+	// everywhere else in this map, and the block leaves the line as the only
+	// place left to do it.
+	assert.deepEqual(h.calls, ["toggleCardPreview(n1)", "select(n1,false)"]);
+});
+
+test("the line is the switch whether the block is open or shut", () => {
+	// The same selector and the same call in both states: a line that stopped
+	// being the switch once it had been pressed would be a card that opens and
+	// never closes.
+	const h = harness();
+	clickOn(h, linkPart(".mm-card.mm-opens-preview"), false);
+	clickOn(h, linkPart(".mm-card.mm-opens-preview"), false);
+	assert.deepEqual(h.calls, [
+		"toggleCardPreview(n1)",
+		"select(n1,false)",
+		"toggleCardPreview(n1)",
+		"select(n1,false)",
+	]);
+});
+
+/**
+ * A press on the words of a card's own title line.
+ *
+ * The words of a link are a `span` with its target in `data-href`, and where
+ * they sit is what decides what a press on them means. On the line of a card
+ * that *is* one link they are that link, written on the line that switches it --
+ * so the two gestures land on the same pixels, and the words win: pressing a
+ * label is asking for what it names. On a card of the note's own prose they are
+ * that card's links, one of three perhaps, and pressing one is asking for that
+ * one.
+ *
+ * `one` says which kind of card this is, and `body` whether it is a
+ * note-content card -- the one place the prose rule applies at all, since a
+ * title is a node's own line.
+ */
+function titleLink(one: boolean, body = false): FakeEl {
+	const el = new FakeEl();
+	el.dataset.href = "外部链接";
+	const line = new FakeEl();
+	line.classes.add("mm-card");
+	line.classes.add("mm-opens-preview");
+	if (one) line.classes.add("mm-one-link");
+	const node = new FakeEl();
+	node.dataset.id = "n1";
+
+	el.ancestors.set(".mm-link[data-href], .mm-embed[data-href], .mm-media[data-href]", el);
+	el.ancestors.set(".mm-card.mm-opens-preview", line);
+	el.ancestors.set(".mm-node", node);
+	// The line is where the card under the press is read off, so it carries
+	// the node as its ancestor too: two lookups, one element each. A link card
+	// answers to both selectors, because both classes are on the one element.
+	if (one) el.ancestors.set(".mm-card.mm-one-link", line);
+	line.ancestors.set(".mm-node", node);
+	// An element is its own ancestor in a real `closest`, and the line is what
+	// the switch rule reads off, so it has to answer for itself.
+	line.ancestors.set(".mm-card.mm-opens-preview", line);
+	if (one) line.ancestors.set(".mm-card.mm-one-link", line);
+	if (body) el.ancestors.set('.mm-node[data-kind="body"], .mm-annotation, .mm-preview', node);
+	return el;
+}
+
+test("the words on a card that is one link are the line's switch, not a link to follow", () => {
+	const h = harness();
+	clickOn(h, titleLink(true), false);
+	// Both, and not `openLink`: the link on that line is the card, so showing
+	// it is showing what the card already shows, and a press that answered
+	// with the same note would be a press that folded nothing away.
+	assert.deepEqual(h.calls, ["toggleCardPreview(n1)", "select(n1,false)"]);
+});
+
+test("a note-content card is no different: the same press on its one link is the switch", () => {
+	const h = harness();
+	// A body card whose whole text is a link draws the same line, and the rule
+	// for links in prose would otherwise take the press first -- which is
+	// exactly what left the block on screen and the card's own words unable to
+	// put it away.
+	clickOn(h, titleLink(true, true), false);
+	assert.deepEqual(h.calls, ["toggleCardPreview(n1)", "select(n1,false)"]);
+});
+
+test("the rest of that line is still the switch", () => {
+	const h = harness();
+	// No `LINK_TARGET` under the press: the gap between the words and the arrow,
+	// and the card's own padding, which is where a reader aims to put the block
+	// away -- and the reason the block needs no other way out.
+	const el = titleLink(true);
+	const line = el.ancestors.get(".mm-card.mm-opens-preview");
+	assert.ok(line);
+	clickOn(h, line, false);
+	assert.deepEqual(h.calls, ["toggleCardPreview(n1)", "select(n1,false)"]);
+});
+
+test("Ctrl/Cmd on those same words still leaves the map for the note", () => {
+	const h = harness();
+	// The way to the note itself, and it is not the switch: `openLink` is what
+	// reads the modifier, and it opens the target rather than showing it.
+	clickOn(h, titleLink(true, true), true);
+	assert.equal(h.calls.length, 1);
+	assert.match(h.calls[0], /^openLink\(外部链接,/);
+	// On a link *node* the same press is the map's own "show me where this is
+	// written", because a title there is that node's line and the press is on
+	// the card: unchanged, and covered with the rest of that rule.
+});
+
+test("the words on a card of prose keep their own meaning", () => {
+	const h = harness();
+	clickOn(h, titleLink(false, true), false);
+	// Three links on one line have no single thing a press there could switch,
+	// so the line's press is the line's and a link's press is the link's. A
+	// press on one of them shows that one.
+	assert.equal(h.calls.length, 1);
+	assert.match(h.calls[0], /^openLink\(外部链接,/);
+});
+
+/**
+ * A tag on a card. `onLinkCard` puts it on a title line that also opens a
+ * preview, which is the case the routing has to get right: the tag has to win
+ * over the line, or a press on it would filter the map *and* shut the block.
+ */
+function tagBadge(tag: string, onLinkCard = false): FakeEl {
+	const el = new FakeEl();
+	el.dataset.tag = tag;
+	el.ancestors.set(".mm-tag", el);
+	if (onLinkCard) {
+		const line = new FakeEl();
+		line.classes.add("mm-card");
+		line.classes.add("mm-opens-preview");
+		line.classes.add("mm-one-link");
+		const node = new FakeEl();
+		node.dataset.id = "n1";
+		el.ancestors.set(".mm-card.mm-opens-preview", line);
+		line.ancestors.set(".mm-node", node);
+		el.ancestors.set(".mm-node", node);
+	}
+	return el;
+}
+
+test("a tag is a filter, not a piece of text to select", () => {
+	const h = harness();
+	clickOn(h, tagBadge("工作"), false);
+	assert.deepEqual(h.calls, ["toggleTagFilter(工作,false)"]);
+});
+
+test("Ctrl/Cmd on a tag narrows the filter rather than replacing it", () => {
+	const h = harness();
+	clickOn(h, tagBadge("urgent"), true);
+	// The one press on a card that means "add to what I am looking at": two
+	// tags keep every card carrying either, which is what narrowing means.
+	assert.deepEqual(h.calls, ["toggleTagFilter(urgent,true)"]);
+});
+
+test("a tag on a link card's title line is the tag's, not the line's", () => {
+	const h = harness();
+	clickOn(h, tagBadge("工作", true), false);
+	// Neither `toggleCardPreview` nor `select`: the line is a switch and the
+	// tag is not it, exactly as the arrow beside it is not.
+	assert.deepEqual(h.calls, ["toggleTagFilter(工作,false)"]);
+});
+
+test("Escape puts a filter away when there is no search to close", () => {
+	const h = harness();
+	// The proxy's `closeSearch` is a recorded call returning undefined, which
+	// reads as false: the branch has to fall through to the filter rather than
+	// swallow the key.
+	h.press(keyEvent("Escape"));
+	assert.deepEqual(h.calls, ["closeSearch()", "clearFilter()"]);
+});
+
+test("a press inside the block below does not shut it", () => {
+	const h = harness();
+	clickOn(h, linkPart(".mm-preview"), false);
+	// The block is another note's words: a press in there is a press on text,
+	// and the way out of the block is the line above it.
+	assert.deepEqual(h.calls, ["select(n1,false)"]);
+});
+
+test("the button on the line is still its own, and not the line's too", () => {
+	const h = harness();
+	const arrow = linkPart(".mm-link-arrow");
+	arrow.ancestors.set(".mm-card.mm-opens-preview", arrow);
+	clickOn(h, arrow, false);
+	// One call. A press on the arrow that also opened and closed the block
+	// would be two gestures for one press.
+	assert.deepEqual(h.calls, ["toggleEmbed(n1)"]);
+});
+
+test("a plain press on a card picks it and opens nothing", () => {
+	const h = harness();
+	clickOn(h, linkPart(".mm-card"), false);
+	// The card used to be the switch as well, so picking one up to move it -- or
+	// the first press of the double-click that renames it -- shut whatever it
+	// was showing. Picking a card has to mean one thing here, because it means
+	// that on every other card in the map.
+	assert.deepEqual(h.calls, ["select(n1,false)"]);
+});
+
+test("the first press of the double-click that renames a card closes nothing", () => {
+	const h = harness();
+	clickOn(h, linkPart(".mm-card"), false, 1);
+	clickOn(h, linkPart(".mm-card"), false, 2);
+	// Both presses only pick. Renaming a card is not a reason for the note it
+	// points at to shut, and the press that opens the field is the first one.
+	assert.deepEqual(h.calls, ["select(n1,false)", "select(n1,false)"]);
+});
+
+test("a modified press picks the card without opening either block", () => {
+	const h = harness();
+	clickOn(h, linkPart(".mm-card"), true);
+	// Ctrl/Cmd is already spoken for on a card -- it is the note-to-map round
+	// trip -- so the card's own open is not offered to that press.
+	assert.ok(!h.calls.some((call) => call.startsWith("toggleCardPreview(")), h.calls.join("; "));
+	assert.ok(!h.calls.some((call) => call.startsWith("toggleEmbed(")));
+});
+
+test("the arrow is a control, not a handle", () => {
+	const h = harness();
+	const arrow = linkPart(".mm-link-arrow");
+	h.viewport.all.push(cardAt("n2", { left: 300, top: 100, width: 120, height: 30 }));
+	h.under.el = null;
+
+	h.viewport.fire("pointerdown", {
+		button: 0,
+		pointerId: 1,
+		clientX: 10,
+		clientY: 10,
+		target: arrow,
+		preventDefault: () => {},
+		stopPropagation: () => {},
+	});
+	h.viewport.fire("pointermove", pointer(340, 110));
+	h.viewport.fire("pointerup", {
+		pointerId: 1,
+		clientX: 340,
+		clientY: 110,
+		preventDefault: () => {},
+	});
+
+	// A press that drifted a few pixels is a press on the arrow, not the start
+	// of a drag that would carry the card away instead.
+	assert.deepEqual(h.calls, []);
+});
+
+test("the link card's button is a control, not a handle", () => {
+	const h = harness();
+	// The selector is the one the module asks, so it has to be in the test for
+	// the test to mean anything.
+	const button = linkPart(".mm-link-tools");
+	h.viewport.all.push(cardAt("n2", { left: 300, top: 100, width: 120, height: 30 }));
+	h.under.el = null;
+
+	h.viewport.fire("pointerdown", {
+		button: 0,
+		pointerId: 1,
+		clientX: 10,
+		clientY: 10,
+		target: button,
+		preventDefault: () => {},
+		stopPropagation: () => {},
+	});
+	h.viewport.fire("pointermove", pointer(340, 110));
+	h.viewport.fire("pointerup", {
+		pointerId: 1,
+		clientX: 340,
+		clientY: 110,
+		preventDefault: () => {},
+	});
+
+	// A press that drifted a few pixels is a press on the switch, not the start
+	// of a drag -- and the collapse in particular sits on the body of a card
+	// that is mostly preview, which is where a drag would be aimed.
+	assert.deepEqual(h.calls, []);
+});
+
+test("a projected card does not lift, because nothing can be moved to it", () => {
+	const h = harness();
+	const node = new FakeEl();
+	const card = new FakeEl();
+	card.ancestors.set(".mm-card", card);
+	card.ancestors.set(".mm-node", node);
+	card.ancestors.set(".mm-node.is-projected", node);
+	h.viewport.all.push(cardAt("n2", { left: 300, top: 100, width: 120, height: 30 }));
+	h.under.el = null;
+
+	h.viewport.fire("pointerdown", {
+		button: 0,
+		pointerId: 1,
+		clientX: 10,
+		clientY: 10,
+		target: card,
+		preventDefault: () => {},
+		stopPropagation: () => {},
+	});
+	h.viewport.fire("pointermove", pointer(340, 110));
+	h.viewport.fire("pointerup", {
+		pointerId: 1,
+		clientX: 340,
+		clientY: 110,
+		preventDefault: () => {},
+	});
+
+	// It is another note's card. Every slot would refuse it, so it stays put
+	// rather than lifting and then disagreeing with the guide.
+	assert.deepEqual(h.calls, []);
+});
+
+// --- the press that rests on a block ------------------------------------------
+
+/**
+ * A press on a note-content card's own surface, at one of the boxes a lift may
+ * be aimed at: the title's card, the preview of another note drawn under it, or
+ * the annotation strip.
+ *
+ * All of them answer every selector at once on purpose -- the box the lift
+ * reads, the card the drag reads, and the node the map looks up by id -- because
+ * in the map they are one element, and a stub that answered only one of them
+ * would let the two readings of a press disagree about what the press landed on.
+ *
+ * The id is the harness's own, so `nodeElement` finds the node the copy is
+ * cloned from: a copy is made out of the card, and a test that could not reach
+ * the card could not see the copy either.
+ */
+function bodySurface(id = "n1"): FakeEl {
+	const node = new FakeEl();
+	node.dataset.id = id;
+	const box = new FakeEl();
+	// The three boxes in one entry, because that is how the module asks for
+	// them: `.mm-card, .mm-preview, .mm-annotation` is the one selector a lift
+	// reads a surface through, and a stub that answered them one at a time
+	// would be answering a question the module never puts.
+	box.ancestors.set(".mm-card, .mm-preview, .mm-annotation", box);
+	box.ancestors.set(".mm-node", node);
+	box.ancestors.set('.mm-node[data-kind="body"]', node);
+	return box;
+}
+
+/** A press on one element, held down until the test says otherwise. */
+function liftPress(target: FakeEl, x = 40, y = 40): Record<string, unknown> {
+	return {
+		button: 0,
+		pointerId: 1,
+		clientX: x,
+		clientY: y,
+		target,
+		preventDefault: () => {},
+		stopPropagation: () => {},
+	};
+}
+
+/** The release that ends a press, at the point it stopped. */
+function liftRelease(x: number, y: number): Record<string, unknown> {
+	return {
+		pointerId: 1,
+		clientX: x,
+		clientY: y,
+		preventDefault: () => {},
+		stopPropagation: () => {},
+	};
+}
+
+test("a press that rests on a block lifts the block itself", () => {
+	const h = harness();
+	h.viewport.all.push(cardAt("n2", { left: 300, top: 100, width: 120, height: 30 }));
+	h.under.el = null;
+
+	h.viewport.fire("pointerdown", liftPress(bodySurface()));
+	// The wait is shown on the card it is on, and nothing has moved: what the
+	// card is saying is that this press is still being read.
+	assert.equal(h.node.classes.has("is-lifting"), true);
+	assert.equal(h.timers.count(), 1);
+	assert.deepEqual(h.calls, []);
+
+	h.timers.fire();
+	// The state the drag has always produced, entered without the pointer
+	// having gone anywhere: the card it came from goes flat, and a copy of it
+	// is in the pointer's hand.
+	assert.equal(h.node.classes.has("is-lifting"), false, "the wait's outline goes with the wait");
+	assert.equal(h.node.classes.has("is-dragging"), true);
+
+	const ghost = h.bodies[0];
+	assert.ok(ghost?.classes.has("mm-drag-ghost"), "no copy was built");
+	assert.equal(ghost.style.left, "40px", "the copy is at the pointer before it has moved");
+	assert.equal(ghost.style.top, "40px");
+});
+
+test("a lifted block lands where it is dropped", () => {
+	const h = harness();
+	h.viewport.all.push(cardAt("n2", { left: 300, top: 100, width: 120, height: 30 }));
+	h.under.el = null;
+
+	h.viewport.fire("pointerdown", liftPress(bodySurface()));
+	h.timers.fire();
+	// The pointer goes somewhere a card is, and the block lands on it: the same
+	// arithmetic, and the same call, a branch drag makes.
+	h.viewport.fire("pointermove", liftPress(h.row, 320, 110));
+	h.viewport.fire("pointerup", liftRelease(320, 110));
+
+	assert.equal(h.calls.length, 1, `one move, got ${h.calls.join("; ")}`);
+	assert.ok(h.calls[0].startsWith("moveMany(n1,"), h.calls[0]);
+});
+
+test("a press that moves on a block's surface is not a lift", () => {
+	const h = harness();
+	h.viewport.all.push(cardAt("n2", { left: 300, top: 100, width: 120, height: 30 }));
+	h.under.el = null;
+
+	h.viewport.fire("pointerdown", liftPress(bodySurface()));
+	// Away it goes before the second is up: the movement is the user's answer
+	// to what the press meant, and it is not "pick this up".
+	h.viewport.fire("pointermove", pointer(340, 110));
+	h.timers.fire();
+	h.viewport.fire("pointerup", liftRelease(340, 110));
+
+	assert.equal(h.node.classes.has("is-lifting"), false, "the wait was taken off the card");
+	assert.equal(h.node.classes.has("is-dragging"), false);
+	assert.deepEqual(h.calls, [], "and nothing was moved");
+	assert.deepEqual(h.bodies, [], "nor was a copy built");
+});
+
+test("the release that ends a lift is not also a click", () => {
+	const h = harness();
+	h.viewport.fire("pointerdown", liftPress(bodySurface()));
+	h.timers.fire();
+	h.viewport.fire("pointerup", liftRelease(40, 40));
+
+	// The press already meant something. Selecting the card as well would be a
+	// second answer to the one press, and the card is not where the user is
+	// looking -- the copy under their pointer is.
+	h.viewport.fire("click", {
+		target: bodySurface(),
+		ctrlKey: false,
+		metaKey: false,
+		shiftKey: false,
+		preventDefault: () => {},
+		stopPropagation: () => {},
+	});
+	assert.deepEqual(h.calls, []);
+});
+
+test("a topic card's title is the drag's handle, not the lift's", () => {
+	const h = harness();
+	// A press on the title of a card that is not note content is the ordinary
+	// press-and-move drag, so no second reading of it is armed -- and there is
+	// nothing for a lift to carry either.
+	const card = new FakeEl();
+	card.ancestors.set(".mm-card, .mm-preview, .mm-annotation", card);
+	h.viewport.fire("pointerdown", liftPress(card));
+
+	assert.equal(h.timers.count(), 0);
+});
+
+test("a body card's controls are not the lift's press", () => {
+	const h = harness();
+	// The three selectors the module asks, in the order it asks them: the fold
+	// button and the checkbox on the branch side, a picture's own two circles
+	// and a sample's copy button, and a video, which is a player once it plays.
+	const controls = [
+		".mm-tools, .mm-checkbox, .mm-link-tools",
+		".mm-media-button, .mm-code-copy",
+		".mm-media-video.is-playing",
+	];
+	for (const control of controls) {
+		const target = new FakeEl();
+		target.ancestors.set(control, target);
+		h.viewport.fire("pointerdown", liftPress(target));
+	}
+
+	assert.equal(h.timers.count(), 0, "no wait was armed on any of them");
 });

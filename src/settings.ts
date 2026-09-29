@@ -111,6 +111,15 @@ export interface MindmapSettings {
 	renderMedia: boolean;
 	/** The tallest a picture or video may be drawn, in CSS pixels. */
 	mediaMaxHeight: number;
+	/**
+	 * How many lines of the note a link card shows when it is open.
+	 *
+	 * Zero is a real answer rather than an off switch that is not one: the card
+	 * keeps its title, its arrow and its way into the whole note, and shows none
+	 * of the note's words. A map full of cards pointing at other notes is a map
+	 * somebody may want at a glance and not at a read.
+	 */
+	linkPreviewLines: number;
 	maxNodeWidth: number;
 	horizontalGap: number;
 	verticalGap: number;
@@ -158,6 +167,7 @@ export const DEFAULT_SETTINGS: MindmapSettings = {
 	inlineAnnotations: true,
 	renderMedia: true,
 	mediaMaxHeight: 200,
+	linkPreviewLines: 6,
 	maxNodeWidth: 340,
 	horizontalGap: 64,
 	verticalGap: 14,
@@ -455,6 +465,11 @@ const GROUPS: SettingGroup[] = [
 				name: "settings.mediaMaxHeight.name",
 				desc: "settings.mediaMaxHeight.desc",
 				control: { type: "slider", key: "mediaMaxHeight", min: 80, max: 480, step: 20 },
+			},
+			{
+				name: "settings.linkPreviewLines.name",
+				desc: "settings.linkPreviewLines.desc",
+				control: { type: "slider", key: "linkPreviewLines", min: 0, max: 20, step: 1 },
 			},
 			{
 				name: "settings.toolbarVisibility.name",

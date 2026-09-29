@@ -7,13 +7,68 @@ import {
 	branchAction,
 	branchIcon,
 	branchLabelKey,
+	projectedBranchAction,
 	showsPlus,
 	BRANCH_FALLBACK_TEXT,
 } from "./branchButton.ts";
+import type { BranchAction } from "./branchButton.ts";
 import { renderBlocks } from "./blocks.ts";
 import { renderInline } from "./inline.ts";
+import type { InlineRender } from "./inline.ts";
 import type { MediaContext } from "./media.ts";
+import { moreLinesLabel, previewBlocks } from "./linkPreview.ts";
+import type { LinkPreview, SitePreview } from "./linkPreview.ts";
 import type { NodeMaxWidth } from "./nodeWidth.ts";
+
+/** Nothing drawn: what a preview with no content of its own reports back. */
+const NOTHING_DRAWN: InlineRender = { math: false, media: false };
+
+/**
+ * What a card that points at something outside itself draws, or null for every
+ * other card.
+ *
+ * Three things, and they are separate on purpose. The **arrow** is the card's
+ * own control rather than the branch button's, because it acts on whatever the
+ * card names rather than on the branch under it, and a link card grows no
+ * children of its own -- so its branch button is only ever a fold. The
+ * **preview** is what the card is showing, and the two are independent: a link
+ * card can show its arrow without showing anything else, and a card of the
+ * note's own prose can show a preview of a note it mentions without being a
+ * link card at all.
+ */
+export interface LinkCardOptions {
+	/**
+	 * Whether the card *is* one link rather than prose that mentions one.
+	 *
+	 * The card whose own title line is a switch, and the reason it can be one:
+	 * such a card names exactly one note, so a press on the line has one thing
+	 * it could mean. A card of the note's own writing may hold three links, and
+	 * a line that had to guess which of them was meant is why it opens its
+	 * preview by having the link itself pressed.
+	 */
+	oneLink: boolean;
+	/** Whether this card draws the arrow that opens the other note's outline. */
+	arrow: boolean;
+	/** Whether that outline is open. */
+	subtreeOpen: boolean;
+	/** What the card is showing, or null while it is closed. */
+	preview: LinkPreview | null;
+	/**
+	 * How the read behind that preview is going: whether it has landed, and
+	 * whether the note is in the vault at all. Null while nothing is open.
+	 */
+	read: "loading" | "missing" | "ready" | null;
+	/**
+	 * The site the card leads to, when the link leaves the vault.
+	 *
+	 * Non-null means the preview names a place rather than showing a note's
+	 * words: there is no file to read, and the card's one action is to hand the
+	 * address to the browser.
+	 */
+	site: SitePreview | null;
+	/** The line the footer offers: the whole note, or the browser. */
+	footer: "note" | "site";
+}
 
 export interface NodeElementOptions {
 	/** Null means no annotation; an empty string is an explicit blank block. */
@@ -62,6 +117,18 @@ export interface NodeElementOptions {
 	 * paint.
 	 */
 	selected: boolean;
+	/**
+	 * The card stands for a node of another note: the outline the arrow pulled
+	 * in, rather than a line of the note being mapped.
+	 *
+	 * It draws like any other card, and it is marked so the interaction layer
+	 * can leave it alone -- a projected card is read-only, and every gesture
+	 * that would write to the note has to be refused before it starts rather
+	 * than after it fails silently. See `view/interactions.ts`.
+	 */
+	projected: boolean;
+	/** How this card draws the note it points at, when it points at one. */
+	link: LinkCardOptions | null;
 }
 
 export interface NodeElement {
@@ -118,6 +185,7 @@ export function buildNodeElement(
 	}
 	if (opts.collapsed) el.addClass("is-collapsed");
 	if (node.virtual) el.addClass("is-virtual");
+	if (opts.projected) el.addClass("is-projected");
 	el.style.maxWidth = `${opts.maxWidth.node}px`;
 
 	// Three boxes, two of them nested. `.mm-row` is the card the user sees: the
@@ -157,6 +225,44 @@ export function buildNodeElement(
 		const drawn = renderInline(text, node.text, opts.media);
 		hasMath = drawn.math;
 		hasMedia = drawn.media;
+	}
+
+	// The title line itself is a switch, on a card that is one link or on one
+	// already showing a block: a reader pressing the line means the block far
+	// more often than they mean the card. What the block is says what the press
+	// does, and the label is how the card says so -- a line that opens when
+	// pressed and looks like every other line is a switch nobody finds. The
+	// button beside the text keeps its own meaning; `interactions.ts` routes
+	// the press, and it is what leaves the block below alone.
+	//
+	// No `title` beside the label: the hint is the row's own `aria-label`, and a
+// native tooltip over it would be a second balloon where the card already has
+// one.
+	if (opts.link !== null && (opts.link.oneLink || opts.link.preview !== null)) {
+		card.addClass("mm-opens-preview");
+		card.setAttribute("aria-label", t("view.link.rowHint"));
+	}
+	// And which of the two kinds of line this is, because the press reads them
+	// differently: on a card that *is* one link the words on the line are that
+	// link, so the whole line is the switch and there is no press left over for
+	// the link itself; on a card of prose the words are that card's own links
+	// and keep their own meaning. See the line rule in `interactions.ts`.
+	if (opts.link !== null && opts.link.oneLink) card.addClass("mm-one-link");
+
+	// The card's own control, on the title's own line so it is measured with
+	// the title rather than placed over it: whether the other note's outline is
+	// open under this card. One button, and no second meaning for the card
+	// itself -- a press anywhere else on the line opens what the card is
+	// showing, and a press anywhere else on the card picks it, which is what a
+	// press on a card means everywhere else in this map.
+	//
+	// On the stylesheet side the button is an auto margin away from the text,
+	// which costs the card nothing while the outline is shut and puts it on the
+	// card's far edge the moment the preview widens the row. The wrapper is what
+	// carries that margin, and it stays whether or not the arrow is drawn.
+	if (opts.link !== null && opts.link.arrow) {
+		const tools = card.createDiv({ cls: "mm-link-tools" });
+		buildLinkArrow(tools, opts.link);
 	}
 
 	// The furniture on the branch side of the card, in one row absolutely
@@ -206,19 +312,43 @@ export function buildNodeElement(
 			toggle.setText(String(opts.hiddenCount));
 		}
 
-		if (opts.addable || opts.collapsible) {
-			const action = branchAction(opts);
-			add = tools.createDiv({
-				cls: ["mm-add", showsPlus(action) ? "is-plus" : "is-minus"],
-			});
-			add.setAttribute("role", "button");
-			add.setAttribute("aria-label", t(branchLabelKey(action)));
-			add.dataset.branchAction = action;
-			setIcon(add, branchIcon(action));
-			// `setIcon` is silent when the id is not in the bundled set, which
-			// would leave an invisible but clickable circle on the card.
-			if (!add.firstElementChild) add.setText(BRANCH_FALLBACK_TEXT[action]);
+		if (opts.addable || opts.collapsible || opts.projected) {
+			const action = branchButtonAction(opts);
+			if (action !== null) {
+				add = tools.createDiv({
+					cls: ["mm-add", showsPlus(action) ? "is-plus" : "is-minus"],
+				});
+				add.setAttribute("role", "button");
+				add.setAttribute("aria-label", t(branchLabelKey(action)));
+				add.dataset.branchAction = action;
+				setIcon(add, branchIcon(action));
+				// `setIcon` is silent when the id is not in the bundled set, which
+				// would leave an invisible but clickable circle on the card.
+				if (!add.firstElementChild) add.setText(BRANCH_FALLBACK_TEXT[action]);
+			}
 		}
+	}
+
+	// Inside the row, below the title: what the note the card points at actually
+	// says, and the way into the whole of it. Both inside the drawn box, for the
+	// reason the annotation strip is -- the fill, the border and the ring cover
+	// the card and everything hanging off it as one thing.
+	//
+	// The preview comes first, then the footer, then the annotation: what the
+	// note says, then how to leave for it, then what this node's own note has to
+	// say about the link. A card can have all three at once.
+	//
+	// A closed card draws neither. What it is stays one line -- the title and
+	// the arrow -- so a map of a note that links to twenty others is still a map
+	// and not twenty paragraphs of somebody else's prose.
+	if (opts.link !== null && opts.link.preview !== null) {
+		// What it drew, folded into what the card waits for: a preview with a
+		// picture in it is a card whose layout is not final until that picture
+		// has landed, exactly as a card of the note's own prose is.
+		const drawn = buildLinkPreview(row, opts.link, opts.media);
+		hasMath = hasMath || drawn.math;
+		hasMedia = hasMedia || drawn.media;
+		buildLinkFoot(row, opts.link);
 	}
 
 	// Inside the row, below the card: the strip is part of the card the user
@@ -258,4 +388,144 @@ export function buildNodeElement(
 		offscreen: false,
 		measured: false,
 	};
+}
+
+/**
+ * What this card's branch button would do, or null when it draws none.
+ *
+ * A projected card answers out of `projectedBranchAction` rather than out of
+ * `branchAction`, and the difference is the whole of the rule: it can be closed
+ * and opened but never grown. Every other card's answer is the one the press
+ * will act on -- see `branchAction`.
+ */
+function branchButtonAction(opts: NodeElementOptions): BranchAction | null {
+	if (opts.projected) return projectedBranchAction(opts);
+	return opts.addable || opts.collapsible ? branchAction(opts) : null;
+}
+
+/**
+ * The arrow that opens the other note's outline under this card.
+ *
+ * Always there, on every link card, whether the note is open under it or not:
+ * it is the one control the card carries that acts on the note rather than on
+ * the branch, and a preview that only appeared once you had already found it
+ * would be a preview nobody finds.
+ */
+function buildLinkArrow(parent: HTMLElement, link: LinkCardOptions): void {
+	const arrow = parent.createDiv({ cls: "mm-link-arrow" });
+	if (link.subtreeOpen) arrow.addClass("is-open");
+	arrow.setAttribute("role", "button");
+	arrow.setAttribute("tabindex", "0");
+	// The icon and the label answer the same question, asked once: an arrow
+	// turned down is a branch already open, and the label is how a screen
+	// reader hears the same thing without seeing the arrow at all.
+	const label = t(link.subtreeOpen ? "view.link.collapseOutline" : "view.link.expandOutline");
+	// `aria-label` alone, and no `title`: Obsidian draws its own tooltip out of
+	// the label, and a `title` beside it is the browser's grey box on top of
+	// that one -- two tooltips for one button.
+	arrow.setAttribute("aria-label", label);
+	arrow.setAttribute("aria-expanded", link.subtreeOpen ? "true" : "false");
+	setIcon(arrow, "chevron-right");
+	// `setIcon` is silent when the id is not in the bundled set, which would
+	// leave an invisible but clickable dot on the card. What goes in its place
+	// is the same shape the icon is -- a chevron, drawn by the character that
+	// is one -- and not a triangle: a filled triangle is a different control to
+	// most readers, the one that means *play*, and this arrow is not that. The
+	// turn when the branch opens is the stylesheet's, on the span as on the
+	// icon, so a fallback is not a second design.
+	if (!arrow.firstElementChild) {
+		arrow.createSpan({ cls: "mm-link-arrow-glyph", text: "\u203a" });
+	}
+}
+
+/**
+ * What the card is showing, under the title.
+ *
+ * Three states for a note and one for a site. The note's three are the read not
+ * landed, the note not there, and here are its words: showing nothing while the
+ * read is in flight would make the card jump from closed to filled with no
+ * account of the wait, and showing nothing because the note is missing would
+ * look like the same bug twice.
+ *
+ * The words go through `renderBlocks`, the same renderer a card of the note's
+ * own prose is drawn with -- which is the point of doing it here rather than
+ * with `renderInline` per line. A sample, a table and a callout cannot survive
+ * being read as characters, and a preview that read them that way was showing
+ * the reader `| a | b |` and ``` where the note had drawn a table and a sample.
+ * Pictures and videos come with it for the same reason and by the same door:
+ * the media context is the card's own, so what the map's settings say about
+ * pictures is what the preview does about them.
+ *
+ * Nothing heads the block. It used to open with a line holding the word for
+ * putting it away, on the argument that a preview can be taller than the screen
+ * and its way out should not be a scroll away -- but the way out is above the
+ * block in every case: the title line is the switch, and it is the switch for
+ * the card that is one link and for the card of the note's own prose a pressed
+ * link opened alike. A second way out costs a line of the reader's map to say
+ * what the line above already says.
+ */
+function buildLinkPreview(
+	row: HTMLElement,
+	link: LinkCardOptions,
+	media: MediaContext | null,
+): InlineRender {
+	const site = link.site;
+	// `.mm-text` as well as its own class, for the reason the annotation strip
+	// carries it: everything `renderBlocks` emits is styled under `.mm-text`,
+	// and a preview is a text box in a card like any other.
+	const box = row.createDiv({
+		cls: site === null ? ["mm-text", "mm-preview"] : ["mm-text", "mm-preview", "is-site"],
+	});
+	box.setAttribute(
+		"aria-label",
+		t(site === null ? "view.link.previewAria" : "view.link.siteAria"),
+	);
+
+	if (site !== null) {
+		box.createDiv({ cls: "mm-site-host", text: site.host });
+		if (site.path !== "" && site.path !== "/") {
+			box.createDiv({ cls: "mm-site-path", text: site.path });
+		}
+		return NOTHING_DRAWN;
+	}
+
+	const preview = link.preview;
+	if (preview === null) return NOTHING_DRAWN;
+
+	if (link.read !== "ready") {
+		box.createDiv({
+			cls: ["mm-preview-line", "is-hint"],
+			text: t(link.read === "missing" ? "view.link.missing" : "view.link.loading"),
+		});
+		return NOTHING_DRAWN;
+	}
+	if (preview.lines.length === 0) {
+		box.createDiv({ cls: ["mm-preview-line", "is-hint"], text: t("view.link.empty") });
+		return NOTHING_DRAWN;
+	}
+
+	const drawn = renderBlocks(box, previewBlocks(preview), media);
+	if (preview.more > 0) {
+		box.createDiv({ cls: "mm-preview-more", text: moreLinesLabel(preview.more) });
+	}
+	return drawn;
+}
+
+/**
+ * The way out of the card.
+ *
+ * On every open card, whatever the settings say, because it is the card's own
+ * promise: a link that could not be followed from where it stands would be a
+ * link this map had broken. The one sentence left on the line -- the badge that
+ * used to sit at its other end is gone, and the preview's own colour and rule
+ * are what say the words above them were read out of another file.
+ */
+function buildLinkFoot(row: HTMLElement, link: LinkCardOptions): void {
+	const foot = row.createDiv({ cls: "mm-link-foot" });
+	const open = foot.createDiv({
+		cls: "mm-link-open",
+		text: t(link.footer === "site" ? "view.link.openSite" : "view.link.openNote"),
+	});
+	open.setAttribute("role", "button");
+	open.setAttribute("tabindex", "0");
 }

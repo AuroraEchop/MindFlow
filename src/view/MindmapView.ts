@@ -5,6 +5,7 @@ import {
 	Notice,
 	Platform,
 	Scope,
+	TFile,
 	TextFileView,
 	setIcon,
 } from "obsidian";
@@ -13,7 +14,6 @@ import type {
 	KeymapEventHandler,
 	KeymapEventListener,
 	Modifier,
-	TFile,
 	WorkspaceLeaf,
 } from "obsidian";
 
@@ -24,7 +24,10 @@ import { parseMarkdown } from "../model/parse.ts";
 import { annotationText, bodyCardCount } from "../model/annotations.ts";
 import { needsBlocks, parseBlocks } from "../model/blocks.ts";
 import type { Block } from "../model/blocks.ts";
+import { normaliseTag, tagFilterKeys } from "../model/tags.ts";
+import { Breadcrumb, crumbTrail, isPath } from "./breadcrumb.ts";
 import type { MindNode, ParsedDoc } from "../model/types.ts";
+import { BODY_ID_MARK } from "../model/types.ts";
 import {
 	addChild,
 	addSibling,
@@ -58,7 +61,11 @@ import {
 } from "../model/mutate.ts";
 import type { Mutation } from "../model/mutate.ts";
 import { hasMoreThanOneLine, toText, spliceLines } from "../model/lines.ts";
-import { linkMarkup, noteNameFrom, soleLink, unlinkedText } from "../model/noteName.ts";
+import { cardLink, linkMarkup, noteNameFrom, soleLink, unlinkedText } from "../model/noteName.ts";
+import { isEmbedId } from "../model/embedTree.ts";
+import { LinkCards } from "./linkCards.ts";
+import { attachNoteDrop, lineOfState } from "./dropNote.ts";
+import type { Projection } from "./linkCards.ts";
 
 import {
 	foldedToFirstLevel,
@@ -81,6 +88,7 @@ import {
 	branchAction,
 	branchIcon,
 	branchLabelKey,
+	projectedBranchAction,
 	showsPlus,
 	BRANCH_FALLBACK_TEXT,
 } from "./branchButton.ts";
@@ -92,7 +100,8 @@ import { Perf } from "./perf.ts";
 import { createEdgeLayer, renderEdges } from "./edges.ts";
 import type { EdgeStyle } from "./edges.ts";
 import { buildNodeElement } from "./nodes.ts";
-import type { NodeElement } from "./nodes.ts";
+import type { LinkCardOptions, NodeElement, NodeElementOptions } from "./nodes.ts";
+import { cardShape } from "./cardShape.ts";
 import { renderInline } from "./inline.ts";
 import { openInlineEditor } from "./inlineEditor.ts";
 import type { InlineEditorHost } from "./inlineEditor.ts";
@@ -115,6 +124,7 @@ import {
 import type { KeyCombo, ShortcutBindings } from "./shortcuts.ts";
 import { SearchBar } from "./searchBar.ts";
 import type { ReplaceScope } from "./searchBar.ts";
+import { clearHits, markHits } from "./hits.ts";
 import { SettingsModal } from "./settingsModal.ts";
 import {
 	clearMathCache,
@@ -149,8 +159,27 @@ function clamp(value: number, min: number, max: number): number {
  */
 const INITIAL_EXPAND_LEVEL = 1;
 
-/** Separates a body card's id from its owner's. Never appears in a parsed id. */
-const BODY_ID_MARK = "$body";
+/**
+ * What the find bar holds before anything has been typed.
+ *
+ * Written once so the three places a session is wound back to nothing agree on
+ * what nothing is -- a switch added to the query is a switch added here, or the
+ * field that builds a bar would hand it a query with a hole in it.
+ */
+const EMPTY_QUERY: SearchQuery = {
+	text: "",
+	regex: false,
+	caseSensitive: false,
+	// The map is searched whole by default: what a card says and what the note's
+	// prose says under it. `¶` in the bar is what narrows it to titles.
+	titlesOnly: false,
+};
+
+/** How many depths the fold button's menu offers. Six is as deep as a heading. */
+const FOLD_MENU_LEVELS = 4;
+
+/** Roughly what the fold menu needs below the bar before it opens upwards. */
+const FOLD_MENU_HEIGHT = 220;
 
 /** Body cards show their block in full up to this much, then trail off. */
 const BODY_PREVIEW_CHARS = 2000;
@@ -238,6 +267,8 @@ const DENSE_NODE_COUNT = 300;
  */
 export type PaintReason =
 	| "edit"
+	/** The selection was sent to a card by a line -- see `focusLine`. */
+	| "focus"
 	| "fold"
 	| "search"
 	| "settings"
@@ -246,7 +277,9 @@ export type PaintReason =
 	| "math-remeasure"
 	| "media-remeasure"
 	| "cull"
-	| "export";
+	| "export"
+	/** A note another card points at has been read, so that card can fill in. */
+	| "link";
 
 /**
  * What a body card shows. The full text stays one click away on the card's own
@@ -399,6 +432,25 @@ export class MindmapView extends TextFileView implements MapController {
 	 */
 	private layoutById = new Map<string, LayoutNode>();
 	private layoutByKey = new Map<string, LayoutNode>();
+	/**
+	 * What each card was drawn as by the last paint, keyed the way the two above
+	 * are.
+	 *
+	 * The paint that is about to draw a card it cannot see asks this whether the
+	 * size it still remembers is the size of *this* card -- a preview opened
+	 * while the card was off screen is a taller card behind the same text. See
+	 * `cardShape` for what goes into the answer.
+	 */
+	private cardShapes = new Map<string, string>();
+	/**
+	 * This paint's shapes, waiting for the layout they belong to.
+	 *
+	 * A paint records what it built as it builds it, and a paint that ends up
+	 * with no map -- the pane was hidden, so every card measured zero -- never
+	 * lays any of it out. Keeping the shapes aside until the layout is installed
+	 * is what stops the two from describing different trees.
+	 */
+	private pendingShapes: Map<string, string> | null = null;
 	private elements = new Map<string, NodeElement>();
 	/**
 	 * The card for each entry of `layoutNodes`, at the same index.
@@ -424,6 +476,13 @@ export class MindmapView extends TextFileView implements MapController {
 	private paintRoot: LayoutNode | null = null;
 	/** True while that re-measure is running, so it cannot re-enter itself. */
 	private remeasuring = false;
+	/**
+	 * A cull inside `measureNewlyShown` put cards back that nobody has measured.
+	 *
+	 * Set by the call the pass refuses to run re-entrantly, and read at the top
+	 * of the next round, which is where those cards are measured.
+	 */
+	private remeasureAgain = false;
 	/**
 	 * The natural size of every picture and video this map has drawn.
 	 *
@@ -467,6 +526,20 @@ export class MindmapView extends TextFileView implements MapController {
 	 */
 	private collapsedBodies = new Set<string>();
 	private foldSeedPending = false;
+	/** True once this view has been unloaded: nothing in flight may paint it. */
+	private closed = false;
+	/**
+	/**
+	 * What each open link card is showing, and the outlines hanging under them.
+	 *
+	 * The whole of reading another note lives in here -- the cache of what has
+	 * been read, what is in flight, and the outline each open card is showing --
+	 * because it is the one part of a paint that is asynchronous, and a paint
+	 * that cannot wait cannot be the thing holding the state either. The host it
+	 * is given is built in the constructor: narrow, and asked for the note and
+	 * its parse rather than handed them, because both move on.
+	 */
+	private readonly linkCards: LinkCards;
 	/**
 	 * A restored focus waiting for the first framing to honour it.
 	 *
@@ -515,7 +588,25 @@ export class MindmapView extends TextFileView implements MapController {
 
 	private search: SearchBar | null = null;
 	/** Kept when the bar closes, dropped when the file changes. */
-	private searchQuery: SearchQuery = { text: "", regex: false };
+	private searchQuery: SearchQuery = { ...EMPTY_QUERY };
+	/**
+	 * Whether every matched card is marked, or only the one the bar is on.
+	 *
+	 * Off, a search marks the current match and rings the rest -- the ring says
+	 * where the matches are, the mark says what matched, and a map with forty
+	 * marks on it says neither. On, the rest are marked too, in the quieter of
+	 * the two colours. A display switch rather than part of the query: it never
+	 * changes which cards matched, so it is not something to search again for.
+	 */
+	private highlightAll = false;
+	/** True while any card is carrying marks, so one search can take them off. */
+	private markedHits = false;
+	/** Tags the map is filtered by, lowercase and without the `#`. */
+	private tagFilter: string[] = [];
+	/** Keys the filter keeps, or null when there is no filter. */
+	private tagKeys: Set<string> | null = null;
+	/** The branch being looked at alone, or null for the whole map. */
+	private soloKey: string | null = null;
 	/** The replace field's contents, remembered on the same terms. */
 	private searchReplacement = "";
 	/** The current match list, in document order. */
@@ -548,10 +639,14 @@ export class MindmapView extends TextFileView implements MapController {
 	private scopeHandlers: KeymapEventHandler[] = [];
 
 	private detachInteractions: (() => void) | null = null;
+	/** Detaches the note drop listeners; see `dropNote.ts`. */
+	private detachDrop: (() => void) | null = null;
 	/** The corner, kept so its visibility can follow the selection. */
 	private toolbars: HTMLElement | null = null;
 	/** The fold button, kept because what it says depends on the map. */
 	private foldButton: HTMLElement | null = null;
+	/** The path to the selected card, kept so the selection can rewrite it. */
+	private breadcrumb: Breadcrumb | null = null;
 	private popover: HTMLElement | null = null;
 	private needsFit = true;
 	private paintedEmpty = false;
@@ -595,6 +690,23 @@ export class MindmapView extends TextFileView implements MapController {
 		// A sibling of the viewport, not a child of it: the preview must not
 		// pan or zoom with the map underneath it.
 		this.lightbox = new Lightbox(this.app, this.contentEl);
+		// Another sibling of the viewport, for the same reason the toolbar is
+		// one: the path sits over the map rather than in it, and must not pan
+		// or zoom with the cards it is describing.
+		this.breadcrumb = new Breadcrumb(this.contentEl);
+		this.linkCards = new LinkCards({
+			app: this.app,
+			currentFile: () => this.file,
+			currentDoc: () => this.parsed,
+			isClosed: () => this.closed,
+			collapsedKeys: () => this.collapsedKeys,
+			layoutByKey: this.layoutByKey,
+			paint: (reason) => this.paint(reason),
+			markAnchor: (key) => this.markAnchor(key),
+			layoutFor: (id) => this.layoutFor(id),
+			cardNodeFor: (id) => this.cardNodeFor(id),
+			revealLine: (view, line) => this.plugin.revealLine(view, line),
+		});
 		this.buildToolbar();
 		this.scope = this.buildScope();
 	}
@@ -736,11 +848,19 @@ export class MindmapView extends TextFileView implements MapController {
 			// Torn down without restoring folds: `this.file` already points at the
 			// new note, so a restore would write this map's shape onto that path.
 			this.resetSearch();
-			this.searchQuery = { text: "", regex: false };
+			this.searchQuery = { ...EMPTY_QUERY };
+			this.tagFilter = [];
+			this.tagKeys = null;
+			this.soloKey = null;
 			this.searchReplacement = "";
 			this.collapsedKeys.clear();
-			this.collapsedBodies.clear();
-			this.setAnchor(null);
+		this.collapsedBodies.clear();
+		// The projections go with the cards that were drawn from them: their
+		// ids carry a link node of the note that is being left behind. The
+		// reads do not -- they are keyed by path and stamped, and a card in
+		// the note arriving now may point at the same file.
+		this.linkCards.reset();
+		this.setAnchor(null);
 			this.restoreFocusKey = null;
 			// A view is destroyed when its leaf changes view type, so a note
 			// toggled to markdown and back arrives here as a brand new instance
@@ -796,7 +916,10 @@ export class MindmapView extends TextFileView implements MapController {
 		this.elements.clear();
 		resetPendingMath();
 		this.resetSearch();
-		this.searchQuery = { text: "", regex: false };
+		this.searchQuery = { ...EMPTY_QUERY };
+		this.tagFilter = [];
+		this.tagKeys = null;
+		this.soloKey = null;
 		this.searchReplacement = "";
 		this.collapsedKeys.clear();
 		this.collapsedBodies.clear();
@@ -814,6 +937,7 @@ export class MindmapView extends TextFileView implements MapController {
 		// should not pay for it at Obsidian startup.
 		void ensureMath();
 		this.detachInteractions = attachInteractions(this);
+		this.detachDrop = attachNoteDrop(this);
 		this.applyToolbarVisibility();
 		this.addAction("file-text", t("view.action.editMarkdown"), () => {
 			void this.plugin.toggleLeaf(this.leaf);
@@ -847,6 +971,97 @@ export class MindmapView extends TextFileView implements MapController {
 	 * already be inside -- or inside something of Obsidian's that is over the
 	 * map, which is where a menu item that opened a modal has just put it.
 	 */
+	/**
+	 * A line this view was asked to show, while it was already showing a map.
+	 *
+	 * Obsidian hands a line over as *ephemeral state*, and the outline pane is
+	 * the caller that matters: pressing a heading there asks for a line, not
+	 * for a particular view. In markdown that means scrolling the editor; here
+	 * it means selecting the card written on that line -- which is this map's
+	 * own answer to the same question, and the reason the two modes can be
+	 * asked the same thing without either doing the other's work.
+	 */
+	override setEphemeralState(state: unknown): void {
+		const line = lineOfState(state);
+		if (line === null) return;
+		this.focusLine(line);
+	}
+
+	/** Select the card written on `line`, opening whatever was hiding it. */
+	focusLine(line: number): void {
+		this.pendingFocus = { line, edit: false };
+		this.render("focus");
+	}
+
+	/**
+	 * The note Obsidian is carrying in a drag right now, or null.
+	 *
+	 * Asked of Obsidian's own record rather than of the drag payload: a
+	 * platform drag cannot be read until it is dropped, and by then the drag is
+	 * over and its payload is all that is left -- which for a note dragged out
+	 * of the file explorer is a path, not a name. The record outlives the drag.
+	 * One field is read off it; the shape of the rest is not this file's
+	 * business.
+	 */
+	draggedNoteName(): string | null {
+		const manager = (
+			this.app as unknown as {
+				dragManager?: {
+					draggable?: { type?: string; file?: { basename?: string } } | null;
+				};
+			}
+		).dragManager;
+		const carried = manager?.draggable;
+		if (!carried || carried.type !== "file" || carried.file === undefined) return null;
+		const name = carried.file.basename;
+		return typeof name === "string" && name !== "" ? name : null;
+	}
+
+	/**
+	 * Write these notes in as cards, under `targetId` or under the root.
+	 *
+	 * One edit for the whole drop, however many notes were in it: a drag is one
+	 * action, and undo has to answer for it once. Each insert is planned against
+	 * the document the one before it produced, because inserting under a card
+	 * moves that card's own block onto a new line -- and a plan made against the
+	 * old one would write the second note in the wrong place.
+	 */
+	dropNotes(texts: readonly string[], targetId: string | null): void {
+		const parsed = this.parsed;
+		if (!parsed || texts.length === 0) return;
+		const dropped = targetId === null ? null : this.cardNodeFor(targetId);
+		// A note-content card is lines the note owns rather than a card with
+		// children of its own, so the link goes under whatever owns those lines:
+		// the drop still lands where the reader aimed, one level up.
+		let parent = dropped ?? parsed.root;
+		while (parent.kind === "body" && parent.parent !== null) parent = parent.parent;
+		const key = parent.key;
+
+		let text = this.data;
+		let focusLine = -1;
+		let added = 0;
+		for (const link of texts) {
+			const next = parseMarkdown(text, this.parseOptions());
+			const owner = next.byKey.get(key);
+			if (owner === undefined) break;
+			const mutation = addChild(next, owner, link);
+			if (!mutation.ok) break;
+			text = mutation.text;
+			focusLine = mutation.focusLine;
+			added++;
+		}
+		if (added === 0 || text === this.data) return;
+		this.apply({ text, focusLine, ok: true });
+
+		// The outline comes with it. A reader who dragged a note here asked to
+		// read it, and a card that says nothing but `[[Note]]` hands that back
+		// as one more thing to press. Only a link into the vault has an outline
+		// to pull in, which is the same question `cardLink` answers.
+		const node = this.findByLine(focusLine);
+		const link = node === null ? null : cardLink(node.text);
+		if (node !== null && link !== null && !link.external) this.toggleEmbed(node.id);
+	}
+
 	focusMap(): void {
 		if (this.app.workspace.getActiveViewOfType(MindmapView) !== this) return;
 		if (this.isEditing()) return;
@@ -877,6 +1092,8 @@ export class MindmapView extends TextFileView implements MapController {
 		this.resetSearch();
 		this.detachInteractions?.();
 		this.detachInteractions = null;
+		this.detachDrop?.();
+		this.detachDrop = null;
 		this.closePopover();
 		this.canvas.destroy();
 	}
@@ -1058,11 +1275,57 @@ export class MindmapView extends TextFileView implements MapController {
 		this.foldButton = button("chevrons-up-down", t("view.tool.expandAll"), () =>
 			this.toggleFoldAll(),
 		);
+		// The depth is the other half of the same control, and it lives on the
+		// other press: a level is a number, and a number is a menu rather than a
+		// button. The click stays the shape it has always been -- one press
+		// between "everything" and "the first level" -- so nothing anybody knew
+		// how to do has moved.
+		this.foldButton.addEventListener("contextmenu", (ev) => {
+			ev.preventDefault();
+			this.showFoldMenu(this.foldButton as HTMLElement);
+		});
 		button("search", t("shortcut.search.name"), () => this.openSearch());
 		button("help-circle", t("view.tool.shortcuts"), () => this.showShortcuts());
 		button("settings", t("view.tool.settings"), () => this.openSettings());
 		this.applyToolbarVisibility();
 		this.applyFoldButton();
+	}
+
+	/**
+	 * The depths, on the fold button's other press.
+	 *
+	 * Four levels and the two ends, which is as many as a note has headings to
+	 * name -- and the whole map first, because after asking for one depth the
+	 * next thing wanted is always the way back out.
+	 */
+	private showFoldMenu(el: HTMLElement): void {
+		const menu = new Menu();
+		menu.addItem((item) =>
+			item
+				.setTitle(t("view.tool.expandAll"))
+				.setIcon("chevrons-up-down")
+				.onClick(() => this.expandAll()),
+		);
+		menu.addSeparator();
+		for (let level = 1; level <= FOLD_MENU_LEVELS; level++) {
+			menu.addItem((item) =>
+				item
+					.setTitle(t("view.tool.foldLevel", { level }))
+					.setIcon("list-tree")
+					.onClick(() => this.foldToLevel(level)),
+			);
+		}
+		menu.addSeparator();
+		menu.addItem((item) =>
+			item
+				.setTitle(t("view.tool.collapseAll"))
+				.setIcon("chevrons-down-up")
+				.onClick(() => this.collapseAll()),
+		);
+		const rect = el.getBoundingClientRect();
+		const room = (el.doc.defaultView?.innerHeight ?? 0) - rect.bottom;
+		const y = room >= FOLD_MENU_HEIGHT ? rect.bottom : rect.top;
+		menu.showAtPosition({ x: rect.left, y, width: rect.width, overlap: true }, el.doc);
 	}
 
 	/**
@@ -1300,6 +1563,11 @@ export class MindmapView extends TextFileView implements MapController {
 		// the highlight has to follow the note rather than the stale class list.
 		this.refreshSearch();
 
+		// A card that stopped being a link stops being an open one. Asked here
+		// rather than at the press because the note is what moves: the press can
+		// only be answered against the tree that is in front of the user.
+		this.pruneLinkState();
+
 		if (this.pendingFocus) {
 			const focus = this.pendingFocus;
 			this.pendingFocus = null;
@@ -1356,6 +1624,7 @@ export class MindmapView extends TextFileView implements MapController {
 		const saved = parsed && path ? this.plugin.readNoteState(path) : null;
 		if (!parsed || !saved) {
 			this.foldFrom(INITIAL_EXPAND_LEVEL);
+			this.linkCards.reset();
 			return;
 		}
 
@@ -1379,6 +1648,42 @@ export class MindmapView extends TextFileView implements MapController {
 		}
 		this.collapsedKeys = restored;
 		this.collapsedBodies = restoredBodies;
+
+		// The cards that were left open come back open, and this is the one place
+		// it happens. What each one was showing is worked out again from the
+		// note rather than remembered: a key names a card, and `cardLink` reads
+		// its own link back off it -- so a card that has since stopped being a
+		// link card, or that had a link inside its prose, comes back closed.
+		// Losing that is the cheapest thing this can lose, and it is the same
+		// bargain `seedEmbedFold` makes.
+		const restoredPreviews: [string, string][] = [];
+		for (const key of saved.previews ?? []) {
+			const node = this.nodeForCardKey(key);
+			const own = node ? cardLink(node.text) : null;
+			if (own !== null && !own.external) restoredPreviews.push([key, own.target]);
+		}
+		// And the same question for an open outline, with one case the previews
+		// do not have: a note-content card is not in the parsed tree, so its text
+		// -- and with it the link it names -- is not readable here at all. Its
+		// key arrives with no link beside it, and the paint that rebuilds the
+		// card is what reads it -- or finds that the block in that place is not
+		// the link card this was saved for, which is what stops an outline left
+		// open on a block from being handed to whatever block replaces it.
+		const restoredEmbeds: [string, string | null][] = [];
+		for (const key of saved.embeds ?? []) {
+			const node = this.nodeForCardKey(key);
+			if (!node) {
+				restoredEmbeds.push([key, null]);
+				continue;
+			}
+			const own = cardLink(node.text);
+			if (own !== null && !own.external) restoredEmbeds.push([key, own.target]);
+		}
+		// What they were showing is not remembered, and would be stale anyway: a
+		// projection is a reading of a file, and the file has had a night to
+		// change. Dropping them is what makes the next paint build each one again
+		// from a fresh read.
+		this.linkCards.restore(restoredPreviews, restoredEmbeds);
 
 		const focus = this.findSaved(parsed, saved.focusKey, saved.focusId);
 		// A focus inside a branch the user left folded loses to the fold: opening
@@ -1427,8 +1732,17 @@ export class MindmapView extends TextFileView implements MapController {
 		const focus = this.selectedNode();
 		// A folded code block is the user's doing too, so it has to keep the
 		// entry alive on its own -- the default-fold test knows nothing about
-		// it, and would throw the fold away the moment the map was closed.
-		if (!focus && this.collapsedBodies.size === 0 && this.isDefaultFold()) {
+		// it, and would throw the fold away the moment the map was closed. An
+		// open link card is the same argument with the sign flipped: a card the
+		// user opened is not the map a note opens in, and losing it would lose
+		// the one thing they did.
+		if (
+			!focus &&
+			this.collapsedBodies.size === 0 &&
+			this.linkCards.previewCount() === 0 &&
+			this.linkCards.embedCount() === 0 &&
+			this.isDefaultFold()
+		) {
 			this.plugin.forgetNoteState(path);
 			return;
 		}
@@ -1437,6 +1751,10 @@ export class MindmapView extends TextFileView implements MapController {
 			// fold and a card's own are the same thing to the user, and the
 			// marker in the key is what tells them apart on the way back in.
 			collapsed: [...this.collapsedKeys, ...this.collapsedBodies],
+			// These two are not folds and do not share that array: one list is
+			// cards the user shut and the others are cards they opened.
+			previews: this.linkCards.previewKeys(),
+			embeds: this.linkCards.embedKeys(),
 			focusKey: focus?.key,
 			focusId: focus?.id,
 		});
@@ -1480,6 +1798,71 @@ export class MindmapView extends TextFileView implements MapController {
 		if (fallback.size !== this.collapsedKeys.size) return false;
 		for (const key of this.collapsedKeys) if (!fallback.has(key)) return false;
 		return true;
+	}
+
+	/**
+	 * Forget the cards that have stopped being link cards, or have stopped
+	 * being cards at all.
+	 *
+	 * A title card's key is its text, so rewriting the title is what turns a
+	 * link card into an ordinary one -- and a preview left open under a key
+	 * nothing answers to any more would be a card that is open and empty, saved
+	 * that way, and restored that way on the next open. A projection goes with
+	 * it, because its ids are built from the link node's id and the card is not
+	 * that node any more.
+	 *
+	 * A note-content card is not in the parsed tree at all, so there is nothing
+	 * to ask about its text here; it is left to the paint, which asks the card
+	 * in front of it -- and asks it the harder question too, whether it is still
+	 * the link the state was opened on. A place is not a card: `ownerKey + mark +
+	 * index` names a slot, and the block the note keeps in that slot can change.
+	 * See `LinkCards`' own `held`, which is where that is answered. Fold keys
+	 * inside a projection are not swept up either, and for the reason
+	 * `seedEmbedFold` gives.
+	 */
+	private pruneLinkState(): void {
+		const parsed = this.parsed;
+		if (!parsed) return;
+		// Only the map knows what a key names: a card that has gone, or one whose
+		// text has stopped being a link, has nothing left to open onto.
+		this.linkCards.prune((key) => {
+			if (!this.cardExists(key)) return true;
+			const node = parsed.byKey.get(key);
+			return node !== undefined && cardLink(node.text) === null;
+		});
+	}
+
+	/**
+	 * The node a card key names, when the key names one of the note's own.
+	 *
+	 * Title nodes only. A note-content card's key names a block of the note
+	 * rather than a node the note's tree holds, and a card of prose is not a
+	 * thing a link can be read back off -- see `cardNodeFor` for the other
+	 * direction, which is the one a press needs.
+	 */
+	private nodeForCardKey(key: string): MindNode | null {
+		return this.parsed?.byKey.get(key) ?? null;
+	}
+
+	/**
+	 * Whether a card key still names a card of the note in front of the user.
+	 *
+	 * A title node is in the parsed tree and a note-content card is not: the
+	 * second is `ownerKey + BODY_ID_MARK + index`, so it exists exactly when
+	 * that owner still has a body range at that index. Asked instead of
+	 * resolving the card, because resolving one means rebuilding its text the
+	 * way `makeBodyNode` does, and the question here is only whether there is
+	 * anything left to be open.
+	 */
+	private cardExists(key: string): boolean {
+		const parsed = this.parsed;
+		if (!parsed) return false;
+		if (parsed.byKey.has(key)) return true;
+		const mark = key.indexOf(BODY_ID_MARK);
+		if (mark < 0) return false;
+		const owner = parsed.byKey.get(key.slice(0, mark));
+		const index = Number(key.slice(mark + BODY_ID_MARK.length));
+		return owner !== undefined && owner.bodyRanges[index] !== undefined;
 	}
 
 	/**
@@ -1587,8 +1970,16 @@ export class MindmapView extends TextFileView implements MapController {
 	 * mutation -- rename, move, delete, indent -- looks them up, misses, and does
 	 * nothing. That is the whole safety story: the note owns those lines, and the
 	 * only way to change them is the editor `openBody` puts up.
+	 *
+	 * A link card with the other note's outline open is the other end of the same
+	 * idea. What it contributes is not its own children -- a node whose whole text
+	 * is a link has none -- but the top level of the note it names, which arrives
+	 * already synthesised, already virtual, and already outside `parsed.byId`.
+	 * `projectOutline` is where that happens and where the reasoning is.
 	 */
 	private childrenOf(parsed: ParsedDoc, node: MindNode, showBody: boolean): MindNode[] {
+		const projection = this.projectionFor(node);
+		if (projection !== null) return projection.tree.roots;
 		if (!showBody || node.bodyRanges.length === 0) return node.children;
 
 		const merged: Array<{ line: number; node: MindNode }> = node.children.map((c) => ({
@@ -1801,10 +2192,19 @@ export class MindmapView extends TextFileView implements MapController {
 		// out are the ones it is about to show. `layoutById` still holds the
 		// previous paint's index -- this paint's own is only installed at the end.
 		const previous = this.layoutById;
+		// The same, for what each of those cards was drawn as. Read out of the
+		// map the last paint left and replaced by this paint's own at the end,
+		// exactly as `layoutById` is.
+		const previousShapes = this.cardShapes;
+		const shapes = new Map<string, string>();
 		const nearView = viewBoxFrom(this.canvas.metrics(), CULL_MARGIN);
 
 		let sawMath = false;
 		let reused = 0;
+		// Resolved once per paint rather than once per card: two cards pointing at
+		// the same note ask the same question, and the answer is the metadata
+		// cache's to give but not to give for free.
+		const linkFiles = new Map<string, TFile | null>();
 		for (const layout of visible) {
 			const node = layout.node;
 			const isBody = node.kind === "body";
@@ -1817,15 +2217,28 @@ export class MindmapView extends TextFileView implements MapController {
 			// Body cards were all made by `childrenOf`, above, so the ref is
 			// there for every one of them and nothing else has an entry at all.
 			const blocks = isBody ? (this.bodyNodes.get(node.id)?.blocks ?? null) : null;
-			const maxWidth = nodeMaxWidth(node.kind, hasAnnotation, s.maxNodeWidth);
-			const element = buildNodeElement(this.nodeLayer, layout, {
+			// A card drawn from another note is a card of this map and is drawn
+			// like one, but it is this map's reading of another file: nothing
+			// here may try to write through it. `is-projected` is what the
+			// interaction layer asks before it offers a gesture at all.
+			const projected = isEmbedId(node.id);
+			// Asked of every card, prose included. A card of the note's own
+			// writing is where links are most often written, and a card that
+			// says one thing about one link is a card a reader will press.
+			const link = this.cardPreviewFor(node, s.linkPreviewLines, linkFiles);
+			const maxWidth = nodeMaxWidth(
+				node.kind,
+				hasAnnotation || (link !== null && link.preview !== null),
+				s.maxNodeWidth,
+			);
+			const options: NodeElementOptions = {
 				annotation: hasAnnotation ? annotationText(parsed, node) : null,
 				maxWidth,
 				branchColors: s.branchColors,
 				blocks,
 				media: this.mediaContext(maxWidth.text ?? maxWidth.node),
-			preformatted: isBody && blocks === null && looksPreformatted(node.text),
-			addable: !isBody,
+				preformatted: isBody && blocks === null && looksPreformatted(node.text),
+				addable: !isBody,
 				// Any block with more than one line to show, a sample or a
 				// paragraph or a table alike: what the fold is for is a card
 				// that takes up more of the map than what it says needs, and a
@@ -1839,25 +2252,43 @@ export class MindmapView extends TextFileView implements MapController {
 				// block is offered the way back out rather than a count.
 				hiddenCount: collapsed ? this.hiddenCount(node, showBody) : 0,
 				selected: this.selectedId() === node.id,
-			});
+				projected,
+				link,
+			};
+			const element = buildNodeElement(this.nodeLayer, layout, options);
 			this.elements.set(node.id, element);
 			if (element.hasMath) sawMath = true;
+			// Asked of the very object the card was built from, so the card drawn
+			// and the card the question is about cannot be different cards.
+			const shape = cardShape({
+				text: node.text,
+				checkbox: node.checkbox,
+				kind: node.kind,
+				depth: layout.depth,
+				...options,
+			});
+			shapes.set(node.id, shape);
 			// Built straight into the state the cull would have put it in anyway,
 			// which is the point: a card that the camera is nowhere near costs this
 			// paint no layout at all. Its size is the one it was measured at, and
 			// the cull that shows it again is what finally measures it.
 			const before = previous.get(node.id);
-			if (before === undefined || before.width === 0 || nearView === null) continue;
-			// Everything the card's own box is drawn from has to be what it was:
-			// the text, the checkbox in front of it, and the two attributes the
-			// stylesheet sizes a card by -- `data-depth` and `data-kind`.
 			if (
-				before.node.text !== node.text ||
-				before.node.checkbox !== node.checkbox ||
-				before.node.kind !== node.kind ||
-				before.depth !== layout.depth ||
-				overlaps(before, nearView)
+				before === undefined ||
+				before.width === 0 ||
+				before.height === 0 ||
+				nearView === null
 			) {
+				continue;
+			}
+			// Everything the card's own box is drawn from has to be what it was.
+			// The text alone is not the question -- nor the text, the checkbox
+			// and the two attributes the stylesheet sizes a card by, which is
+			// what this used to ask and which is why a link card that opened its
+			// preview off screen came back the size it was before it opened it,
+			// on top of the cards around it. The whole shape is the question: see
+			// `cardShape`.
+			if (previousShapes.get(node.id) !== shape || overlaps(before, nearView)) {
 				continue;
 			}
 			layout.width = before.width;
@@ -1868,6 +2299,10 @@ export class MindmapView extends TextFileView implements MapController {
 			element.el.addClass("is-offscreen");
 			reused++;
 		}
+		// Handed over rather than installed: `setLayoutNodes` is what puts them
+		// beside the sizes they are compared against, and a paint that never
+		// gets there has no sizes to be compared against either.
+		this.pendingShapes = shapes;
 		this.perf.span("paint-build", started, { reason, nodes: visible.length, reused });
 
 		// On the content layer, not on the view root: the root is the box
@@ -2189,6 +2624,11 @@ export class MindmapView extends TextFileView implements MapController {
 	): void {
 		const started = this.perf.now();
 		let measured = 0;
+		// How many cards this pass could not read a size for. See the note in
+		// the loop: a card the browser is not drawing is not a small card, and
+		// laying the map out around one is what piles a region of the map onto
+		// that card's own centre.
+		let unreadable = 0;
 
 		// One batched read pass: every write above, every measurement here.
 		// offsetWidth, not getBoundingClientRect -- the cards sit inside a
@@ -2199,8 +2639,25 @@ export class MindmapView extends TextFileView implements MapController {
 			// size it had when it was last in view is the one that still holds,
 			// and it is already on the layout node.
 			if (!element || element.offscreen) continue;
-			layout.width = element.el.offsetWidth;
-			layout.height = element.el.offsetHeight;
+			const width = element.el.offsetWidth;
+			const height = element.el.offsetHeight;
+			// And the same is true of every other way a card can be undrawn: a
+			// pane with no shape yet, a layer not yet in the document. A zero
+			// here is not a size -- no card is drawn without a border and two
+			// lines of padding -- it is the browser saying it did not lay this
+			// card out, and a layout run with one is a layout that stacks every
+			// card after it on that card's own centre. The size the layout
+			// already holds is a real one, measured when the card was last
+			// drawn, so it is kept and the card is handed back the state a
+			// culled card is in: out of the document, owed a measurement.
+			if (width === 0 || height === 0) {
+				element.offscreen = true;
+				element.el.addClass("is-offscreen");
+				unreadable++;
+				continue;
+			}
+			layout.width = width;
+			layout.height = height;
 			// The card apart from the node: the annotation strip is inside `.mm-row`
 			// under `.mm-card`, so the layout centres, anchors and offsets on the
 			// title's box while spacing siblings by the whole node.
@@ -2209,13 +2666,18 @@ export class MindmapView extends TextFileView implements MapController {
 			element.measured = true;
 			measured++;
 		}
-		this.perf.span("paint-measure", started, { reason, measured });
+		this.perf.span("paint-measure", started, { reason, measured, unreadable });
 
-		this.paintedEmpty = rootLayout.width === 0;
-		if (this.paintedEmpty) return;
+		// The map is one the browser has not drawn in full, so it is not a map
+		// anything may act on: the export refuses it, and the next resize paints
+		// it again rather than culling it. Nothing readable at all is the
+		// stronger case below, where there is not even a layout to write.
+		this.paintedEmpty = unreadable > 0 || rootLayout.width === 0;
+		if (rootLayout.width === 0) return;
 
 		this.applySelection();
 		this.applySearchState();
+		this.applyFades();
 		// A card this paint rebuilt came out of `buildNodeElement` without the
 		// markers the live one was carrying, and the card being written in is the
 		// one that may not lose them.
@@ -2309,18 +2771,38 @@ export class MindmapView extends TextFileView implements MapController {
 	 */
 	private measureNewlyShown(): void {
 		const root = this.paintRoot;
-		if (root === null || this.remeasuring) return;
+		if (root === null) return;
+		// Reached from the cull at the end of `place`, which is inside this very
+		// pass. Its cards are already back in the document and `measured` is
+		// false on them, so dropping the call would leave them on the map at the
+		// size they were built with -- the size the layout has already used, and
+		// the reason a region of the map could come back squeezed together. The
+		// pass below picks them up on a round of its own.
+		if (this.remeasuring) {
+			this.remeasureAgain = true;
+			return;
+		}
 		this.remeasuring = true;
 		try {
-			for (let round = 0; round < REMEASURE_ROUNDS; round++) {
+			// The first rounds are the ordinary ones; the pair after them is for
+			// a cull that asked for another round on the last of those.
+			for (let round = 0; round < REMEASURE_ROUNDS + 2; round++) {
+				this.remeasureAgain = false;
 				const started = this.perf.now();
 				const { measured, changed } = this.measureUnmeasured();
-				if (measured === 0) return;
+				if (measured === 0 && !this.remeasureAgain) return;
 				this.perf.span("cull-measure", started, { measured, changed, round });
 				// Almost always nothing: the size a card was built with is one it
 				// was measured at, under the same text and the same rules, so the
 				// map it was laid out into is already the right one.
-				if (changed === 0) return;
+				if (changed === 0) {
+					// Nothing moved, so there is no map to place again. Another
+					// round is still worth it when the cull put cards back: they
+					// are read at the top of it, and a layout between here and
+					// there would be one that moved nothing.
+					if (!this.remeasureAgain) return;
+					continue;
+				}
 				this.place(root, null, "cull", false);
 			}
 		} finally {
@@ -2352,6 +2834,13 @@ export class MindmapView extends TextFileView implements MapController {
 			const layout = this.layoutNodes[i];
 			const width = element.el.offsetWidth;
 			const height = element.el.offsetHeight;
+			// The same rule the paint's own pass keeps: a card the browser is
+			// not drawing is not a card of no size. Reading nothing here would
+			// hand the layout a zero for a card that is on screen, which is how
+			// a card ends up under the ones beside it -- so the card simply
+			// stays owed a measurement, and the size it is carrying is the one
+			// the layout already used for it.
+			if (width === 0 || height === 0) continue;
 			const cardWidth = element.card.offsetWidth;
 			const cardHeight = element.card.offsetHeight;
 			element.measured = true;
@@ -2591,7 +3080,9 @@ export class MindmapView extends TextFileView implements MapController {
 		}
 		// The corner follows the selection when the setting asks it to.
 		this.applyToolbarVisibility();
+		this.applyBreadcrumb();
 	}
+
 
 	/**
 	 * Re-ask the branch button what it does, for the state the card is in now.
@@ -2606,7 +3097,13 @@ export class MindmapView extends TextFileView implements MapController {
 		const id = element.el.dataset.id;
 		const layout = id ? this.layoutFor(id) : null;
 		if (!layout) return;
-		const action = branchAction(this.branchStateFor(layout.node, selected));
+		// A projected card's button is the minus or nothing: another note's
+		// outline is the only thing under it, and that note is not this map's to
+		// add a child to.
+		const action = isEmbedId(layout.node.id)
+			? projectedBranchAction(this.branchStateFor(layout.node, selected))
+			: branchAction(this.branchStateFor(layout.node, selected));
+		if (action === null) return;
 		const plus = showsPlus(action);
 		element.add.removeClass("is-plus", "is-minus");
 		element.add.addClass(plus ? "is-plus" : "is-minus");
@@ -2703,6 +3200,16 @@ export class MindmapView extends TextFileView implements MapController {
 		for (const layout of nodes) {
 			this.layoutById.set(layout.node.id, layout);
 			this.layoutByKey.set(layout.node.key, layout);
+		}
+		// And the shapes, for the same reason: a paint that built every card but
+		// never laid them out -- the one painted into a hidden pane -- has left
+		// the map holding this paint's shapes beside the last one's sizes, and
+		// the next paint would then read a card as unchanged against a layout
+		// that never had it. Installed here and nowhere else, so the two are
+		// always about the same tree.
+		if (this.pendingShapes !== null) {
+			this.cardShapes = this.pendingShapes;
+			this.pendingShapes = null;
 		}
 	}
 
@@ -2885,6 +3392,14 @@ export class MindmapView extends TextFileView implements MapController {
 	 * the wrong note to land in even by one line.
 	 */
 	async revealInNote(id: string): Promise<void> {
+		// A projected card is written in another note, so "show me where this
+		// is" is a line in that note and a different tab -- the line under the
+		// pointer is this map's, and the card is not.
+		const source = this.embedSourceOf(id);
+		if (source !== null) {
+			await this.openSourceNote(source.path, source.line);
+			return;
+		}
 		const node = this.parsed?.byId.get(id);
 		if (!node || node.lineStart < 0) return;
 		const line = node.lineStart;
@@ -3343,18 +3858,29 @@ export class MindmapView extends TextFileView implements MapController {
 			this.toggleFoldSelection();
 			return;
 		}
-		this.withNode(id, (_parsed, node) => {
-			// Has to agree with the `hasChildren` that decided whether to draw the
-			// toggle at all, or the button exists and does nothing.
-			if (this.childCount(node, this.plugin.settings.showBodyNodes) === 0) return;
-			// Folded or unfolded by hand: the branch is the user's from here on,
-			// and closing the search must not undo what they just did.
-			this.searchRevealed.delete(node.key);
-			this.markAnchor(node.key);
-			if (this.collapsedKeys.has(node.key)) this.collapsedKeys.delete(node.key);
-			else this.collapsedKeys.add(node.key);
-			this.paint("fold");
-		});
+		// `cardNodeFor` and not `withNode`, and the difference is a card that
+		// came out of another note: a projected card is not in this note's parse
+		// at all -- it is built from the other file's text and lives only in the
+		// layout -- so a lookup that knows only this note's nodes finds nothing,
+		// and the count badge on one of those cards would do nothing at all.
+		// `toggleBranch` already sends such a card's button here; this is what
+		// makes that door open, and it is why the button next to a dashed
+		// connector could be pressed until the cows came home.
+		//
+		// Nothing is written either way: a fold is the map's shape, not the
+		// note's, and the note behind a projected card is read-only besides.
+		const node = this.cardNodeFor(id);
+		if (node === null) return;
+		// Has to agree with the `hasChildren` that decided whether to draw the
+		// toggle at all, or the button exists and does nothing.
+		if (this.childCount(node, this.plugin.settings.showBodyNodes) === 0) return;
+		// Folded or unfolded by hand: the branch is the user's from here on,
+		// and closing the search must not undo what they just did.
+		this.searchRevealed.delete(node.key);
+		this.markAnchor(node.key);
+		if (this.collapsedKeys.has(node.key)) this.collapsedKeys.delete(node.key);
+		else this.collapsedKeys.add(node.key);
+		this.paint("fold");
 	}
 
 	/**
@@ -3410,6 +3936,14 @@ export class MindmapView extends TextFileView implements MapController {
 		// here -- `withNode` would look it up, find nothing and do nothing.
 		if (this.bodyNodes.has(id)) {
 			this.toggleBodyFold(id);
+			return;
+		}
+		// A projected card belongs to another note, so the only thing its button
+		// can do is shut the subtree the arrow opened. It has no children this
+		// map could add to, and a plus on it would be a promise the note behind
+		// it cannot keep.
+		if (this.projectedNodeFor(id) !== null) {
+			this.toggleFold(id);
 			return;
 		}
 		this.withNode(id, (_parsed, node) => {
@@ -3755,6 +4289,36 @@ export class MindmapView extends TextFileView implements MapController {
 					.setIcon("pencil")
 					.onClick(() => this.beginEdit(id)),
 			);
+			// A block whose whole text is one link is a link card in everything
+			// but where it came from, so it gets the door too: opening the note
+			// is one press, and editing the line it is written on is the other.
+			const drawn = this.layoutFor(id)?.node;
+			if (drawn && soleLink(drawn.text) !== null) {
+				menu.addItem((item) =>
+					item
+						.setTitle(t("view.menu.openLink"))
+						.setIcon("external-link")
+						.onClick(() => this.openLinkedNote(id)),
+				);
+			}
+			menu.showAtMouseEvent(ev);
+			return;
+		}
+
+		// A card drawn from another note has one thing this map can do with it:
+		// go to the line it was written on. It cannot be renamed, moved or given
+		// children here, so the menu is that and nothing else.
+		const source = this.embedSourceOf(id);
+		if (source !== null) {
+			this.select(id);
+			menu.addItem((item) =>
+				item
+					.setTitle(t("view.menu.openSource"))
+					.setIcon("file-symlink")
+					.onClick(() => {
+						void this.openSourceNote(source.path, source.line);
+					}),
+			);
 			menu.showAtMouseEvent(ev);
 			return;
 		}
@@ -3811,6 +4375,23 @@ export class MindmapView extends TextFileView implements MapController {
 					.setIcon("chevrons-down-up")
 					.onClick(() => this.toggleFold(id)),
 			);
+			// Looking at one branch alone, offered where a branch is: on a card
+			// that has one. The way back out is the same entry, and Escape.
+			if (this.soloKey === node.key) {
+				menu.addItem((item) =>
+					item
+						.setTitle(t("view.menu.unsolo"))
+						.setIcon("eye")
+						.onClick(() => this.toggleSolo(id)),
+				);
+			} else {
+				menu.addItem((item) =>
+					item
+						.setTitle(t("view.menu.solo"))
+						.setIcon("eye")
+						.onClick(() => this.toggleSolo(id)),
+				);
+			}
 		}
 
 		if (canRename(node) || node.parent) {
@@ -4009,9 +4590,11 @@ export class MindmapView extends TextFileView implements MapController {
 		this.search = new SearchBar(this.contentEl, {
 			query: this.searchQuery,
 			replacement: this.searchReplacement,
+			highlightAll: this.highlightAll,
 			onQuery: (query) => this.onQueryChanged(query),
 			onStep: (delta) => this.stepMatch(delta),
 			onReplace: (scope, replacement) => this.replaceMatches(scope, replacement),
+			onHighlightAll: (on) => this.setHighlightAll(on),
 			onClose: () => {
 				this.closeSearch();
 			},
@@ -4038,7 +4621,12 @@ export class MindmapView extends TextFileView implements MapController {
 		this.searchReplacement = replacement;
 		const result = replaceInTree(
 			parsed,
-			{ text: this.searchQuery.text, regex: this.searchQuery.regex, replacement },
+			{
+				text: this.searchQuery.text,
+				regex: this.searchQuery.regex,
+				caseSensitive: this.searchQuery.caseSensitive,
+				replacement,
+			},
 			scope === "current" ? this.currentMatchNode() : null,
 		);
 		if (!result.ok) {
@@ -4084,7 +4672,10 @@ export class MindmapView extends TextFileView implements MapController {
 	private currentMatchNode(): MindNode | null {
 		const key = this.currentMatchKey();
 		if (key === null) return null;
-		return this.parsed?.byKey.get(key) ?? null;
+		// `nodeForKey` and not `byKey`: with the note-content switch on, a match
+		// can be a card the parser never made -- one the view synthesises per
+		// body range at paint time, and which only the layout knows by key.
+		return this.nodeForKey(key);
 	}
 
 	/**
@@ -4098,7 +4689,7 @@ export class MindmapView extends TextFileView implements MapController {
 		if (!this.search) return;
 		const current = this.currentMatchKey();
 		const result = this.parsed
-			? searchTree(this.parsed.root, this.searchQuery)
+			? searchTree(this.parsed, this.searchQuery)
 			: { matches: [], invalid: false };
 		this.matchKeys = result.matches.map((match) => match.key);
 		const index = current === null ? -1 : this.matchKeys.indexOf(current);
@@ -4140,7 +4731,7 @@ export class MindmapView extends TextFileView implements MapController {
 	 */
 	private jumpToCurrent(): void {
 		const key = this.currentMatchKey();
-		const node = key === null ? undefined : this.parsed?.byKey.get(key);
+		const node = key === null ? null : this.nodeForKey(key);
 		if (key === null || !node) return;
 
 		// Read before anything folds: whatever the user is looking at now is what
@@ -4233,21 +4824,220 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	/**
+	 * Where the selected card sits, written out at the top of the map.
+	 *
+	 * A map zoomed out far enough to see all of it is a map whose cards are too
+	 * small to read, and the one thing that is still worth knowing is which
+	 * heading the card you are on belongs to. The row, and the path it is drawn
+	 * from, are `breadcrumb.ts`; all this does is hand it the card.
+	 */
+	private applyBreadcrumb(): void {
+		const trail = this.breadcrumb;
+		if (!trail) return;
+		const steps = crumbTrail(this.selectedNode(), t("view.node.placeholder"));
+		if (!isPath(steps)) {
+			trail.hide();
+			return;
+		}
+		trail.show(steps, (key) => {
+			const there = this.nodeForKey(key);
+			if (!there) return;
+			this.select(there.id);
+			this.revealSelection();
+		});
+	}
+
+	// --- the tag filter, and the branch looked at alone -----------------------
+
+	/**
+	 * Filter the map by a tag, or take that tag back off it.
+	 *
+	 * A tag is the one thing on a card that says what it is about without
+	 * saying where it sits, and pressing one is the natural way to ask for the
+	 * rest of what is about the same thing. What the map does with the answer
+	 * is fade rather than hide: a card that went away would take its branch
+	 * with it and the map would close up around the hole, so what is left of a
+	 * filtered map is the shape the reader already knows, with the cards that
+	 * answer dimmed back into it.
+	 *
+	 * `additive` is what `Ctrl`/`Cmd` asks for, and is the difference between
+	 * narrowing and replacing: two tags at once keep every card carrying
+	 * either.
+	 */
+	toggleTagFilter(tag: string, additive = false): void {
+		const name = normaliseTag(tag);
+		if (name === "") return;
+		const at = this.tagFilter.indexOf(name);
+		if (at >= 0) {
+			this.tagFilter.splice(at, 1);
+		} else if (additive) {
+			this.tagFilter.push(name);
+		} else {
+			this.tagFilter = [name];
+		}
+		this.refreshFades();
+	}
+
+	/**
+	 * Look at one branch and nothing else.
+	 *
+	 * Everything else on the map is faded back rather than taken away: a map
+	 * that lost its other branches would close up around the hole, and the
+	 * reader would be looking at a smaller map rather than at the same map with
+	 * one branch lit. The branch's own ancestors stay too -- they are what says
+	 * where the branch is.
+	 */
+	toggleSolo(id: string): void {
+		const node = this.layoutById.get(id)?.node ?? this.parsed?.byId.get(id);
+		if (!node) return;
+		this.soloKey = this.soloKey === node.key ? null : node.key;
+		this.refreshFades();
+		if (this.soloKey !== null) this.revealSelection();
+	}
+
+	/** Take the whole filter off. False when there was none on. */
+	clearFilter(): boolean {
+		const filtered = this.tagFilter.length > 0;
+		const soloed = this.soloKey !== null;
+		if (!filtered && !soloed) return false;
+		this.tagFilter = [];
+		this.soloKey = null;
+		this.refreshFades();
+		return true;
+	}
+
+	/**
+	 * The cards a solo keeps: the branch, and the chain above it.
+	 *
+	 * Null when no branch is being looked at alone. Read off the tree the node
+	 * belongs to rather than the layout, so a branch folded away is still the
+	 * branch that was asked for.
+	 */
+	private soloKeys(): Set<string> | null {
+		if (this.soloKey === null) return null;
+		const node = this.nodeForKey(this.soloKey);
+		if (!node) return null;
+		const keys = new Set<string>();
+		for (let at: MindNode | null = node; at; at = at.parent) keys.add(at.key);
+		const visit = (n: MindNode): void => {
+			keys.add(n.key);
+			for (const child of n.children) visit(child);
+		};
+		visit(node);
+		return keys;
+	}
+
+	/** Recompute which cards the filter keeps, and redraw the answer. */
+	private refreshFades(): void {
+		const parsed = this.parsed;
+		this.tagKeys =
+			parsed && this.tagFilter.length > 0
+				? tagFilterKeys(parsed.root, this.tagFilter, (node) => this.bodyTextOf(node))
+				: null;
+		this.applyFades();
+	}
+
+	/** What a node's own note-content cards say, for the tag filter to read. */
+	private bodyTextOf(node: MindNode): string {
+		const doc = this.parsed?.doc;
+		if (!doc) return "";
+		return node.bodyRanges
+			.map(([start, end]) => doc.lines.slice(start, end + 1).join("\n"))
+			.join("\n");
+	}
+
+	/**
+	 * Put the filter, and the solo branch, on the cards that are on the map.
+	 *
+	 * Classes rather than a repaint: neither changes any geometry, and a
+	 * repaint would re-measure every card to redraw the same map it is already
+	 * showing. The badges are marked too, because a filter nobody can see the
+	 * state of is a filter that looks like it did nothing.
+	 */
+	private applyFades(): void {
+		const kept = this.tagKeys;
+		const solo = this.soloKeys();
+		for (const [id, element] of this.elements) {
+			const node = this.layoutById.get(id)?.node;
+			let on = kept === null || (node !== undefined && kept.has(node.key));
+			if (on && solo !== null) on = node !== undefined && solo.has(node.key);
+			element.el.toggleClass("mm-faded", !on);
+		}
+		if (kept === null) {
+			for (const el of this.contentEl.querySelectorAll<HTMLElement>(".mm-tag")) {
+				el.removeClass("is-active");
+			}
+			return;
+		}
+		for (const el of this.contentEl.querySelectorAll<HTMLElement>(".mm-tag")) {
+			const name = el.dataset.tag === undefined ? "" : normaliseTag(el.dataset.tag);
+			el.toggleClass("is-active", this.tagFilter.includes(name));
+		}
+	}
+
+	/**
+	 * Open the map to `level` and no deeper.
+	 *
+	 * The press nobody has a button for: "全部展开" is too much on a long note
+	 * and "全部收起" is too little, and what is wanted in between is a depth --
+	 * the second level of headings, say, with everything under it closed. Level
+	 * 1 is the root's own children and nothing else; level 2 is their children.
+	 *
+	 * It is the same walk `collapseAll` and `expandAll` are the two ends of: a
+	 * level is not a third thing, it is that walk at a number the user chose.
+	 */
+	foldToLevel(level: number): void {
+		if (!this.parsed || level < 1) return;
+		this.markGlobalAnchor();
+		this.foldFrom(level);
+		this.paint("fold");
+		this.applyFoldButton();
+	}
+
+	/**
 	 * Redraw the rings from the current match list.
 	 *
 	 * Stripped and rebuilt through `byKey` every time: a paint hands out new
 	 * elements, and a match inside a folded branch has no card to mark at all.
 	 */
+	/**
+	 * The bar's highlight-everything switch. Nothing is searched again for it:
+	 * which cards matched did not change, only how much of that is drawn.
+	 */
+	private setHighlightAll(on: boolean): void {
+		if (this.highlightAll === on) return;
+		this.highlightAll = on;
+		this.applySearchState();
+	}
+
 	private applySearchState(): void {
-		for (const element of this.elements.values()) {
-			element.el.removeClasses(["is-search-match", "is-search-current"]);
+		const current = this.search ? this.currentMatchKey() : null;
+		// Cards are rebuilt by every paint, and a rebuilt card is born without
+		// either mark or ring -- so this only has work to do while a bar is up,
+		// or once just after one came down, when the last marks have to come off
+		// a map that is not going to be rebuilt.
+		if (this.search !== null || this.markedHits) {
+			for (const element of this.elements.values()) {
+				element.el.removeClasses(["is-search-match", "is-search-current"]);
+				clearHits(element.el);
+			}
+			this.markedHits = false;
 		}
 		if (!this.search || !this.parsed) return;
-		const current = this.currentMatchKey();
 		for (const key of this.matchKeys) {
-			const node = this.parsed.byKey.get(key);
+			const node = this.nodeForKey(key);
 			const element = node ? this.elements.get(node.id) : undefined;
-			element?.el.addClass(key === current ? "is-search-current" : "is-search-match");
+			if (!element) continue;
+			const now = key === current;
+			element.el.addClass(now ? "is-search-current" : "is-search-match");
+			// The card is *where* the match is; the mark is *what* matched. Off,
+			// only the card the bar is sitting on is marked -- `is-search-match`
+			// still says the others are matches, and forty marks would say
+			// nothing at all. On, all of them are, and they all look the same:
+			// which one the bar is on is the ring's job, not the mark's.
+			if (now || this.highlightAll) {
+				if (markHits(element.el, this.searchQuery) > 0) this.markedHits = true;
+			}
 		}
 	}
 
@@ -4457,23 +5247,24 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	/**
-	 * The note this card points at, or null when it points at nothing.
+	 * The note or address this card points at, and where it goes.
 	 *
-	 * Only a node whose whole text is one link counts. A sentence that mentions
-	 * a note has no single target, and opening an arbitrary one of them would
-	 * be the map guessing.
+	 * `cardLink` rather than `soleLink`, so the menu, the footer and the card
+	 * itself all agree about which cards these are: a reader cannot see which
+	 * spelling the note used, and being sent somewhere by a card that looked
+	 * pressable but was not is the map looking broken.
 	 */
-	linkedTarget(id: string): string | null {
-		const node = this.parsed?.byId.get(id);
-		if (!node) return null;
-		const parts = soleLink(node.text);
-		return parts === null ? null : parts.target;
-	}
-
 	openLinkedNote(id: string): void {
-		const target = this.linkedTarget(id);
-		if (target === null) return;
-		void this.app.workspace.openLinkText(target, this.file?.path ?? "", false);
+		const node = this.cardNodeFor(id);
+		const own = node ? cardLink(node.text) : null;
+		if (own === null) return;
+		// An address is not something the workspace can open: it goes to the
+		// browser, which is the only place it can be read.
+		if (own.external) {
+			if (/^(https?|mailto):/i.test(own.target)) window.open(own.target, "_blank");
+			return;
+		}
+		void this.app.workspace.openLinkText(own.target, this.file?.path ?? "", false);
 	}
 
 	/**
@@ -4487,6 +5278,88 @@ export class MindmapView extends TextFileView implements MapController {
 		this.withNode(id, (parsed, node) => {
 			this.applyEdit(renameNode(parsed, node, text), text.trim() === "");
 		});
+	}
+
+	// --- reading the note a card points at ------------------------------------
+
+	/**
+	 * What a card should draw about a link, or null when it has none.
+	 *
+	 * The work and the state it reads live in `linkCards`: a paint cannot wait
+	 * for a file, so the answer is whatever has arrived so far, and asking for
+	 * the rest is that module's business.
+	 */
+	private cardPreviewFor(
+		node: MindNode,
+		maxLines: number,
+		cache: Map<string, TFile | null>,
+	): LinkCardOptions | null {
+		return this.linkCards.cardPreviewFor(node, maxLines, cache);
+	}
+
+	/**
+	 * The outline an open card is showing, or null when it is not an open one.
+	 *
+	 * Built from a read rather than from the press, so a card whose note has not
+	 * been read yet answers null until it has.
+	 */
+	private projectionFor(node: MindNode): Projection | null {
+		return this.linkCards.projectionFor(node);
+	}
+
+	/**
+	 * Another note changed under the maps that are reading it.
+	 *
+	 * What is thrown away is the outline built from the old text; the read cache
+	 * is stamped, so a new mtime is already a miss.
+	 */
+	forgetLinkRead(path: string): void {
+		this.linkCards.forgetRead(path);
+	}
+
+	/** Open or close what a card is showing about a note it points at. */
+	toggleCardPreview(id: string): void {
+		this.linkCards.toggleCardPreview(id);
+	}
+
+	/** Open a link from inside a card that is not itself one. */
+	previewLink(id: string, target: string): void {
+		this.linkCards.previewLink(id, target);
+	}
+
+	/** Open or close the other note's outline under this card. */
+	toggleEmbed(id: string): void {
+		this.linkCards.toggleEmbed(id);
+	}
+
+	/** The projected node a card's id stands for, or null. */
+	private projectedNodeFor(id: string): MindNode | null {
+		return this.linkCards.projectedNodeFor(id);
+	}
+
+	/** Where a projected card's text was written: the note it came from. */
+	private embedSourceOf(id: string): { path: string; line: number } | null {
+		return this.linkCards.embedSourceOf(id);
+	}
+
+	/**
+	 * Open the note a projected card was read from, at the line it was read from,
+	 * in a new tab.
+	 */
+	private openSourceNote(path: string, line: number): Promise<void> {
+		return this.linkCards.openSourceNote(path, line);
+	}
+
+	/**
+	 * The node a card is drawn from: a node of the note, or a card of its prose.
+	 *
+	 * A note-content card has no node in the parsed tree, so `byId` misses it --
+	 * and it is the card a reader is most likely to press a link on, since
+	 * prose is where links are written. Resolved through the layout, which is
+	 * what put the card on screen in the first place.
+	 */
+	private cardNodeFor(id: string): MindNode | null {
+		return this.parsed?.byId.get(id) ?? this.layoutFor(id)?.node ?? null;
 	}
 
 	// --- export ---------------------------------------------------------------
@@ -4614,5 +5487,19 @@ export class MindmapView extends TextFileView implements MapController {
 	override async onLoadFile(file: TFile): Promise<void> {
 		this.needsFit = true;
 		await super.onLoadFile(file);
+	}
+
+	/**
+	 * The view is going away.
+	 *
+	 * Reading another note is a turn of the event loop, and the read outlives
+	 * whatever asked for it -- a view swapped to markdown, a tab closed, a leaf
+	 * pointed at another file. Every promise this view started already holds the
+	 * view, so the flag is not about collecting it: it is about the paint the
+	 * read would otherwise run against a map that is no longer there.
+	 */
+	override onunload(): void {
+		this.closed = true;
+		super.onunload();
 	}
 }

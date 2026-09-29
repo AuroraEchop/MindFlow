@@ -172,6 +172,10 @@ const EN = {
 	"settings.mediaMaxHeight.desc":
 		"The tallest a picture or a video may be drawn, in pixels. A picture narrower than the card is never stretched to fill it.",
 
+	"settings.linkPreviewLines.name": "Link card preview lines",
+	"settings.linkPreviewLines.desc":
+		"How many lines of the note a card that links to one shows when it is open, before it stops and counts the rest. Set to 0 to leave the preview out and keep the card to its own line plus the way in.",
+
 	"settings.toolbarVisibility.name": "Corner toolbar",
 	"settings.toolbarVisibility.desc":
 		"When the zoom, search and settings buttons are shown. On selection keeps them out of the way until a card is picked; always leaves them where they have always been.",
@@ -245,6 +249,8 @@ const EN = {
 	// --- the corner toolbar -------------------------------------------------
 	"view.tool.expandAll": "Expand all",
 	"view.tool.collapseAll": "Collapse all",
+	"view.tool.foldLevel": "Open to level {level}",
+	"view.breadcrumb": "Path to this card",
 	"view.tool.shortcuts": "Keyboard shortcuts",
 	"view.tool.export": "Export",
 	"view.tool.settings": "Settings",
@@ -263,6 +269,20 @@ const EN = {
 	"view.media.open": "Open in Obsidian's player",
 	"view.media.preview": "Preview",
 	"view.lightbox.close": "Close the preview",
+
+	// --- the card of a node that points at another note ---------------------
+	"view.link.openNote": "Open the whole note",
+	"view.link.moreLines": "{count} more lines",
+	"view.link.loading": "Reading the note…",
+	"view.link.missing": "No note called {name} yet",
+	"view.link.empty": "That note has no text in it yet",
+	"view.link.expandOutline": "Open this note's outline here",
+	"view.link.collapseOutline": "Close this note's outline",
+	"view.link.noOutline": "That note has no headings or lists to open.",
+	"view.link.previewAria": "What the linked note says",
+	"view.link.siteAria": "Where this card leads",
+	"view.link.openSite": "Open in the browser",
+	"view.link.rowHint": "Click to expand or collapse the preview",
 
 	// --- a callout's title, when the note wrote none ------------------------
 	// Obsidian's own list of types, which is also the set that gets an icon.
@@ -324,12 +344,15 @@ const EN = {
 	"view.menu.addSiblingAbove": "Add sibling above",
 	"view.menu.fold": "Fold",
 	"view.menu.unfold": "Unfold",
+	"view.menu.solo": "Only this branch",
+	"view.menu.unsolo": "The whole map again",
 	"view.menu.rename": "Rename",
 	"view.menu.delete": "Delete",
 	"view.menu.linkToNote": "Link to a note…",
 	"view.menu.createNote": "New note from this node",
 	"view.menu.unlink": "Remove the link",
 	"view.menu.openLink": "Open the linked note",
+	"view.menu.openSource": "Open the source note",
 
 	// --- what the map says when it will not do something --------------------
 	"view.notice.rootRename": "This node is the file name. Rename the note to change it.",
@@ -351,6 +374,9 @@ const EN = {
 
 	// --- the find bar -------------------------------------------------------
 	"search.regex": "Regular expression",
+	"search.case": "Match case",
+	"search.titlesOnly": "Search card titles only",
+	"search.highlightAll": "Highlight every match",
 	"search.previous": "Previous match",
 	"search.next": "Next match",
 	"search.close": "Close search",
@@ -546,6 +572,10 @@ const ZH: Record<I18nKey, string> = {
 	"settings.mediaMaxHeight.desc":
 		"图片和视频最高画多少像素。比卡片还窄的图片不会被拉伸填满。",
 
+	"settings.linkPreviewLines.name": "链接卡预览行数",
+	"settings.linkPreviewLines.desc":
+		"指向另一篇笔记的卡片展开后，显示那篇笔记的前几行，再往下就停下并数出剩余行数。设为 0 则完全不显示预览，卡片只保留它自己那一行加上入口。",
+
 	"settings.toolbarVisibility.name": "角落工具栏",
 	"settings.toolbarVisibility.desc":
 		"缩放、搜索、设置这些按钮何时显示。「仅选中时」会让它们先让开，直到选中某张卡片；「始终」则一直留在原来的位置。",
@@ -618,6 +648,8 @@ const ZH: Record<I18nKey, string> = {
 	// --- 右下角工具栏 --------------------------------------------------------
 	"view.tool.expandAll": "全部展开",
 	"view.tool.collapseAll": "全部折叠",
+	"view.tool.foldLevel": "展开到第 {level} 层",
+	"view.breadcrumb": "这张卡片的路径",
 	"view.tool.shortcuts": "快捷键",
 	"view.tool.export": "导出",
 	"view.tool.settings": "设置",
@@ -636,6 +668,20 @@ const ZH: Record<I18nKey, string> = {
 	"view.media.open": "用 Obsidian 的播放器打开",
 	"view.media.preview": "点击放大预览",
 	"view.lightbox.close": "关闭预览",
+
+	// --- 指向另一篇笔记的节点，它的卡片 --------------------------------------
+	"view.link.openNote": "在完整笔记中打开",
+	"view.link.moreLines": "还有 {count} 行未显示",
+	"view.link.loading": "正在读取笔记…",
+	"view.link.missing": "还没有叫「{name}」的笔记",
+	"view.link.empty": "这篇笔记还没有正文",
+	"view.link.expandOutline": "在这里展开这篇笔记的大纲",
+	"view.link.collapseOutline": "收起这篇笔记的大纲",
+	"view.link.noOutline": "这篇笔记没有标题或列表，展不开。",
+	"view.link.previewAria": "被链接笔记的内容",
+	"view.link.siteAria": "这张卡片指向哪里",
+	"view.link.openSite": "在浏览器中打开",
+	"view.link.rowHint": "点击展开/收起预览",
 
 	// --- 笔记没写标题时的 callout 标题 ---------------------------------------
 	// 与 Obsidian 内置类型一一对应，也是能拿到图标的那些。列表之外的类型
@@ -696,12 +742,15 @@ const ZH: Record<I18nKey, string> = {
 	"view.menu.addSiblingAbove": "在上方添加同级节点",
 	"view.menu.fold": "折叠",
 	"view.menu.unfold": "展开",
+	"view.menu.solo": "只看这支分支",
+	"view.menu.unsolo": "看回整张图",
 	"view.menu.rename": "重命名",
 	"view.menu.delete": "删除",
 	"view.menu.linkToNote": "链接到某篇笔记…",
 	"view.menu.createNote": "由该节点新建笔记",
 	"view.menu.unlink": "移除链接",
 	"view.menu.openLink": "打开链接的笔记",
+	"view.menu.openSource": "打开来源笔记",
 
 	// --- 导图拒绝执行某件事时的提示 ------------------------------------------
 	"view.notice.rootRename": "该节点就是文件名。要改名请重命名这篇笔记。",
@@ -722,6 +771,9 @@ const ZH: Record<I18nKey, string> = {
 
 	// --- 查找栏 --------------------------------------------------------------
 	"search.regex": "正则表达式",
+	"search.case": "区分大小写",
+	"search.titlesOnly": "只搜卡片标题",
+	"search.highlightAll": "高亮全部命中",
 	"search.previous": "上一个匹配",
 	"search.next": "下一个匹配",
 	"search.close": "关闭查找",

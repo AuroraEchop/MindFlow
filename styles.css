@@ -274,6 +274,19 @@
 .mm-edge[data-branch="8"] { stroke: var(--mm-b8); }
 .mm-edge[data-branch="9"] { stroke: var(--mm-b9); }
 
+/*
+ * The connector that crosses into another note, when a link card has that
+ * note's outline open under it.
+ *
+ * Dashed, and nothing else: the card on the far end is drawn like every other
+ * card, because it *is* a card of a map -- just not this one's. A line that
+ * changes its nature halfway across is the whole of the marking, and it is the
+ * only one that does not have to be learned twice.
+ */
+.mm-edge.mm-edge-projected {
+	stroke-dasharray: 5 4;
+}
+
 /* --- the branch palette --------------------------------------------------- */
 
 /*
@@ -443,6 +456,19 @@
 	line-height: 1.45;
 	cursor: grab;
 	user-select: none;
+}
+
+/*
+ * A title line that opens and closes the block under it.
+ *
+ * The card is still something you pick up and move, which is the `grab` above,
+ * and the press that opens the block is the same press. What says there is a
+ * block to open is the cursor and the tooltip together: a line that behaves
+ * like every other line until it is pressed is a switch nobody finds, and a
+ * hand is the one thing on the card that costs no room.
+ */
+.mm-card.mm-opens-preview {
+	cursor: pointer;
 }
 
 /* The root reads as the anchor of the whole map. */
@@ -744,6 +770,75 @@
 		0 2px 10px rgb(0 0 0 / 18%);
 }
 
+/* The words themselves, marked like a highlighter rather than ringed like a
+   card. The ring says *which* card answered the query; this says *what* in it
+   did, which a ring around the whole card cannot.
+
+   One colour, and it is the same colour on every mark. A paler shade for the
+   matches that are not the current one was tried and dropped: two yellows on
+   one card read as two different things when they are the same thing, and the
+   weak one looked washed out beside the strong one. Which match the bar is on
+   is already said twice over -- by the ring, and by where the camera is.
+
+   The amber is `#dfb14d` in the dark theme and `#ffe07a` in the light one.
+
+   **The ink is the theme's**, and it is a deliberate change of colour: black
+   under a light theme's yellow reads 9.8:1 where the muted `#888888` it
+   replaced read 2.7:1, so recolouring a word is usually what makes it legible
+   rather than what spoils it.
+
+   **Except where the word is already brighter than the block.** A root card is
+   written in `--text-on-accent` -- white in most themes, in the light one too
+   -- and forcing black on it would put black words inside a coloured pill, so
+   the mark reads as having come from another card. Those marks carry
+   `.keeps-ink` and take the word's own colour back; `hits.ts` decides which
+   they are from the card's computed colour, not from the kind of card.
+
+   `.keeps-ink` is `color: inherit` and not the absence of a `color`, which is
+   not a detail: the browser's own stylesheet sets `mark { color: MarkText }`,
+   black, and a UA declaration beats inheritance. A `mark` with no `color` of
+   its own is black whatever the card is written in.
+
+   What is left is honest rather than perfect: a root card's white word on
+   `#ffe07a` is 1.3:1, and the two ways to fix that -- darkening the word or
+   darkening that card's block -- are both changes to something the reader is
+   looking at. `docs/design/hit-keep-ink.html` measures every one of them.
+
+   Nothing here may change the box. No padding, no border, no font, no
+   letter-spacing: a mark sits inside a measured line, and a mark that widened
+   one would re-wrap the line and move every card after it. The resets below
+   are the same rule stated defensively -- a theme is free to style `mark`. */
+.mindflow {
+	--mm-hit-bg: #dfb14d;
+	--mm-hit-ink: #fff;
+}
+
+.theme-light .mindflow {
+	--mm-hit-bg: #ffe07a;
+	--mm-hit-ink: #000;
+}
+
+mark.mm-hit {
+	display: inline;
+	padding: 0;
+	margin: 0;
+	border: 0;
+	font: inherit;
+	line-height: inherit;
+	letter-spacing: inherit;
+	box-shadow: none;
+	background: var(--mm-hit-bg);
+	color: var(--mm-hit-ink);
+	border-radius: 2px;
+}
+
+/* The word was already brighter than the block, so it keeps its own colour --
+   see the note above. Set by `brightInk` in `hits.ts`, which reads it off the
+   card rather than guessing from the card's kind. */
+mark.mm-hit.keeps-ink {
+	color: inherit;
+}
+
 /*
  * What the drag left behind: an empty slot rather than a faded card. A dashed
  * outline reads as "the card came from here", which dimming cannot say -- a
@@ -767,6 +862,36 @@
 .mm-node.is-dragging {
 	opacity: 0.4;
 	pointer-events: none;
+	/* The text of the card being carried is not up for selection: the press
+	   that lifted it was a press on prose, and a drag that also swept a
+	   highlight across the note would be the one gesture doing two things. */
+	user-select: none;
+}
+
+/*
+ * The half second before a card comes up: the outline it will wear as a slot,
+ * drawn in over the wait.
+ *
+ * The same dashed outline the drag draws, arrived at slowly, because the wait
+ * has to say something or a press that does nothing while it lasts reads as a
+ * press that did nothing. Drawing it rather than a spinner or a progress bar:
+ * what is being waited for is this outline, and a card that shows the thing it
+ * is about to become needs no legend.
+ *
+ * A colour change rather than an animation, because the base rule already
+ * leaves `outline-color` to transition -- the hover ring fades in that way --
+ * so this is a duration and a colour and nothing else. The dashes are there
+ * from the first frame: `outline-style` cannot be transitioned, and a slot that
+ * crept in one dash at a time would be a box being drawn rather than a card
+ * being picked up.
+ *
+ * `500ms` is `LIFT_HOLD` in `liftPress.ts`, and the two have to agree: the
+ * outline finishes filling exactly as the card comes up.
+ */
+.mm-node.is-lifting .mm-row {
+	outline-color: var(--interactive-accent);
+	outline-style: dashed;
+	transition: outline-color 500ms linear;
 }
 
 /*
@@ -894,6 +1019,220 @@
 	font-size: var(--font-ui-smaller);
 }
 
+/* --- the card of a node that points at another note ---------------------- */
+
+/*
+ * The pair of buttons a link card carries, on the title's own line so the layout
+ * measures them with the title the way it measures the checkbox.
+ *
+ * The wrapper is what carries the auto margin: it costs the card nothing while
+ * both blocks are closed -- there is no free space for a margin to take -- and it
+ * puts the pair on the card's far edge the moment the preview widens the row.
+ * Carrying it here rather than on each button is what keeps the two together,
+ * whichever of them is drawn.
+ */
+.mm-link-tools {
+	flex: 0 0 auto;
+	align-self: center;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	margin-left: auto;
+}
+
+/*
+ * The one button a link card carries: the arrow that opens the other note's
+ * outline under the card.
+ *
+ * 18px around a 15px icon, which is the size the rest of a card's furniture is
+ * drawn at. The icon turns when its block opens, and the icon rather than the
+ * button: a rotated box would take its hover fill round with it, and a
+ * quarter-turned square behind an arrow reads as a mistake.
+ */
+.mm-link-arrow {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	border-radius: 4px;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.mm-link-arrow:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.mm-link-arrow .svg-icon {
+	width: 15px;
+	height: 15px;
+	transition: transform 120ms ease;
+}
+
+/*
+ * The arrow drawn by a character, which is what happens when the icon is not in
+ * the bundle -- Obsidian's `setIcon` says nothing when it finds nothing. The
+ * character is a chevron and not a triangle: a filled triangle is the shape
+ * readers read as *play*, and the one thing this button is not is a play
+ * button. It turns exactly as the icon does, which is the whole of what makes
+ * it the same control rather than a second design of one.
+ */
+.mm-link-arrow .mm-link-arrow-glyph {
+	font-size: 15px;
+	line-height: 1;
+	transition: transform 120ms ease;
+}
+
+/* Open is colour as well as the turn: a reader who has pressed the arrow once
+   reads the colour from then on, and the turn alone is a small thing to read at
+   the edge of a card. */
+.mm-link-arrow.is-open {
+	color: var(--link-color);
+}
+
+.mm-link-arrow.is-open .svg-icon,
+.mm-link-arrow.is-open .mm-link-arrow-glyph {
+	transform: rotate(90deg);
+}
+
+/* While the card is being edited the button steps out of the way. The field is
+   widened to the card's own edges by a negative margin of exactly its padding,
+   and a flex item still sitting after it would be tucked under that edge. What
+   the card is being edited into may not be a link at all, so the button would
+   be the one piece of the card that had already stopped being true. */
+.mm-node.is-editing .mm-link-tools {
+	display: none;
+}
+
+/*
+ * The note's own words, under the title.
+ *
+ * The annotation strip's box model, for the annotation strip's reasons: inside
+ * the row, so the fill, the border and the ring cover it, and so its width
+ * counts towards the card the way the strip's does. The rule above it is what
+ * makes the header, the note and the footer read as three parts.
+ *
+ * What is inside is drawn by `renderBlocks`, the renderer a card of the note's
+ * own prose uses, which is why the box carries `.mm-text` as well: every rule
+ * that gives a sample, a table and a callout their shape is written under
+ * `.mm-text`, and the preview is a text box in a card like any other. It is
+ * read at the smaller size and in the muted colour, so a paragraph of somebody
+ * else's prose never passes for the note being mapped.
+ *
+ * Not selectable, and that is the one deliberate loss here. The card is a drag
+ * handle and the block has a button on it; text a press could select is text a
+ * press would stop meaning that. The whole note is one press away, and that is
+ * where it is read.
+ */
+.mm-preview {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 6px var(--mm-card-pad-x, 12px) 2px;
+	border-top: 1px solid var(--background-modifier-border);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.5;
+	user-select: none;
+	cursor: grab;
+}
+
+/* The blocks of a preview are spaced the way a content card's own blocks are,
+   and for the same reason: two paragraphs drawn flush read as one. The head is
+   one of these children, so the gap under it comes from here too. */
+.mm-preview > * + * {
+	margin-top: 6px;
+}
+
+.mm-preview-line {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.mm-preview-line.is-hint,
+.mm-preview-more {
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+/*
+ * The other kind of preview: where an address leads.
+ *
+ * A card pointing outside the vault has no words to show -- there is no file to
+ * read, and fetching the page would be the map going to the network on the
+ * reader's behalf, which is a promise this plugin already makes about pictures.
+ * What is left is what a reader recognises: the site, and the rest of the
+ * address under it.
+ *
+ * The site is set in the card's own colour rather than the muted one a note's
+ * preview is read in. It is the answer, not the contents: there is nothing else
+ * on the card to read, so nothing for it to defer to.
+ */
+.mm-preview.is-site {
+	padding-top: 7px;
+	color: var(--text-normal);
+}
+
+.mm-site-host {
+	font-weight: 500;
+	overflow-wrap: anywhere;
+}
+
+.mm-site-path {
+	color: var(--text-faint);
+	font-size: 0.92em;
+	overflow-wrap: anywhere;
+}
+
+/*
+ * The way into the whole note.
+ *
+ * One sentence under the rule that closes the preview, and the only thing on
+ * that line: the badge that used to hold the other end went up into the block it
+ * was describing. With one child left there is nothing to space apart, so the
+ * row is left to lay out from the start.
+ */
+.mm-link-foot {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-top: 6px;
+	padding: 5px var(--mm-card-pad-x, 12px) var(--mm-card-pad-y, 6px);
+	border-top: 1px solid var(--background-modifier-border);
+	font-size: var(--font-ui-smaller);
+}
+
+.mm-link-open {
+	color: var(--link-color);
+	cursor: pointer;
+}
+
+.mm-link-open:hover {
+	color: var(--link-color-hover, var(--link-color));
+	text-decoration: underline;
+}
+
+/*
+ * A projected card: a node of the note the arrow pulled in rather than one of
+ * the note being mapped.
+ *
+ * Drawn exactly like any other card, on purpose -- it is a reading of a map, not
+ * a different kind of thing, and a second card style would be one more thing to
+ * learn. What the dashed connector into it says is the whole of the marking.
+ */
+.mm-node.is-projected .mm-card {
+	cursor: default;
+}
+
+/* The checkbox on a projected card is the other note's, and ticking it would
+   write to that note. It is drawn for what it says and not for what it does, so
+   it does not take the pointer: a press there is a press on the card. */
+.mm-node.is-projected .mm-checkbox {
+	pointer-events: none;
+}
+
 .mm-placeholder {
 	color: var(--text-faint);
 	font-style: italic;
@@ -908,13 +1247,29 @@
 }
 
 /* A tag, drawn as the badge Obsidian draws it as. Padding rather than a
-   `text-decoration`, for the reason the link below spells out -- and unlike the
-   link it is not clickable, because the map has nothing to do with it. */
+   `text-decoration`, for the reason the link below spells out -- and now a
+   press on one filters the map by it, so it gets the pointer that says so. */
 .mm-text .mm-tag {
 	padding: 0 5px;
 	border-radius: var(--radius-s, 4px);
 	color: var(--tag-color, var(--text-accent));
 	background: var(--tag-background, var(--background-modifier-hover));
+	cursor: pointer;
+}
+
+/* A tag the map is filtered by. The badge keeps its own colour -- a tag is a
+   tag whether it is the filter or not -- and says it is the one by taking the
+   outline a selected card takes. */
+.mm-text .mm-tag.is-active {
+	outline: 1px solid currentColor;
+}
+
+/* What the filter leaves behind: faded rather than gone, so the shape of the
+   map a reader knows is still the shape in front of them. Everything about the
+   card is dimmed at once, connectors included, which is what makes a filtered
+   map read as one thing looked at rather than as two things drawn. */
+.mm-node.mm-faded {
+	opacity: 0.25;
 }
 
 /* The dotted underline is a bottom border rather than a decoration: the plugin
@@ -1216,6 +1571,75 @@
    has to read as columns, which is the one thing `pre-wrap` cannot do. */
 .mm-text .mm-para {
 	white-space: pre-wrap;
+}
+
+/* A list, drawn by the browser as the list the note wrote: the markers are
+   generated, so the indent here is what puts the text of an item in from its
+   bullet, and a nested list indents once more because it is one more list.
+
+   The padding is the room a marker sits in -- a two-digit number fits it, and
+   a bullet is centred in it -- and a nested list is indented once more simply
+   because it is one more list. The markers themselves are muted: they are the
+   note's structure, and the words are what a reader came for. */
+.mm-text .mm-list {
+	margin: 0;
+	padding-left: 1.5em;
+	/* `pre-wrap`, like a paragraph: an item written over two lines is an item
+	   of two lines, and the note is not a reflowing page. The wrap indents
+	   under the item's text rather than under its marker, which is what the
+	   marker being outside the content box buys. */
+	white-space: pre-wrap;
+}
+
+.mm-text .mm-list .mm-list {
+	/* Nothing above it: an item with a nested list is one item, and a gap
+	   between them would read as two. */
+	margin-top: 0;
+}
+
+.mm-text .mm-list li::marker {
+	color: var(--text-muted);
+}
+
+/* A quote: the bar is the whole of the style, because the bar is what a reader
+   reads first -- these are somebody else's words, and the card says so before a
+   word of them. It is deliberately not the callout's box: a callout has a
+   heading and a colour and is a thing the note named, where a quote is only
+   ever the words and the edge they came in by. Nothing here sets a width:
+   the quote is in the flow and the card is measured off the flow.
+
+   The muted face is the same bargain the list markers make -- the words are
+   what a reader came for -- and it stops at the quote's own edge so a link
+   inside it is still the colour a link is. */
+.mm-text .mm-quote {
+	margin: 0;
+	padding-left: 10px;
+	border-left: 3px solid var(--text-faint);
+	color: var(--text-muted);
+}
+
+/* Blocks inside a quote are spaced as they are on the card, and a quote inside
+   a quote is one step in: the second bar is the nesting, which is what the
+   second `>` in the note was. */
+.mm-text .mm-quote > * + * {
+	margin-top: 6px;
+}
+
+.mm-text .mm-quote .mm-quote {
+	padding-left: 8px;
+}
+
+/* A rule: the one block with nothing to say, so it is the one block with
+   nothing but its own line. The colour is fainter than the quote's bar -- a
+   bar sits beside words and has to be readable, where a rule is the gap it
+   makes. `border` rather than `background` so it inherits no box and a card
+   measured off the flow still sees it; the vertical margin is the gap, and it
+   is deliberately smaller than the gap between paragraphs because a rule is
+   already a gap with a line in it. */
+.mm-text .mm-rule {
+	margin: 6px 0;
+	border: 0;
+	border-top: 1px solid var(--text-faint);
 }
 
 /* Sized by the flow, never pinned: the card is `max-content` under a cap, so a
@@ -1562,6 +1986,58 @@
 .mm-toolbars.is-hidden {
 	opacity: 0;
 	pointer-events: none;
+}
+
+/* The path to the selected card, across the top of the map. Pinned to the top
+   left rather than centred: a map is panned and zoomed, and a row that moved
+   with the cards would be a row the reader has to look for. It is a sibling of
+   the viewport for the same reason the toolbar is, and it never takes a press
+   that is not meant for it -- the map's own handlers live inside the viewport.
+
+   Muted, and small: it is an answer to "where am I", not a heading. */
+.mm-breadcrumb {
+	position: absolute;
+	z-index: 10;
+	left: 12px;
+	top: 10px;
+	right: 12px;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 4px;
+	font-size: var(--font-ui-smaller, 12px);
+	color: var(--text-muted);
+	/* A press has to reach the crumbs and nothing else: the row is wide, and
+	   the blank either side of them is blank canvas. */
+	pointer-events: none;
+	transition: opacity 160ms ease;
+}
+
+.mm-breadcrumb.is-hidden {
+	opacity: 0;
+	pointer-events: none;
+}
+
+.mm-breadcrumb .mm-crumb {
+	pointer-events: auto;
+	cursor: pointer;
+	max-width: 22em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mm-breadcrumb .mm-crumb:hover {
+	color: var(--text-normal);
+}
+
+/* Where the reader is, as opposed to the way there. */
+.mm-breadcrumb .mm-crumb.is-here {
+	color: var(--text-normal);
+}
+
+.mm-breadcrumb .mm-crumb-sep {
+	opacity: 0.6;
 }
 
 /* The copy of a card that follows the pointer while one is being dragged. On
