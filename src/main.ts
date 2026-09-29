@@ -2,6 +2,7 @@ import { MarkdownView, Notice, Plugin, TFile, TFolder, debounce, setIcon } from 
 import type { ViewState, WorkspaceLeaf } from "obsidian";
 
 import { MINDMAP_VIEW_TYPE, MindmapView } from "./view/MindmapView.ts";
+import { lineOfState } from "./view/dropNote.ts";
 import { SettingsModal } from "./view/settingsModal.ts";
 import { EXPORT_COMMANDS } from "./export/run.ts";
 import { resolveLanguage, setLanguage, t } from "./i18n.ts";
@@ -82,6 +83,21 @@ const FOLD_SAVE_DELAY = 800;
  * three call sites honest: a cast would let a typo in the field name through,
  * and this is the one place that decides.
  */
+/**
+ * The line a markdown view has just been sent to.
+ *
+ * `file-open` carries no line, so it is read off the view that was asked: the
+ * ephemeral state is what the caller said, and the caret is where the view
+ * ended up -- the outline pane sets the first, and Obsidian's own scroll sets
+ * the second, so either one answers and the state is asked first.
+ */
+function requestedLine(view: MarkdownView): number {
+	const asked = lineOfState(view.getEphemeralState());
+	if (asked !== null) return asked;
+	const cursor = view.editor?.getCursor?.();
+	return typeof cursor?.line === "number" ? cursor.line : 0;
+}
+
 function leafFile(leaf: WorkspaceLeaf): TFile | null {
 	const view: unknown = leaf.view;
 	if (typeof view !== "object" || view === null) return null;
@@ -126,6 +142,19 @@ export default class MindmapPlugin extends Plugin {
 
 	/** Notes this session has been left showing as a map. */
 	private mapNotes = new Set<string>();
+
+	/**
+	 * The map each leaf is holding, by path.
+	 *
+	 * Kept so that a leaf which swaps *away* from a map can be told apart from
+	 * one that was never a map: the outline pane's press, and any
+	 * `[[note#heading]]` click, arrives as a markdown view at a line, and the
+	 * only thing that says whether the reader was looking at a map when they
+	 * asked is what that leaf was showing a moment before. Deleted by the swap
+	 * back and by the one use it is kept for, so it cannot outlive the map it
+	 * describes.
+	 */
+	private mapLeaves = new Map<WorkspaceLeaf, string>();
 
 	/**
 	 * The same list as a previous session left it, read only in `always` mode.
@@ -487,7 +516,14 @@ export default class MindmapPlugin extends Plugin {
 		// as the map's own, or switching views would mean switching histories.
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => {
-				if (file instanceof TFile && file.extension === "md") void this.trackExternalEdit(file);
+				if (!(file instanceof TFile) || file.extension !== "md") return;
+				void this.trackExternalEdit(file);
+				// A map may be showing this note under a card that links to it.
+				// The read itself needs no telling -- it is stamped with the
+				// mtime, so a new one is a miss -- but the outline built from
+				// the old text is a set of nodes with ids of its own, and it
+				// would go on saying what the note said before the edit.
+				this.forgetLinkReads(file.path);
 			}),
 		);
 
@@ -496,10 +532,28 @@ export default class MindmapPlugin extends Plugin {
 		// -- and what stops this from firing on the swap it has just made.
 		this.registerEvent(
 			this.app.workspace.on("file-open", (file) => {
-				if (!file || !this.markedAsMap(file.path)) return;
+				if (!file) return;
 				const leaf = this.app.workspace.getMostRecentLeaf();
 				if (!leaf || leaf.view.getViewType() !== "markdown") return;
 				if (leafFile(leaf)?.path !== file.path) return;
+
+				// The note was a map a moment ago, in this very leaf, and
+				// something has just replaced it with the editor at a line --
+				// the outline pane, or a `[[note#heading]]` press. The reader
+				// was reading a map, so the map is what comes back, with the
+				// card that line is written on selected. Taken once: a note the
+				// user has since chosen to read as markdown is theirs to keep
+				// that way, and hijacking the next press would be the plugin
+				// overruling them.
+				const holding = this.mapLeaves.get(leaf);
+				if (holding === file.path) {
+					this.mapLeaves.delete(leaf);
+					this.pendingReveal = { path: file.path, line: requestedLine(leaf.view as MarkdownView) };
+					void this.setMindmapView(leaf);
+					return;
+				}
+
+				if (!this.markedAsMap(file.path)) return;
 				void this.setMindmapView(leaf);
 			}),
 		);
@@ -800,6 +854,21 @@ export default class MindmapPlugin extends Plugin {
 		}
 	}
 
+	/**
+	 * A note changed under the maps that are reading it.
+	 *
+	 * Told, rather than asked for: a map knows which cards point where, and the
+	 * vault does not. Only the maps that were actually projecting this note do
+	 * anything about it, so a vault-wide edit -- a sync client landing a hundred
+	 * files -- costs a lookup per open map per file and nothing else.
+	 */
+	forgetLinkReads(path: string): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(MINDMAP_VIEW_TYPE)) {
+			const view = leaf.view;
+			if (view instanceof MindmapView) view.forgetLinkRead(path);
+		}
+	}
+
 	// --- switching between markdown and the map -------------------------------
 
 	private isToggleable(leaf: WorkspaceLeaf): boolean {
@@ -842,6 +911,7 @@ export default class MindmapPlugin extends Plugin {
 			},
 			{ focus: true },
 		);
+		this.mapLeaves.set(leaf, file.path);
 	}
 
 	/**
@@ -853,6 +923,7 @@ export default class MindmapPlugin extends Plugin {
 	 */
 	async setMarkdownView(leaf: WorkspaceLeaf, remember = true): Promise<void> {
 		const file = leafFile(leaf);
+		this.mapLeaves.delete(leaf);
 		if (remember && file) this.rememberView(file.path, false);
 		const remembered = this.previousState.get(leaf);
 
