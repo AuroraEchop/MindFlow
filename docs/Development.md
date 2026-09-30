@@ -67,11 +67,22 @@ undo, search, popovers and export all hang off one `TextFileView` lifecycle.
 | `blocks.ts` | A body range as the blocks it is made of — paragraph, code, table, callout — and which of them a card cannot draw as a run of text |
 | `replace.ts` | Find and replace over the tree: a plan, then the whole plan written as one edit |
 | `noteName.ts` | A node's text as a legal note name, and a `[[link]]` read back into its target and label |
+| `embedTree.ts` | Another note's outline as a detached, `virtual` subtree — see below |
 | `search.ts` | Substring / regex matching over the tree, plus fold bookkeeping |
 
 **`spliceLines` is the single exit for every write.** To change the file you must
 first work out "delete N lines starting at line M, insert this", and hand it over.
 There is no second path.
+
+**Nodes that are not in `parsed.byId` are read-only, and that is the whole of the
+safety story.** Two features rely on it: note-content cards, which stand for
+ranges of the note the map only draws, and link-card projections, which stand for
+another note entirely. Both synthesise their nodes in the view, both mark them
+`virtual`, and every mutation — rename, move, indent, delete — looks the node up,
+misses, and does nothing. `embedTree.ts` builds the second kind; `projectOutline()`
+takes an already-parsed outline and returns a detached forest whose ids and keys
+carry the link node's own, so two cards pointing at one note cannot collide and
+no id here could ever name a line of the note being mapped.
 
 **The parser is lenient in the read direction only.** A paragraph directly under a
 list item, for instance, is a lazy continuation in CommonMark — this parser tells
@@ -88,7 +99,7 @@ between the two sides of the root by weight.
 
 | File | Responsibility |
 | --- | --- |
-| `MindmapView.ts` | The `TextFileView` subclass. Drawing, culling, selection, undo, search, popovers, export |
+| `MindmapView.ts` | The `TextFileView` subclass. Drawing, culling, selection, undo, search, popovers, export — the features that are owned by the view itself; anything that can stand on a narrow host (link cards, breadcrumbs) lives in a module of its own |
 | `canvas.ts` | Viewport zoom/pan (`transform`) and coordinate conversion |
 | `nodes.ts` | Turns a `MindNode` into a DOM card |
 | `edges.ts` | Connector drawing. `edgePath()` is a pure function, with tests for both styles |
@@ -104,6 +115,11 @@ between the two sides of the root by weight.
 | `inline.ts` | One line of text → DOM. The emitter table for every `InlineKind`; the rules themselves are in `model/inlineText.ts` |
 | `media.ts` | Drawing `![[hero.png]]` as a picture or a video, and the path that re-measures the card once it lands |
 | `lightbox.ts` | The enlarged preview a click opens: backdrop, dismissal, and why it lives outside the camera's transform and outside every export |
+| `linkPreview.ts` | What a link card shows of the note it points at: the first lines as written, the parse that turns them into blocks, and the read cache that lets a synchronous paint draw an asynchronous read |
+| `linkCards.ts` | The other half of a link card: opening and closing it, the projection of another note's outline, and every piece of state that has to outlive a paint. Takes a narrow `LinkCardHost` |
+| `hits.ts` | Marking the words a search found. Offsets are read off the **card's own text nodes** rather than derived from the note's source, because a card that drew a picture or a formula has no plain-text projection left. `localCuts` is pure and tested |
+| `dropNote.ts` | Turning a `.md` dropped on the map into a card. Payload reading and the name-to-`[[link]]` step are pure and tested (`linkTextFromDrop` / `linksFromDrop` / `linkForName`); the listeners are the second half |
+| `breadcrumb.ts` | The path to the selected card across the top of the canvas |
 | `perf.ts` | Render-timing instrumentation |
 | `settingsModal.ts` | The standalone settings window |
 | `branchButton.ts` / `frame.ts` / `motion.ts` / `nodeWidth.ts` | Small view utilities |
@@ -112,7 +128,7 @@ between the two sides of the root by weight.
 
 | File | Responsibility |
 | --- | --- |
-| `main.ts` | Plugin entry: registers the view, commands and events; `revealLine()` does the note-side scroll |
+| `main.ts` | Plugin entry: registers the view, commands and events; `revealLine()` does the note-side scroll; `installLeafSwitchPatch()` catches a `show line N` before Obsidian resolves a view for it, so a map is not swapped out for the editor |
 | `settings.ts` | Setting definitions + `SettingsPanel`, the rendering logic shared by the settings tab and the settings window |
 | `i18n.ts` | The EN/ZH dictionaries. The English table is the source of truth for keys |
 | `foldStore.ts` | Fold-state persistence, keyed by note path, stored in `data.json` |
@@ -267,6 +283,7 @@ These are deliberate choices, not oversights. Read the reasoning before changing
 | **One key, two meanings, on `Space`** | Held with the left button it pans the canvas, the way every graphics tool has it; tapped and **released** it folds. The fold waits for the release only to leave the hold free; once a mouse press has happened in that hold the fold is dropped, because that press was a pan. The key does not follow the binding — a pan key is a modifier, the same kind of thing as `Shift`, and the map does not offer "rebind the modifier". |
 | **A reorder past the halfway point changes sides** | The note's order is the reading order — down the right column of the root, then down the left — and the layout cuts that order in half by subtree weight. So the order is the user's and the side follows from it. Refusing to reorder top-level branches was tried, and the price was that a drop on one of them could only ever mean "reparent". |
 | **Fold state is found again by heading path** | Which means renaming a node forgets where it was folded. Keying by line number or by id would mis-match worse after an edit. |
+| **A card's open state is checked against the card, not against the key** | A note-content card is stored under the *place* the note puts its block in (`ownerKey + $body + index`), which is not the block that is in it — so an entry believed against the key alone outlives its card, and a block moved out of that place hands its projection or preview to whatever block takes the place over. The entry therefore keeps the link it was opened on, and the paint that draws the card asks whether it is still that link (`LinkCards.held`); a card that is not lets the entry go. A restored entry whose card has not been read yet — a note-content card's text is rebuilt from the note's lines at paint time — is bound by that first paint instead. |
 | **`Ctrl+Z` in the markdown editor is not taken over** | Doing so needs `undoDepth` from `@codemirror/commands` to tell when the editor has nothing left to undo, and that is not part of Obsidian's public API. Failing to resolve it makes the plugin fail to load, and it could not be verified in this environment — so it is not done. |
 | **The undo stack is parked on the plugin** | A view switch goes through `leaf.setViewState()`, and Obsidian destroys the old view instance. A stack living only in the view dies with it. `undoPark.ts` parks it on the plugin to fix that. |
 | **Only pictures in the vault are drawn** | `![](https://…)` stays a chip. Drawing a remote picture means the map goes to the network on the note's behalf, and it cannot be inlined into an export anyway — the bytes are not readable across origins. |

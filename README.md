@@ -8,6 +8,12 @@ to reading mode. Same tab, same file, **no new files ever created**.
 Every edit you make on the map is written straight back into the original `.md` note
 as a minimal line edit. Toggle back and your note is still your note.
 
+> [!TIP]
+> **Got an idea, or something that feels wrong?**
+> [Open an issue](https://github.com/AuroraEchop/MindFlow/issues) — a feature you wish
+> it had, a rough edge, a note it draws badly. Most of what this plugin does now
+> started as one of those.
+
 ![MindFlow](assets/hero.png)
 
 ---
@@ -28,6 +34,13 @@ as a minimal line edit. Toggle back and your note is still your note.
   and a video is a still frame with two buttons on it — one plays it in place, the
   other hands it to Obsidian's own player. In an exported SVG, PNG or HTML the
   pictures are inlined, so the file shows them anywhere.
+- **A card that points at another note opens where it stands.** Its title carries
+  two buttons: one shows what that note **says** — rendered as markdown, samples
+  and tables and pictures included — and one brings its **outline** in as a
+  subtree under the card, drawn with dashed connectors. A link written inside
+  your prose previews on the card it was written on, and a link that leaves the
+  vault gets a card naming the site. None of it opens a new tab, and none of it
+  writes a single file.
 - **Three card styles.** Bordered, rounded, or minimal — the last draws nothing at
   rest and frames a card only while you are editing it.
 - **Curved or right-angled connectors**, four toolbar dock positions, and a corner
@@ -52,10 +65,14 @@ as a minimal line edit. Toggle back and your note is still your note.
 
 ## Install
 
-Not in the community plugin browser yet, so install manually.
+**From the community plugin browser.** In Obsidian, open *Settings → Community
+plugins → Browse*, search for **MindFlow**, press **Install**, then **Enable**.
+That is the whole of it — Obsidian offers you each new version from then on.
+
+**By hand**, if you would rather have the files yourself:
 
 1. Download `main.js`, `manifest.json` and `styles.css` from the
-   [latest release](../../releases/latest);
+   [latest release](https://github.com/AuroraEchop/MindFlow/releases/latest);
 2. Copy them into your vault:
 
    ```
@@ -64,8 +81,10 @@ Not in the community plugin browser yet, so install manually.
 
 3. Enable **MindFlow** in *Settings → Community plugins*.
 
-Or download `mindflow.zip` and unzip it into `.obsidian/plugins/` — one download
-instead of three.
+Or download `mindflow.zip` from the same release and unzip it into
+`.obsidian/plugins/` — one download instead of three.
+
+Either way you need Obsidian **1.5.7** or later.
 
 ## Use it
 
@@ -96,7 +115,6 @@ export formats are in the [usage guide](docs/Usage.md).**
 | --- | --- |
 | **[Usage guide](docs/Usage.md)** ([中文](docs/使用指南.md)) | Every gesture, the full shortcut table, the shortcuts settings page, annotations, content cards, search, export, all settings |
 | **[Development](docs/Development.md)** ([中文](docs/开发文档.md)) | Architecture, module map, the round-trip invariant, how to add a shortcut or a setting, testing, releasing |
-| [Requirements & plan](docs/需求与实施方案.md) | The original planning document for this project (Chinese) |
 
 ## Development
 

@@ -90,6 +90,29 @@ reading.
 
 ---
 
+### Where pressing a heading in the outline pane goes
+
+The same note, a map on the right or an editor on the right, means two different
+things when you press a heading in the outline pane on the left:
+
+- **Map mode**: the card written on that line is **selected** and moved to the
+  **middle of the screen**, opening whatever folded branch was hiding it. The
+  view is **not replaced**, so there is no switch to see — pressing the outline
+  is "find it on the map", not "leave the map".
+- **Editor mode**: it scrolls to that line, exactly as it always did.
+
+Both modes live in the same tab (the button in the title bar swaps between them),
+so the difference is only which one you are looking at. A `[[note#heading]]`
+press takes the same route.
+
+What makes that quiet: the outline pane is asking for "line N", and resolving a
+view for a `.md` file means the editor — so the map used to be replaced on the
+way and put back a moment later, which is a switch the reader can see. The
+request is now caught **before** that resolution, and the map that is already
+open answers it by selecting the card. No view is ever replaced.
+
+---
+
 ## 3. The interface
 
 ### Cards
@@ -111,6 +134,19 @@ than somewhere to go. A card holding a table, a fenced sample or a `> [!note]`
 callout is drawn as those blocks rather than as the characters they are spelled
 with.
 
+### Filtering by tag
+
+A `#tag` drawn on a card is **clickable**: one click filters the map to the cards
+carrying that tag, and every branch that neither carries it nor has a card below it
+carrying it fades back. The shape of the map does not change — what you are looking
+for is simply the part that stays lit.
+
+- `Ctrl`/`Cmd`+click **adds** another tag; two tags are a union;
+- Clicking the same tag again takes it off, and `Esc` clears the whole filter;
+- Nesting counts: `#work` takes `#work/todo` with it;
+- A tag written inside a paragraph counts too — that paragraph's content card is
+  the card carrying it.
+
 ### The corner toolbar
 
 A row of buttons sits in the corner of the canvas:
@@ -121,7 +157,7 @@ A row of buttons sits in the corner of the canvas:
 | Zoom in / out | One step each |
 | Fit to window | Frames the whole map in the viewport |
 | Centre on selection | Brings the selected card to the middle |
-| Expand / collapse all | Toggles between "expand everything" and "back to how it opened" |
+| Expand / collapse all | Toggles between "expand everything" and "back to how it opened"; **right-click** it for a level menu: expand all / open to level 1–4 / collapse all |
 | Find | Opens the find bar over the canvas |
 | Shortcuts | Pops up the keys that are bound right now |
 | Settings | Opens the MindFlow settings window |
@@ -134,6 +170,15 @@ The toolbar's behaviour is configurable:
 
 **Dragging the toolbar itself** moves it anywhere; on release the dock switches to
 "wherever I dragged it" and the coordinates are remembered.
+
+With a card selected, the **top of the canvas** writes out the chain of titles from
+the root down to it (`Root › Chapter one › Cross-origin calls`), and clicking any
+one of them goes to that card. Zoomed far enough out that a card's words no longer
+read, that line is the thing still legible; with nothing selected it takes no room.
+
+The card's **context menu** also carries **only this branch**: everything else fades
+and the branch stays with the chain above it. Picking the same item again, or
+pressing `Esc`, puts the whole map back.
 
 ---
 
@@ -231,9 +276,129 @@ card's right-click menu carries it, and so does the command palette:
 | Remove the link | Puts the card's own words back, leaving the text the link was made from |
 
 The last two appear only when the card is a link and nothing else; **Link to a
-note…** appears when the card has a name to link from. A link in a card's title
-is clickable on the map, so a map can be a way into a vault rather than only a
-way of looking at one note.
+note…** appears when the card has a name to link from. A card that is one link is
+a card you can press on the map, which is what the next section is about — so a
+map can be a way into a vault rather than only a way of looking at one note.
+
+### Opening a link card where it stands
+
+A card whose whole text is one link is a **link card**. It can be opened without
+leaving the map: no new tab, and no losing your place.
+
+- **The title line itself** shows what the note says: the card grows the note's
+  first lines under a rule, with **Open the whole note** at the bottom. Press the
+  line again to close.
+- **› (the arrow)** pulls that note's **outline in under the card**: the note's
+  headings and lists become children of this card, as if they had grown there.
+  Fold, unfold and select them like any other card.
+
+The two are separate. A card can show what the note says without showing its
+shape, and the shape without the words. The arrow is drawn in both states — the
+muted colour is shut, the link colour is open — and it is the only button on the
+line, because what the note says is the line's own business.
+
+**The title line itself is the switch.** Anywhere on it except the arrow at its
+right end opens and closes the preview, in either state — **including the link
+written on it**: on a card that is one link those words *are* the link, so a
+press on them is a press on the line. Hovering it says **Click to expand or
+collapse the preview** with the cursor turning into a hand. **A press inside the
+block does not shut it** — that is another note's text, and closing it is the
+line above. The press picks the card too, so selecting and double-clicking to
+rename all still work: a drag still starts on that line, and it is the press
+that goes nowhere that opens.
+
+**`Ctrl`/`Cmd`+press on that link still goes to the note.** The modifier means
+"take me there" everywhere on this map and is never the switch: on the link it
+opens the note it names in a new tab, and on the rest of the line it goes to the
+line the link was written on. So a plain press is "show me", and a modified one
+is "take me" — the two never argue.
+
+**What the preview shows is rendered like a card of the note's own writing.**
+Headings lose their markers and read as the words they are; **ordered and
+unordered lists are drawn as lists** — the numbering is the note's (a list that
+starts at `3.` starts at 3), a bullet is a bullet, and an indented item is a
+nested one. A fenced sample is drawn as a sample (with its language and a copy
+button), a table as a table, a `> [!type]` box as the box, and a picture or a
+video as the picture or the video. Pictures follow **Show pictures** and
+**Maximum media height** exactly as they do everywhere else on the map, and a
+click on one enlarges it without leaving the map. The block's smaller, muted
+type is what says the words in it belong to another note.
+
+**A link written inside a note's own prose is pressable too.** A paragraph that
+mentions three notes is not a link card — there is no single thing it is about —
+but a plain click on any of its links shows that note **on the card the link was
+written on**, without leaving the map. That card has no button, because there
+would be no way to say which of its links the button meant; its preview is put
+away by pressing the card itself. Only links that resolve to a note
+are treated this way: a picture, a PDF or an attachment still opens the way it
+always did.
+
+**The card is about one link, whatever is written around it.** `() [[Note]]`,
+`[[Note]]。` and `[Note](Note)` are all link cards: a reader cannot tell the
+spellings apart on the card, so the map does not either. Words are the one thing
+that stops it — `see [[Note]]` is a sentence, and there is no single thing in it
+to open.
+
+The connectors into projected cards are **dashed**, which is how you tell at a
+glance which cards belong to another note. Everything else about them is drawn
+as usual — the marking is the line, not a second kind of card.
+
+**A projected card is read-only.** It belongs to another note, so on this map it
+cannot be renamed, dragged, deleted or given children, and a checkbox is drawn
+for what it says rather than for what it does. To get there: `Ctrl`/`Cmd`+click
+it, or pick **Open the source note** from its menu — either one opens that note
+in a new tab with the caret on the line the card came from, and leaves the map
+where it was.
+
+**Nothing is written, ever.** The preview and the outline are read out of the
+file, and that file is only read: it is never opened for writing, and the note
+you are mapping is not touched at all. Edit the other note anywhere else — the
+editor, another window, a sync client — and the tree under the card rebuilds
+itself.
+
+How much of the note the preview shows is **Link card preview lines** (6 by
+default, 0 for none), and the lines it leaves out are counted underneath as
+"N more lines". A card left open is remembered per note, exactly as a fold is.
+
+**What the preview shows is drawn as markdown, not copied as characters.** A
+fenced sample is drawn as a sample, a table as a table, a list as a list, a
+`> [!type]` as the callout box, and a plain `> ` as a quote with a bar down its
+left edge — the way that note draws them itself. Only paragraphs drop their `##`
+and friends, so the first lines read as the words they are rather than as syntax.
+
+### A link that leaves the vault
+
+`[obsidian](https://obsidian.md)`, or a card that is nothing but an address, is a
+link card too — but there is no file behind it and no outline to pull in, so its
+title line carries no arrow: the line's own press is its only switch. Press it
+and the card names the site: **obsidian.md** with the rest of the address under
+it, and **Open in the browser**.
+
+**It does not embed the page, and that is deliberate.** Most sites refuse to be
+framed (`X-Frame-Options`, or a `frame-ancestors` rule), and a browser will not
+tell the page that it refused — so an embedded window would be a box that shows
+nothing on most of the web and no way to say why. Obsidian's own canvas does the
+same thing this does: it names the link. Fetching the page's title or favicon
+would mean going to the network on your behalf, which this plugin does not do —
+the same promise it already makes about pictures.
+
+`Ctrl`/`Cmd`+click a link inside a note's prose and it still opens the address in
+your browser, as it always did.
+
+### Dropping a note onto the map
+
+Drag a `.md` out of the file list and drop it over the map: a `[[Note]]` card appears
+**under the card it landed on**, the whole drag counting as **one undo step** (on empty
+canvas it goes under the root). It arrives with its **outline already open** — a note
+dragged here was dragged to be read, so its headings grow under it on dashed connectors.
+
+What is written into the note is a **real link** (`[[Note]]`) and not the file name as
+text, which is what makes the rest work: pressing the title line shows the preview, `›`
+folds the outline out, and `Ctrl`/`Cmd`+click goes there. The card the pointer is over
+is highlighted while you drag — that is where the note will land.
+
+Several notes make several lines. **Only `.md`** — a picture, a PDF or a web address does
+not become a link card. A note that does not exist yet is fine: the card says so.
 
 ### Dragging
 
@@ -249,6 +414,16 @@ faint. Over another card, that card highlights to show where the drop would land
 subtree on one side of its parent, so a card left of the root has its children to
 its left — and that is where "become its child" is too. Follow the highlight on
 the card; there is nothing to work out.
+
+**A card of the note's own prose takes a long press.** Paragraphs, samples and
+tables are the note's own lines: a press there is for selecting the text and a
+double-click is for editing it, so those cards do not answer "press and go". Hold
+still on the card instead — a dashed outline fills over about half a second, and at the
+end of it the card comes up: the place it left is a dashed slot, a dimmed copy
+follows the pointer, and everything above applies from there. Moving more than a
+few pixels, or letting go early, is an ordinary press — it selects, or it starts
+an edit. This is the only way to move such a card; its buttons, its links, a
+copy button and a video that is playing are all left out of it.
 
 The copy always follows the pointer rather than jumping to a predicted spot — you
 judge the landing yourself, and the highlight tells you what the map thinks.
@@ -325,7 +500,7 @@ Every key below is a **default**. Each one can be changed in the settings.
 | `Ctrl`/`Cmd`+`.` | Centre on the selection |
 | `Ctrl`/`Cmd`+`F` | Find in the map |
 | `Ctrl`/`Cmd`+`H` | Find and replace in the map |
-| `Esc` | Close the find bar (only the map's while one is open) |
+| `Esc` | Close the find bar (only the map's while one is open); with no find bar open it clears the tag filter or the branch focus |
 
 > **`Ctrl`/`Cmd`+`Enter` vs `Shift`+`Enter`:** the first is the annotation (a
 > `: text` line hanging under the card), the second is a text block (a separate
@@ -481,8 +656,8 @@ structural metadata for the parser, not something to read.
 the map is only showing them. (Selecting one and pressing `Delete` is the exception:
 that does remove the corresponding lines.)
 
-**A code block card can be dragged.** Drop it on another card and it becomes that
-card's own body; drop it on a card's top or bottom edge and it lands beside that
+**A code block card can be dragged — hold it for about half a second first.** Drop it on
+another card and it becomes that card's own body; drop it on a card's top or bottom edge and it lands beside that
 card — as a block of that card's parent; drop it on another **code block card** and
 it lands above or below that one. Only the indentation that attaches a block to the
 node it hangs under moves with it; the lines themselves are never touched, so
@@ -516,6 +691,34 @@ A `> [!note]` blockquote is drawn as the box it is in Obsidian rather than as th
 The content is the part of the callout that is not a card of its own, so a long one
 is previewed like any other block — the expand button on the card shows the whole
 thing.
+
+### Quotes
+
+A blockquote that opens with `> ` but names no `[!type]` is a **quote**, not a
+callout: it has no title, so it has no icon and no colour — a bar down its left
+edge and muted type, which is the note's way of saying these are somebody else's
+words.
+
+```markdown
+> Write for one reader first.
+> The second line is quoted too.
+```
+
+- What a quote holds is read as blocks as ever: a list inside a quote is a list, a
+  table is a table, and a **quote inside a quote** is one step in (one `>` comes off
+  per level, exactly as Obsidian reads it).
+- A line that is not quoted ends it, blank or not — which is why a note has to
+  repeat the `>` on an empty line to keep a quote open.
+- A quote is drawn as a quote and a callout as a callout: both are boxes opened by
+  a `>`, and the title, the icon and the colour are the whole of the difference. A
+  link card's preview draws them the same way.
+
+### Thematic break
+
+`---`, `***` and `___` (and the spaced spellings such as `- - -`) are drawn as a
+**horizontal rule** rather than as three hyphens. The one exception is a `---`
+sitting directly under a line of text: in markdown that is a setext second-level
+heading, not a rule, so it stays text.
 
 ---
 
@@ -596,22 +799,44 @@ opens.
 `Ctrl`/`Cmd`+`F` opens a find bar over the canvas — Obsidian's own editor search
 cannot reach a map, so the map brings its own.
 
-- Matching is **case-insensitive substring** by default;
+- Matching is **case-insensitive substring** by default; press `Aa` to switch to
+  case-sensitive, where `API` and `api` are two different words and only the one
+  you spelled is found;
 - Tick `.*` for a regular expression; a pattern that does not compile just marks the
   box red rather than throwing;
+- The **whole note** is searched by default — a card's title *and* the prose under
+  it (paragraphs, code blocks, tables, quotes), because the sentence you are
+  looking for is as likely to be in a paragraph as in a heading. Press `¶` to
+  narrow it to **card titles only**, for when you already know the words are on a
+  card's own line and do not want every paragraph that mentions them;
+- Press the **highlighter** button to mark **every** match (see below);
 - `Enter` / `Shift`+`Enter` step through the matches, `Esc` closes.
 
 Nodes are matched on the text you can see: `**bold** text` is found by "bold text",
 and `[[note|Label]]` by "Label" but never by "note". A formula is matched as its
 TeX source.
 
+**The matched words themselves are marked**, the way a highlighter pen goes over
+them — not just the card they sit on. The ring around a card says *which* card
+answered the query; the mark says *what* in it did, and the two are complements.
+Only the match the cursor is on is marked to begin with; press the highlighter
+button and the rest are marked too, and **every mark looks the same** — which one
+the bar is on is said by the ring and by where the camera is, not by a shade.
+
+The two themes are drawn differently, each for its own palette:
+
+**The matched words are marked**, the way a highlighter goes over them — the ring
+around a card says *which* card answered, the mark says *what* in it did. Only the
+match the cursor is on is marked at first; the highlighter button marks the rest,
+and **every mark is the same colour**. Background and ink both come from the theme
+(`#dfb14d` with white type in dark, `#ffe07a` with black in light); **a word already
+brighter than the block keeps its own colour**, because black type inside a coloured
+pill reads as a card from somewhere else. Measurements: `docs/design/hit-no-reflow.html`.
+
 Stepping to a match inside a folded branch opens it, and stepping onwards folds
 that branch back again, so walking a query does not leave the map spread open
 behind you. Closing the bar puts back the rest and keeps only the path to the match
 you stopped on, still selected and on screen.
-
-In this version whole matched cards are ringed rather than the matched substring,
-and content cards (paragraphs, code blocks, tables) are not searched.
 
 ![Find](../assets/search.png)
 
@@ -634,9 +859,11 @@ markup is stripped cannot be replaced, because there is nowhere for it to land.
 Find still finds it.)
 
 Only a card's own title is replaced. An annotation and a text block are lines the
-card owns rather than lines it *is*, and the find bar does not search them either —
-a replacement that reached further than the search did would change text you were
-never shown.
+card owns rather than lines it *is*, so a replacement does not reach them. The
+**search** does read a note-content card — that is the whole of what the default
+whole-note search is for — but the replacement still writes into titles only: a
+replacement that reached further than that would change text you were never shown,
+and would have to decide which note line a card's rendered words came from.
 
 However many cards one replacement touches, it is **one undo step**.
 
@@ -705,6 +932,7 @@ while you change something.
 | **Inline annotations** | Render `: text` lines as annotations rather than cards of their own. |
 | **Show pictures and videos** | Draw images and videos from the vault on the card rather than as a chip. |
 | **Maximum media height** | 80–480, step 20. The height cap for a picture or a video. |
+| **Link card preview lines** | 0–20, step 1, 6 by default. How many lines of the note a link card shows when it is open; 0 keeps the card to its own line plus the arrow. |
 | **Corner toolbar** | Only while a card is selected, or always. |
 | **Corner toolbar position** | Bottom right / bottom centre / right edge / wherever I dragged it. |
 | **Maximum card width** | 140–520, step 20. |
@@ -836,7 +1064,8 @@ let go: not a column of them, and not so few that one goes unnoticed.
   That is what keeps `$5-$10` a price, at the cost of `$x$2` staying literal.
 - Moving a checkbox item into heading position keeps `[x]` as literal text
   (headings cannot hold checkboxes). Moving it back restores a real checkbox.
-- Content cards (paragraphs, code blocks, tables) are not searched.
+- The search covers the whole note, content cards included; `¶` in the find bar is
+  what narrows it to card titles.
 - **Only pictures and videos in the vault are drawn.** A remote address such as
   `![](https://…)`, a PDF, an audio file, an embedded note, or a file the vault
   cannot find all stay the italic chip they were.
@@ -848,6 +1077,39 @@ let go: not a column of them, and not so few that one goes unnoticed.
 - **The preview enlarges up to twice the media's own size** — past that it only
   stretches pixels. A very small picture, a 48-pixel icon for instance, does not
   fill the pane.
+- **Only a link that names a note can be opened.** A card pointing at a picture,
+  a PDF or another kind of file keeps the plain one-line form it has always had,
+  and clicking it opens the file, as it always did.
+- **A projected card is not a link card in its own right.** If a heading in the
+  other note is itself written as `[[Somewhere else]]`, that card is drawn as
+  ordinary text rather than growing an arrow of its own. Reading one note
+  through the links inside another is not something this does yet.
+- **Folds inside a projection are not remembered across sessions.** The outline
+  under a card opens onto the other note's top level every time it is opened,
+  and what you fold by hand within a session stays for that session. What is
+  remembered is which cards were left open — the note the map is of is the only
+  file anything here is written to.
+- A projected card has **no context menu of its own beyond opening the source
+  note**, because every other entry a card's menu holds would end in a line of
+  the note being mapped.
+- **An address is named, not embedded.** A card pointing outside the vault shows
+  the site and the rest of the address, with a button that opens your browser;
+  it does not frame the page, and it does not fetch the page's title or favicon.
+  Most sites refuse to be framed and a refusal is invisible from the page doing
+  the framing, so a window would be blank across most of the web and silent about
+  why. Nothing this plugin does goes to the network on your behalf.
+- A link inside a note's prose shows its note **on the card it was written on**,
+  which means a card can be showing one thing about one of its links. It cannot
+  be given an outline: an outline hangs under a card that *is* one link, and a
+  paragraph that mentions three notes is not.
+- **A dropped note has to be a `.md` inside the vault.** Dropping a file from
+  outside the vault does not import it — the plugin writes a link rather than
+  moving your files around. The link takes the file's name, without the `.md` and
+  without its folders.
+- **A preview can stop in the middle of a block.** The line budget is spent on
+  content lines, and a sample or a table longer than what is left is drawn as far
+  as the budget reached rather than being left out whole. The count underneath
+  says how much is missing, and the note itself is one press away.
 
 ---
 
@@ -876,7 +1138,10 @@ you did not edit come back byte-for-byte identical, including CRLF endings.
 **Why can't I drag or rename some cards?**
 
 Content cards stand for lines the note owns. They can be read and edited, but never
-renamed, dragged or given children.
+renamed or given children. They **can** be moved — they just have a different way
+of starting: the words on the card belong to selecting and to double-clicking to
+edit, so hold still for about half a second to pick one up (see
+[Dragging](#dragging)).
 
 **What happens if I disable the plugin?**
 
