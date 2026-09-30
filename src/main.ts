@@ -1,5 +1,5 @@
 import { MarkdownView, Notice, Plugin, TFile, TFolder, debounce, setIcon } from "obsidian";
-import type { ViewState, WorkspaceLeaf } from "obsidian";
+import type { OpenViewState, View, ViewState, WorkspaceLeaf } from "obsidian";
 
 import { MINDMAP_VIEW_TYPE, MindmapView } from "./view/MindmapView.ts";
 import { lineOfState } from "./view/dropNote.ts";
@@ -75,6 +75,16 @@ const DRAG_MODE_KEY = "dragModeExplained";
 const FOLD_SAVE_DELAY = 800;
 
 /**
+ * A map a leaf was left holding: the note it was showing, and the view showing
+ * it. The view is the identity that decides whether that map is still there --
+ * see `MindmapPlugin.mapLeaves`.
+ */
+interface HeldMap {
+	path: string;
+	view: MindmapView;
+}
+
+/**
  * The file a leaf is showing, or null.
  *
  * `WorkspaceLeaf.view` is typed as `View`, and only the file-backed views
@@ -83,27 +93,44 @@ const FOLD_SAVE_DELAY = 800;
  * three call sites honest: a cast would let a typo in the field name through,
  * and this is the one place that decides.
  */
-/**
- * The line a markdown view has just been sent to.
- *
- * `file-open` carries no line, so it is read off the view that was asked: the
- * ephemeral state is what the caller said, and the caret is where the view
- * ended up -- the outline pane sets the first, and Obsidian's own scroll sets
- * the second, so either one answers and the state is asked first.
- */
-function requestedLine(view: MarkdownView): number {
-	const asked = lineOfState(view.getEphemeralState());
-	if (asked !== null) return asked;
-	const cursor = view.editor?.getCursor?.();
-	return typeof cursor?.line === "number" ? cursor.line : 0;
-}
-
 function leafFile(leaf: WorkspaceLeaf): TFile | null {
 	const view: unknown = leaf.view;
 	if (typeof view !== "object" || view === null) return null;
 	const file: unknown = (view as { file?: unknown }).file;
 	return file instanceof TFile ? file : null;
 }
+
+/**
+ * The line a view-switching call is asking for, or null.
+ *
+ * Obsidian carries it as *ephemeral state*: `openFile` and `setViewState` both
+ * take one, and the outline pane -- the caller all of this exists for -- puts
+ * the line it wants there. Both channels are read, because which one a given
+ * caller uses is not something this can know from here.
+ */
+function lineOfSwitch(open: { eState?: unknown; state?: unknown } | undefined): number | null {
+	if (!open) return null;
+	return lineOfState(open.eState) ?? lineOfState(open.state);
+}
+
+/** A leaf method that swaps the view, in the shape the patch has to keep. */
+type LeafSwitch = (this: WorkspaceLeaf, ...args: unknown[]) => Promise<void>;
+
+/** The two methods the patch replaces, and the plugin answering for it. */
+interface SwitchPatch {
+	plugin: MindmapPlugin;
+	openFile: LeafSwitch;
+	setViewState: LeafSwitch;
+}
+
+/**
+ * Where the replaced methods live, on the prototype itself.
+ *
+ * On the prototype rather than in the instance, because a plugin reload builds
+ * a new plugin over a prototype that is still patched: finding this is what
+ * tells the new instance to take the patch over rather than wrap a wrapper.
+ */
+const SWITCH_PATCH = Symbol("mindflow-leaf-switch-patch");
 
 export default class MindmapPlugin extends Plugin {
 	override settings: MindmapSettings = { ...DEFAULT_SETTINGS };
@@ -144,17 +171,33 @@ export default class MindmapPlugin extends Plugin {
 	private mapNotes = new Set<string>();
 
 	/**
-	 * The map each leaf is holding, by path.
+	 * The map each leaf is holding, by the view instance that is holding it.
 	 *
 	 * Kept so that a leaf which swaps *away* from a map can be told apart from
 	 * one that was never a map: the outline pane's press, and any
-	 * `[[note#heading]]` click, arrives as a markdown view at a line, and the
-	 * only thing that says whether the reader was looking at a map when they
-	 * asked is what that leaf was showing a moment before. Deleted by the swap
-	 * back and by the one use it is kept for, so it cannot outlive the map it
-	 * describes.
+	 * `[[note#heading]]` click, arrives as a markdown view, and the only thing
+	 * that says whether the reader was looking at a map when they asked is what
+	 * that leaf was showing a moment before.
+	 *
+	 * The *view* is what is remembered, not the view type. Obsidian's own
+	 * request to show a line re-resolves the view type for the file on its way
+	 * past, so by the time anything observable has happened the map is already
+	 * gone; an identity check does not care when it went, only that the thing
+	 * in the leaf is no longer the thing this plugin put there. Deleted by the
+	 * swap back, by the recovery, and when the tab is closed.
 	 */
-	private mapLeaves = new Map<WorkspaceLeaf, string>();
+	private mapLeaves = new Map<WorkspaceLeaf, HeldMap>();
+
+	/**
+	 * True while this plugin is the one swapping a leaf's view.
+	 *
+	 * A swap raises `layout-change` in the middle of itself, and the entry
+	 * above still describes the view being replaced -- so without this the
+	 * plugin would read its own swap as somebody having stolen the map and
+	 * swap it back, forever. One flag rather than a re-entrancy test, because
+	 * "we are the ones doing this" is exactly the thing being asserted.
+	 */
+	private swapping = false;
 
 	/**
 	 * The same list as a previous session left it, read only in `always` mode.
@@ -185,6 +228,11 @@ export default class MindmapPlugin extends Plugin {
 		// `log`: the plugin review allows warn, error and debug, and this is
 		// neither of the first two -- turn Verbose on in the console to see it.
 		console.debug(`mindflow ${this.manifest.version} loaded`);
+
+		// Before anything can open a note: a press in the outline pane asks the
+		// workspace for a line, and this is what answers it in place of the view
+		// swap that would otherwise be visible. See `installLeafSwitchPatch`.
+		this.installLeafSwitchPatch();
 
 		await this.loadSettings();
 
@@ -533,33 +581,26 @@ export default class MindmapPlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on("file-open", (file) => {
 				if (!file) return;
+				// Before anything else, and whether or not this file is one of
+				// the remembered ones: a map that was taken away is put back
+				// whatever the note's own state says.
+				this.restoreStolenMaps();
+
 				const leaf = this.app.workspace.getMostRecentLeaf();
 				if (!leaf || leaf.view.getViewType() !== "markdown") return;
 				if (leafFile(leaf)?.path !== file.path) return;
-
-				// The note was a map a moment ago, in this very leaf, and
-				// something has just replaced it with the editor at a line --
-				// the outline pane, or a `[[note#heading]]` press. The reader
-				// was reading a map, so the map is what comes back, with the
-				// card that line is written on selected. Taken once: a note the
-				// user has since chosen to read as markdown is theirs to keep
-				// that way, and hijacking the next press would be the plugin
-				// overruling them.
-				const holding = this.mapLeaves.get(leaf);
-				if (holding === file.path) {
-					this.mapLeaves.delete(leaf);
-					this.pendingReveal = { path: file.path, line: requestedLine(leaf.view as MarkdownView) };
-					void this.setMindmapView(leaf);
-					return;
-				}
-
 				if (!this.markedAsMap(file.path)) return;
 				void this.setMindmapView(leaf);
 			}),
 		);
 
 		this.registerEvent(
-			this.app.workspace.on("layout-change", () => this.refreshHeaderButtons()),
+			this.app.workspace.on("layout-change", () => {
+				// A view swap lands here, which is what makes this the net that
+				// catches a map being taken away -- see `restoreStolenMaps`.
+				this.restoreStolenMaps();
+				this.refreshHeaderButtons();
+			}),
 		);
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
@@ -574,6 +615,11 @@ export default class MindmapPlugin extends Plugin {
 			}),
 		);
 		this.app.workspace.onLayoutReady(() => {
+			// The patch is installed on the shared prototype, which is found by
+			// borrowing a leaf -- and a plugin can load before the workspace has
+			// opened one. Asked again here, where the layout has restored the
+			// tabs; the second call is a no-op when the first one landed.
+			this.installLeafSwitchPatch();
 			this.refreshHeaderButtons();
 			// After layout: a notice raised while Obsidian is still starting up
 			// competes with Obsidian's own, and the user is not looking yet.
@@ -605,6 +651,7 @@ export default class MindmapPlugin extends Plugin {
 		// Obsidian is done with the plugin after this returns, so a fold change
 		// still sitting on the debounce timer has to be spent now or lost.
 		this.queueSave.run();
+		this.removeLeafSwitchPatch();
 		this.removeHeaderButtons();
 	}
 
@@ -903,15 +950,21 @@ export default class MindmapPlugin extends Plugin {
 
 		this.previousState.set(leaf, state);
 		this.rememberView(file.path, true);
-		await leaf.setViewState(
-			{
-				type: MINDMAP_VIEW_TYPE,
-				state: { file: file.path },
-				active: true,
-			},
-			{ focus: true },
-		);
-		this.mapLeaves.set(leaf, file.path);
+		this.swapping = true;
+		try {
+			await leaf.setViewState(
+				{
+					type: MINDMAP_VIEW_TYPE,
+					state: { file: file.path },
+					active: true,
+				},
+				{ focus: true },
+			);
+		} finally {
+			this.swapping = false;
+		}
+		const view = leaf.view as View | undefined;
+		if (view instanceof MindmapView) this.mapLeaves.set(leaf, { path: file.path, view });
 	}
 
 	/**
@@ -936,7 +989,12 @@ export default class MindmapPlugin extends Plugin {
 			next.state = { ...(remembered.state ?? {}), file: file.path };
 		}
 
-		await leaf.setViewState(next, { focus: true });
+		this.swapping = true;
+		try {
+			await leaf.setViewState(next, { focus: true });
+		} finally {
+			this.swapping = false;
+		}
 	}
 
 	/**
@@ -946,6 +1004,220 @@ export default class MindmapPlugin extends Plugin {
 	 * than eating it -- the user asked for a card on the note they were reading,
 	 * not on whichever note happened to open next.
 	 */
+	/**
+	 * Put a map back that something other than the plugin has taken away.
+	 *
+	 * The outline pane is the caller this exists for. Pressing a heading there
+	 * asks the workspace to show a *line*, and the workspace resolves the file's
+	 * view type on the way -- `.md` means the editor -- so the map the reader was
+	 * looking at is replaced before anything can be said about it. Nothing in
+	 * that request means "leave the map", and to a reader of a map it plainly
+	 * means "show me that card", so the map goes back with the line's card
+	 * selected and in the middle of the view.
+	 *
+	 * Detection is by identity rather than by asking whether the leaf shows
+	 * markdown now: whatever did the swap, the leaf is no longer holding the view
+	 * this plugin put in it, and that becomes true the instant it stops being
+	 * true -- no dependence on which event arrives first. Entries are spent as
+	 * they are used, so a note the reader has since chosen to see as markdown is
+	 * theirs to keep that way: the plugin never takes the same map back twice.
+	 */
+	private restoreStolenMaps(): void {
+		if (this.swapping || this.mapLeaves.size === 0) return;
+		const live = new Set<WorkspaceLeaf>();
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			live.add(leaf);
+			const held = this.mapLeaves.get(leaf);
+			if (!held || leaf.view === held.view) return;
+			this.mapLeaves.delete(leaf);
+			const view = leaf.view as View | undefined;
+			// Only the editor can have taken it. A tab that is closing, or one
+			// that has moved on to another note, is not a map to put back.
+			if (!view || view.getViewType() !== "markdown") return;
+			if (leafFile(leaf)?.path !== held.path) return;
+			void this.restoreMap(leaf, held.path);
+		});
+		// A leaf the workspace no longer lists is a map tab that was closed, and
+		// there is nothing left for its entry to describe.
+		for (const leaf of [...this.mapLeaves.keys()]) {
+			if (!live.has(leaf)) this.mapLeaves.delete(leaf);
+		}
+	}
+
+	/** The map for `path` back into `leaf`, sitting on the line the editor is at. */
+	private async restoreMap(leaf: WorkspaceLeaf, path: string): Promise<void> {
+		const line = await this.lineTheEditorLandedOn(leaf);
+		this.pendingReveal = { path, line };
+		await this.setMindmapView(leaf);
+	}
+
+	/**
+	 * The line the editor that has just replaced a map is sitting at.
+	 *
+	 * `file-open` carries no line, so it is read off the view that was asked:
+	 * the ephemeral state is what the caller said, and the caret is where the
+	 * view ended up. Which of the two the caller moved is not something this can
+	 * know, so both are read, and the explicit one is asked first. Landing on the
+	 * wrong card still lands on the map, which is the difference that matters
+	 * here.
+	 *
+	 * The wait is for the answer rather than for the view: a line can arrive a
+	 * frame after the swap, and a read taken too early would put the selection
+	 * back at the top of the note. Bounded, because a view that never moves is
+	 * not something to hang on.
+	 */
+	private async lineTheEditorLandedOn(leaf: WorkspaceLeaf): Promise<number> {
+		for (let attempt = 0; attempt < 10; attempt++) {
+			const view = leaf.view as View | undefined;
+			if (!view || view.getViewType() !== "markdown") break;
+			const asked = lineOfState(view.getEphemeralState());
+			if (asked !== null) return asked;
+			const markdown = view as MarkdownView;
+			const cursor = markdown.editor?.getCursor?.();
+			if (typeof cursor?.line === "number" && cursor.line > 0) return cursor.line;
+			await new Promise((resolve) => window.setTimeout(resolve, 20));
+		}
+		return 0;
+	}
+
+	// --- keeping a map that was asked for a line -----------------------------
+
+	/**
+	 * Answer for the line instead of letting the workspace swap the view.
+	 *
+	 * This is what removes the flicker. Obsidian resolves a view type for the
+	 * file on the way to showing a line -- `.md` means the editor -- so a press
+	 * in the outline pane used to replace the map, and putting the map back
+	 * afterwards was a switch the reader could see. The request is caught here,
+	 * before that resolution happens, and answered by the map that is already
+	 * open: the card is selected and centred, the view is never replaced, and
+	 * there is nothing left to flicker.
+	 *
+	 * Answering for the line is all it does. A different file, a leaf showing
+	 * anything but this plugin's map, and a request that carries no line all
+	 * pass through untouched -- which is what keeps "open this note here"
+	 * meaning what it has always meant everywhere else, including the toggle
+	 * back to the editor.
+	 */
+	private keepMapOnLine(leaf: WorkspaceLeaf, path: string, line: number | null): boolean {
+		if (line === null) return false;
+		const held = this.mapLeaves.get(leaf);
+		if (!held || held.path !== path) return false;
+		const view: View | undefined = leaf.view;
+		if (!(view instanceof MindmapView) || view !== held.view) return false;
+		view.focusLine(line);
+		return true;
+	}
+
+	/** The same question for `openFile`, where the file is its own argument. */
+	private keepMapForOpen(
+		leaf: WorkspaceLeaf,
+		file: unknown,
+		open: OpenViewState | undefined,
+	): boolean {
+		if (!(file instanceof TFile)) return false;
+		return this.keepMapOnLine(leaf, file.path, lineOfSwitch(open));
+	}
+
+	/** And for `setViewState`, where the file sits inside the state. */
+	private keepMapForState(
+		leaf: WorkspaceLeaf,
+		state: ViewState | undefined,
+		eState: unknown,
+	): boolean {
+		if (!state || state.type === MINDMAP_VIEW_TYPE) return false;
+		const named = (state.state ?? {}) as { file?: unknown };
+		// A path, which is what a view state carries, and a `TFile` as well:
+		// the shape of somebody else's state is not this plugin's to insist on.
+		const path =
+			typeof named.file === "string"
+				? named.file
+				: named.file instanceof TFile
+					? named.file.path
+					: null;
+		if (path === null) return false;
+		return this.keepMapOnLine(leaf, path, lineOfSwitch({ eState, state: state.state }));
+	}
+
+	/**
+	 * The prototype every leaf shares, taken off a leaf that is already open.
+	 *
+	 * Taken this way rather than from `WorkspaceLeaf.prototype` so the patch
+	 * does not depend on Obsidian exporting that class as a value: the type is
+	 * all the plugin is promised. Nothing is opened to find one -- the walk is
+	 * over the leaves the workspace already has.
+	 */
+	private leafPrototype(): Record<PropertyKey, unknown> | null {
+		let sample: WorkspaceLeaf | null = null;
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			sample ??= leaf;
+		});
+		if (!sample) return null;
+		const proto = Object.getPrototypeOf(sample) as Record<PropertyKey, unknown> | null;
+		if (!proto || typeof proto.openFile !== "function") return null;
+		return proto;
+	}
+
+	/**
+	 * Catch a "show line N" before Obsidian resolves a view for it.
+	 *
+	 * Two entry points are wrapped because both are ways in: `openFile` is what
+	 * the outline pane and a `[[note#heading]]` press reach for, and
+	 * `setViewState` is what a caller that wants a particular view uses. Both
+	 * end in the same place -- a view type resolved for the file -- so both have
+	 * to be answered in the same place to be sure the flicker is gone.
+	 *
+	 * The replaced methods are kept on the prototype, which is what makes a
+	 * reload safe: the instance that installs this may not be the one that
+	 * removes it, and a wrapper that wrapped the wrapper would grow a chain of
+	 * dead plugins.
+	 */
+	private installLeafSwitchPatch(): void {
+		const proto = this.leafPrototype();
+		if (!proto) return;
+		const existing = proto[SWITCH_PATCH] as SwitchPatch | undefined;
+		if (existing) {
+			// A reload: the prototype is still patched by the instance before
+			// this one, and the new instance takes the patch over.
+			existing.plugin = this;
+			return;
+		}
+
+		const patch: SwitchPatch = {
+			plugin: this,
+			openFile: proto.openFile as LeafSwitch,
+			setViewState: proto.setViewState as LeafSwitch,
+		};
+		const owner = (): MindmapPlugin | undefined => {
+			const current = proto[SWITCH_PATCH] as SwitchPatch | undefined;
+			return current?.plugin;
+		};
+
+		proto.openFile = function (this: WorkspaceLeaf, ...args: unknown[]): Promise<void> {
+			const asked = owner();
+			const open = args[1] as OpenViewState | undefined;
+			if (asked?.keepMapForOpen(this, args[0], open)) return Promise.resolve();
+			return patch.openFile.apply(this, args);
+		};
+		proto.setViewState = function (this: WorkspaceLeaf, ...args: unknown[]): Promise<void> {
+			const asked = owner();
+			const state = args[0] as ViewState | undefined;
+			if (asked?.keepMapForState(this, state, args[1])) return Promise.resolve();
+			return patch.setViewState.apply(this, args);
+		};
+		proto[SWITCH_PATCH] = patch;
+	}
+
+	/** Put the leaf's own methods back, unless a newer instance owns the patch. */
+	private removeLeafSwitchPatch(): void {
+		const proto = this.leafPrototype();
+		const patch = proto?.[SWITCH_PATCH] as SwitchPatch | undefined;
+		if (!proto || !patch || patch.plugin !== this) return;
+		proto.openFile = patch.openFile;
+		proto.setViewState = patch.setViewState;
+		delete proto[SWITCH_PATCH];
+	}
+
 	takeReveal(path: string): number | null {
 		const pending = this.pendingReveal;
 		if (!pending || pending.path !== path) return null;

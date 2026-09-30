@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { lineOfState, linksFromDrop, linkTextFromDrop } from "./dropNote.ts";
+import { lineOfState, linkForName, linksFromDrop, linkTextFromDrop } from "./dropNote.ts";
 
 test("a link the platform wrote is kept exactly as it is", () => {
 	// An alias is the note's own words for itself, and a link that went through
@@ -48,6 +48,29 @@ test("a payload is one note per line, without repeats", () => {
 	assert.deepEqual(linksFromDrop("daily/a.md\r\ndaily/a.md"), ["[[a]]"]);
 	assert.deepEqual(linksFromDrop("[[a]]\na.md\n\nhero.png\n"), ["[[a]]"]);
 	assert.deepEqual(linksFromDrop("hero.png\nhttps://x.dev"), []);
+});
+
+test("a dragged note's name is written as a link, never as itself", () => {
+	// The drag record has the name and not the syntax, and a card whose text is
+	// the bare name is a card that only copied the title: nothing opens, no
+	// preview appears and no outline can be folded out of it.
+	assert.equal(linkForName("外部链接"), "[[外部链接]]");
+	assert.equal(linkForName("9.24 Day9"), "[[9.24 Day9]]");
+	assert.equal(linkForName("  Day 9  "), "[[Day 9]]");
+	// Spaces and punctuation are the note's own and are kept as written.
+	assert.equal(linkForName("a, b — c"), "[[a, b — c]]");
+});
+
+test("a name that cannot be a wikilink is refused rather than escaped", () => {
+	// These are the link's own syntax, and Obsidian refuses them in a file name
+	// besides -- so a name carrying one did not come from a note.
+	assert.equal(linkForName("a]b"), null);
+	assert.equal(linkForName("a[b"), null);
+	assert.equal(linkForName("note#head"), null);
+	assert.equal(linkForName("note^block"), null);
+	assert.equal(linkForName("note|alias"), null);
+	assert.equal(linkForName(""), null);
+	assert.equal(linkForName("   "), null);
 });
 
 test("an ephemeral state is only a request when it carries a line", () => {

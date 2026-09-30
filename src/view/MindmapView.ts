@@ -64,7 +64,7 @@ import { hasMoreThanOneLine, toText, spliceLines } from "../model/lines.ts";
 import { cardLink, linkMarkup, noteNameFrom, soleLink, unlinkedText } from "../model/noteName.ts";
 import { isEmbedId } from "../model/embedTree.ts";
 import { LinkCards } from "./linkCards.ts";
-import { attachNoteDrop, lineOfState } from "./dropNote.ts";
+import { attachNoteDrop, lineOfState, linkForName } from "./dropNote.ts";
 import type { Projection } from "./linkCards.ts";
 
 import {
@@ -143,6 +143,13 @@ import type { UndoStacks } from "../undoPark.ts";
 import type MindmapPlugin from "../main.ts";
 
 export const MINDMAP_VIEW_TYPE = "mindflow-view";
+
+/**
+ * Marks the header action this view adds, so a later instance in the same leaf
+ * can tell its own from the one left there by the view it replaced -- the tab
+ * header is not part of the view and survives a swap. See `addHeaderAction`.
+ */
+const MAP_ACTION_CLASS = "mindflow-map-action";
 
 /** How far a press has to travel before it is a drag rather than a click. */
 const TOOLBAR_DRAG_THRESHOLD = 5;
@@ -368,6 +375,16 @@ function looksCode(text: string): boolean {
 interface PendingFocus {
 	line: number;
 	edit: boolean;
+	/**
+	 * Whether the camera goes to the card or the card merely comes into view.
+	 *
+	 * An edit wants the smallest pan there is -- the map is being typed into and
+	 * a camera that jumps under the caret is unreadable. A line asked for from
+	 * outside (`focusLine`) is the other thing: nothing is being typed and the
+	 * reader is looking for one card among hundreds, so it goes to the middle
+	 * of the screen, where "here it is" needs no hunting.
+	 */
+	centre: boolean;
 }
 
 /** Where a body card came from, so its editor can find the range again. */
@@ -641,6 +658,8 @@ export class MindmapView extends TextFileView implements MapController {
 	private detachInteractions: (() => void) | null = null;
 	/** Detaches the note drop listeners; see `dropNote.ts`. */
 	private detachDrop: (() => void) | null = null;
+	/** The view action added to the tab header, so it can be taken away again. */
+	private headerAction: HTMLElement | null = null;
 	/** The corner, kept so its visibility can follow the selection. */
 	private toolbars: HTMLElement | null = null;
 	/** The fold button, kept because what it says depends on the map. */
@@ -892,10 +911,13 @@ export class MindmapView extends TextFileView implements MapController {
 		const path = this.file?.path;
 		const reveal = path === undefined ? null : this.plugin.takeReveal(path);
 		if (reveal !== null) {
+			// `nodeAtLine` rather than `findByLine`: a heading's line is what
+			// arrives here, and the block it opens is the card that means. A
+			// near miss must not leave the reader with a map that did nothing.
 			const target = this.nodeAtLine(reveal);
 			if (target) {
 				this.select(target.id);
-				this.revealSelection();
+				this.centreSelection();
 			}
 		}
 	}
@@ -939,15 +961,44 @@ export class MindmapView extends TextFileView implements MapController {
 		this.detachInteractions = attachInteractions(this);
 		this.detachDrop = attachNoteDrop(this);
 		this.applyToolbarVisibility();
-		this.addAction("file-text", t("view.action.editMarkdown"), () => {
-			void this.plugin.toggleLeaf(this.leaf);
-		});
+		this.addHeaderAction();
 		// The keyboard, on the next tick rather than here. The swap that opened
 		// this view is still running, and its `{ focus: true }` lands on the pane
 		// as it finishes -- a focus taken now would be overwritten a line later,
 		// which is exactly how the map came to look half broken until it was
 		// clicked. See `focusMap` for what is at stake.
 		window.setTimeout(() => this.focusMap(), 0);
+	}
+
+	/**
+	 * The way back to the editor, beside Obsidian's own view actions.
+	 *
+	 * Added on every open and taken away on every close, because the row it goes
+	 * into is not the view's: the tab header outlives the view inside it, so an
+	 * action added by the view a swap replaced is still sitting there. Toggling
+	 * a note between the map and the editor three times used to leave three
+	 * identical "edit as markdown" buttons in one header. Anything a previous
+	 * instance left behind is cleared first, so the row holds this view's action
+	 * and nothing else -- and `onClose` removes it even when the instance that
+	 * added it is the last one.
+	 */
+	private addHeaderAction(): void {
+		this.removeStaleHeaderActions();
+		const action = this.addAction("file-text", t("view.action.editMarkdown"), () => {
+			void this.plugin.toggleLeaf(this.leaf);
+		});
+		action.addClass(MAP_ACTION_CLASS);
+		this.headerAction = action;
+	}
+
+	/** Whatever a view that used to be in this leaf left in the same row. */
+	private removeStaleHeaderActions(): void {
+		// Searched from the whole leaf rather than from the row, so it does not
+		// depend on where Obsidian keeps the actions: the leaf holds one view,
+		// and anything wearing this class in it belongs to a view that is gone.
+		const root = this.containerEl.closest(".workspace-leaf") ?? this.containerEl;
+		for (const stale of Array.from(root.querySelectorAll(`.${MAP_ACTION_CLASS}`))) stale.detach();
+		this.headerAction = null;
 	}
 
 	/**
@@ -987,34 +1038,48 @@ export class MindmapView extends TextFileView implements MapController {
 		this.focusLine(line);
 	}
 
-	/** Select the card written on `line`, opening whatever was hiding it. */
+	/** Select the card written on `line`, and put it in the middle of the view. */
 	focusLine(line: number): void {
-		this.pendingFocus = { line, edit: false };
+		this.pendingFocus = { line, edit: false, centre: true };
 		this.render("focus");
 	}
 
 	/**
-	 * The note Obsidian is carrying in a drag right now, or null.
+	 * The note Obsidian is carrying in a drag right now, as a link, or null.
 	 *
-	 * Asked of Obsidian's own record rather than of the drag payload: a
-	 * platform drag cannot be read until it is dropped, and by then the drag is
-	 * over and its payload is all that is left -- which for a note dragged out
-	 * of the file explorer is a path, not a name. The record outlives the drag.
-	 * One field is read off it; the shape of the rest is not this file's
+	 * Asked of Obsidian's own record rather than of the drag payload: a drag
+	 * that started in the file explorer carries a `Files` entry and no text at
+	 * all, so there is no path to read and no name either -- the record has the
+	 * name. One field is read off it; the shape of the rest is not this file's
 	 * business.
+	 *
+	 * What comes back is a *link*, not the name. The two are not
+	 * interchangeable: a card whose text is a bare name is a card that says a
+	 * name and is nothing else, so the note it names never opens, no preview
+	 * appears and nothing can be folded out of it. See `linkForName`.
 	 */
-	draggedNoteName(): string | null {
+	draggedNoteLink(): string | null {
 		const manager = (
 			this.app as unknown as {
 				dragManager?: {
-					draggable?: { type?: string; file?: { basename?: string } } | null;
+					draggable?: {
+						type?: string;
+						file?: { basename?: string; extension?: string };
+					} | null;
 				};
 			}
 		).dragManager;
 		const carried = manager?.draggable;
 		if (!carried || carried.type !== "file" || carried.file === undefined) return null;
+		// Only a note. A picture or a PDF dragged onto the map is not something
+		// a card can open, and `linkForName` cannot tell one from the other --
+		// the extension is the only thing that can, and the record carries it.
+		// Absent rather than wrong is treated as a note, so a field this file
+		// guessed the shape of going missing only costs the check.
+		const extension = carried.file.extension;
+		if (extension !== undefined && extension !== "md") return null;
 		const name = carried.file.basename;
-		return typeof name === "string" && name !== "" ? name : null;
+		return typeof name === "string" ? linkForName(name) : null;
 	}
 
 	/**
@@ -1094,6 +1159,11 @@ export class MindmapView extends TextFileView implements MapController {
 		this.detachInteractions = null;
 		this.detachDrop?.();
 		this.detachDrop = null;
+		// The header is not this view's to keep, so the action is taken out of it
+		// by name rather than left for the next view to find. See
+		// `addHeaderAction` for what it costs to leave one behind.
+		this.headerAction?.detach();
+		this.headerAction = null;
 		this.closePopover();
 		this.canvas.destroy();
 	}
@@ -1571,13 +1641,18 @@ export class MindmapView extends TextFileView implements MapController {
 		if (this.pendingFocus) {
 			const focus = this.pendingFocus;
 			this.pendingFocus = null;
-			const target = this.findByLine(focus.line);
+			// A line asked for from outside is a heading's, and the block that
+			// contains it is the card the reader means -- the same forgiving
+			// reading `nodeAtLine` gives the other direction. An edit's line is
+			// always a card's own marker line, so it keeps the exact one.
+			const target = focus.centre ? this.nodeAtLine(focus.line) : this.findByLine(focus.line);
 			if (target) {
 				this.setAnchor(target.key);
 				this.revealAncestors(target);
 				this.paint(reason);
 				if (focus.edit) this.beginEdit(target.id);
-				this.revealSelection();
+				if (focus.centre) this.centreSelection();
+				else this.revealSelection();
 				return;
 			}
 		}
@@ -3257,7 +3332,7 @@ export class MindmapView extends TextFileView implements MapController {
 
 	private commit(text: string, focusLine: number, edit: boolean): void {
 		this.data = text;
-		this.pendingFocus = focusLine >= 0 ? { line: focusLine, edit } : null;
+		this.pendingFocus = focusLine >= 0 ? { line: focusLine, edit, centre: false } : null;
 		// Parked on every write, not on the way out: the leaf swaps this view for
 		// a markdown one by way of a brand new instance, so the stacks have to
 		// live somewhere that outlasts this one.
@@ -4566,6 +4641,35 @@ export class MindmapView extends TextFileView implements MapController {
 		const layout = id ? this.layoutFor(id) : null;
 		if (!layout) return;
 		this.canvas.reveal(layout.x, layout.y, layout.width, layout.height);
+	}
+
+	/**
+	 * Put the selected card in the middle of the viewport.
+	 *
+	 * The difference from `revealSelection` is what the two are for. That one
+	 * pans the smallest amount there is, because everything that calls it is
+	 * already looking at the map and only needs the card on screen -- a search
+	 * step, an edit, a card that grew. This one is for a card named from
+	 * outside, where the reader has no idea where on the map it might be and
+	 * the middle of the screen is the only place that answers without a hunt.
+	 *
+	 * A viewport with no box yet -- a map a moment old -- has nothing to centre
+	 * on, so the ask is handed to the first framing that has one. `frameMap`
+	 * already knows how to spend it: `restoreFocusKey` under `needsFit` is a
+	 * `centreOn` of that card, and it is the same "put it in the middle" this
+	 * is asking for.
+	 */
+	private centreSelection(): void {
+		const id = this.selectedId();
+		const layout = id ? this.layoutFor(id) : null;
+		if (!layout) return;
+		const frame = this.canvas.metrics();
+		if (frame.width === 0 || frame.height === 0) {
+			this.restoreFocusKey = layout.node.key;
+			this.needsFit = true;
+			return;
+		}
+		this.canvas.centreOn(layout.x + layout.width / 2, layout.y + layout.height / 2);
 	}
 
 	// --- search ---------------------------------------------------------------

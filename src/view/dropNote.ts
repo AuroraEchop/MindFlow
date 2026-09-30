@@ -67,6 +67,28 @@ export function linkTextFromDrop(line: string): string | null {
 }
 
 /**
+ * The wikilink a note's name stands for, or null when it cannot be one.
+ *
+ * Asked of Obsidian's record of the drag rather than of the payload, because a
+ * drag that started in the file explorer carries its file as a `Files` entry
+ * and nothing readable at all -- no path, no name. The record has the name.
+ * What it does not have is the link syntax, and that is the whole point of
+ * this function: writing the bare name into the note makes a card that says
+ * the note's name and *is* nothing -- no link to open, no preview, no outline,
+ * and the drop looks like it only copied the title.
+ *
+ * `[`, `]`, `#`, `^` and `|` are the link's own syntax, and Obsidian refuses
+ * them in a file name besides, so a name carrying one did not come from a note
+ * and is refused rather than escaped into a link that means something else.
+ */
+export function linkForName(name: string): string | null {
+	const trimmed = name.trim();
+	if (trimmed === "") return null;
+	if (/[[\]#^|]/.test(trimmed)) return null;
+	return `[[${trimmed}]]`;
+}
+
+/**
  * Every note a dropped payload names, in order, without repeats.
  *
  * A payload is one line per item, and a drag of several files is several
@@ -100,13 +122,16 @@ export function lineOfState(state: unknown): number | null {
 export interface NoteDropHost {
 	canvas: { viewport: HTMLElement };
 	/**
-	 * The note Obsidian is carrying right now, or null.
+	 * The note Obsidian is carrying right now, as a link, or null.
 	 *
-	 * Asked first, and it is the reliable answer for a drag that started in the
-	 * file explorer: the payload of a platform drag cannot be read until the
-	 * drop, and by then the drag is over.
+	 * Asked as well as the payload rather than instead of it, and it is the
+	 * answer for a drag that started in the file explorer: that payload is a
+	 * `Files` entry with nothing readable in it, so the record is the only
+	 * place the name is written down. The payload wins when it names something,
+	 * because a drag of several notes says all of them there and the record
+	 * only ever holds the one under the pointer.
 	 */
-	draggedNoteName(): string | null;
+	draggedNoteLink(): string | null;
 	/** Write these links in as cards, under this card or under the root. */
 	dropNotes(texts: readonly string[], targetId: string | null): void;
 }
@@ -156,7 +181,14 @@ export function attachNoteDrop(host: NoteDropHost): () => void {
 		// the question here can only be "is this text at all". What it says is
 		// decided at the drop, where it can be read.
 		const data = ev.dataTransfer;
-		if (!data || !Array.from(data.types ?? []).includes("text/plain")) return;
+		if (!data) return;
+		const kinds = Array.from(data.types ?? []);
+		// `Files` is what the file explorer's own drag carries, and it is the
+		// one with no payload in it: the record of the drag is what answers for
+		// it, and refusing it here would refuse the drag before the drop that
+		// could have read it. Without this the platform never fires `drop` at
+		// all -- a dragover that is not prevented is a drag nobody can drop.
+		if (!kinds.includes("text/plain") && !kinds.includes("Files")) return;
 		ev.preventDefault();
 		data.dropEffect = "copy";
 		mark(cardUnder(ev));
@@ -174,13 +206,12 @@ export function attachNoteDrop(host: NoteDropHost): () => void {
 	const onDrop = (ev: DragEvent): void => {
 		const card = cardUnder(ev);
 		mark(null);
-		const text = payloadText(ev);
-		const payloadTexts = linksFromDrop(text);
-		// The platform's own record of the drag outlives the drag, so it is
-		// asked first and used alone when it answers: reading its path is not
-		// guessing at what a payload meant.
-		const dragged = host.draggedNoteName();
-		const texts = dragged === null ? payloadTexts : [dragged];
+		// The payload first, because it is what the drag itself said: a drag of
+		// several notes lists them all, where the record below holds only the
+		// one the pointer happened to be over.
+		const fromPayload = linksFromDrop(payloadText(ev));
+		const carried = host.draggedNoteLink();
+		const texts = fromPayload.length > 0 ? fromPayload : carried === null ? [] : [carried];
 		if (texts.length === 0) return;
 		ev.preventDefault();
 		host.dropNotes(texts, card?.dataset.id ?? null);
