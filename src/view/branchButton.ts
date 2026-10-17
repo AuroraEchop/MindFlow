@@ -118,4 +118,3 @@ export const BRANCH_FALLBACK_TEXT: Record<BranchAction, string> = {
 };
 
 /** The classes a branch button wears, in one place for tests and callers. */
-export const BRANCH_BUTTON_CLASSES = ["mm-add", "is-plus", "is-minus"];

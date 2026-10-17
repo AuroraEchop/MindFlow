@@ -5,7 +5,7 @@ import type { EdgeStyle } from "./edges.ts";
 import { attachLiftPress } from "./liftPress.ts";
 import type { Lift } from "./liftPress.ts";
 import { comboFromEvent, resolveAction } from "./shortcuts.ts";
-import type { KeyCombo, ShortcutBindings } from "./shortcuts.ts";
+import type { KeyCombo, ShortcutAction, ShortcutBindings } from "./shortcuts.ts";
 
 export type Direction = "up" | "down" | "left" | "right";
 
@@ -1391,152 +1391,7 @@ export function attachInteractions(controller: MapController): () => void {
 		}
 
 		if (!action) return;
-		const id = controller.selectedId();
-
-		switch (action) {
-			case "undo":
-				ev.preventDefault();
-				controller.undo();
-				return;
-			case "redo":
-				ev.preventDefault();
-				controller.redo();
-				return;
-			case "fit":
-				ev.preventDefault();
-				controller.fit();
-				return;
-			case "zoom-in":
-				ev.preventDefault();
-				canvas.zoomBy(1.2);
-				return;
-			case "zoom-out":
-				ev.preventDefault();
-				canvas.zoomBy(1 / 1.2);
-				return;
-			case "centre-selection":
-				ev.preventDefault();
-				controller.centreOnSelection();
-				return;
-			// The map's own Ctrl/Cmd+F. The view's keymap scope is what normally
-			// claims it -- this handler needs the viewport to hold the DOM focus,
-			// which it only does once a card has been clicked -- so this is the
-			// belt to that pair of braces. `openSearch` is idempotent, so the two
-			// paths overlapping costs nothing.
-			case "search":
-				ev.preventDefault();
-				controller.openSearch();
-				return;
-			case "replace":
-				ev.preventDefault();
-				controller.openReplace();
-				return;
-			case "close-search":
-				// Only ours while a search is open, and failing that while the map
-				// is filtered; otherwise Escape keeps whatever meaning Obsidian
-				// gives it. The view's scope registers the same key on the same
-				// terms; whichever sees it first, the second call finds nothing
-				// left to close.
-				if (!controller.closeSearch() && !controller.clearFilter()) return;
-				ev.preventDefault();
-				return;
-			case "navigate-up":
-			case "navigate-down":
-			case "navigate-left":
-			case "navigate-right":
-				// No selection is not a reason to stand still: `navigate` takes
-				// the root when there is nothing selected yet.
-				ev.preventDefault();
-				controller.navigate(DIRECTIONS[action]);
-				return;
-			// Deliberately handled here and not in the view's keymap scope: a
-			// move is not idempotent the way `openSearch` is, and a key both
-			// paths saw would move the node two places instead of one. The same
-			// reasoning is why this one stops the event rather than only
-			// preventing the default -- Obsidian's keymap sits on the document,
-			// so a hotkey a user has bound to the same combination would
-			// otherwise fire on top of this.
-			case "move-up":
-				if (!id) return;
-				ev.preventDefault();
-				ev.stopPropagation();
-				controller.moveUp(id);
-				return;
-			case "move-down":
-				if (!id) return;
-				ev.preventDefault();
-				ev.stopPropagation();
-				controller.moveDown(id);
-				return;
-			case "add-child":
-				if (!id) return;
-				ev.preventDefault();
-				controller.addChildTo(id);
-				return;
-			case "add-sibling":
-				if (!id) return;
-				ev.preventDefault();
-				controller.addSiblingTo(id);
-				return;
-			case "edit-title":
-				if (!id) return;
-				ev.preventDefault();
-				controller.beginEdit(id);
-				return;
-			case "edit-annotation":
-				if (!id) return;
-				ev.preventDefault();
-				controller.editAnnotation(id);
-				return;
-			case "insert-block":
-				if (!id) return;
-				ev.preventDefault();
-				controller.addBlock(id);
-				return;
-			case "delete-node":
-				if (!id) return;
-				ev.preventDefault();
-				controller.removeNode(id);
-				return;
-			case "toggle-check":
-				if (!id) return;
-				ev.preventDefault();
-				controller.toggleCheck(id);
-				return;
-			// On the way down this is reached only by a key the fold has been
-			// moved to: on its default, the pan key, it waits for the release --
-			// see the branch above the dispatch.
-			case "toggle-fold":
-				if (!id) return;
-				ev.preventDefault();
-				controller.toggleFold(id);
-				return;
-			case "indent":
-				if (!id) return;
-				// Stops the event rather than only preventing the default: the
-				// binding sits on Ctrl/Cmd+Shift+Tab, which is Obsidian's
-				// previous-tab switcher at the document, and a move that also
-				// flipped tabs would look like the key did nothing at all.
-				ev.preventDefault();
-				ev.stopPropagation();
-				controller.indent(id);
-				return;
-			case "outdent":
-				if (!id) return;
-				ev.preventDefault();
-				controller.outdent(id);
-				return;
-			case "expand-body":
-				if (!id) return;
-				ev.preventDefault();
-				controller.expandBody(id);
-				return;
-			default:
-				// An action with no case here is a compile error, which is the
-				// point: the table cannot grow a row nothing performs.
-				assertHandled(action);
-				return;
-		}
+		performAction(controller, action, ev);
 	});
 
 	/**
@@ -1588,4 +1443,164 @@ export function attachInteractions(controller: MapController): () => void {
 		for (const off of cleanups) off();
 		cleanups.length = 0;
 	};
+}
+
+/**
+ * Run one action of the shortcut table.
+ *
+ * Separate from the listener that reads the keys, because there are two of
+ * those and there has to be one of this: a combo carrying a modifier is
+ * answered by Obsidian's keymap before a DOM listener ever sees it -- see
+ * `needsScope` for which presses those are -- so the view's own scope calls in
+ * here as well, with the same press. One table, one switch, two ways in.
+ *
+ * The event goes with it: an action that takes a key out of Obsidian's hands
+ * says so on the event, and the scope path hands over the event it was given.
+ */
+export function performAction(
+	controller: MapController,
+	action: ShortcutAction,
+	ev: KeyboardEvent,
+): void {
+	const id = controller.selectedId();
+
+	switch (action) {
+		case "undo":
+			ev.preventDefault();
+			controller.undo();
+			return;
+		case "redo":
+			ev.preventDefault();
+			controller.redo();
+			return;
+		case "fit":
+			ev.preventDefault();
+			controller.fit();
+			return;
+		case "zoom-in":
+			ev.preventDefault();
+			controller.canvas.zoomBy(1.2);
+			return;
+		case "zoom-out":
+			ev.preventDefault();
+			controller.canvas.zoomBy(1 / 1.2);
+			return;
+		case "centre-selection":
+			ev.preventDefault();
+			controller.centreOnSelection();
+			return;
+		// The map's own Ctrl/Cmd+F. The view's keymap scope is what normally
+		// claims it -- this handler needs the viewport to hold the DOM focus,
+		// which it only does once a card has been clicked -- so this is the
+		// belt to that pair of braces. `openSearch` is idempotent, so the two
+		// paths overlapping costs nothing.
+		case "search":
+			ev.preventDefault();
+			controller.openSearch();
+			return;
+		case "replace":
+			ev.preventDefault();
+			controller.openReplace();
+			return;
+		case "close-search":
+			// Only ours while a search is open, and failing that while the map
+			// is filtered; otherwise Escape keeps whatever meaning Obsidian
+			// gives it. The view's scope registers the same key on the same
+			// terms; whichever sees it first, the second call finds nothing
+			// left to close.
+			if (!controller.closeSearch() && !controller.clearFilter()) return;
+			ev.preventDefault();
+			return;
+		case "navigate-up":
+		case "navigate-down":
+		case "navigate-left":
+		case "navigate-right":
+			// No selection is not a reason to stand still: `navigate` takes
+			// the root when there is nothing selected yet.
+			ev.preventDefault();
+			controller.navigate(DIRECTIONS[action]);
+			return;
+		// Deliberately handled here and not in the view's keymap scope: a
+		// move is not idempotent the way `openSearch` is, and a key both
+		// paths saw would move the node two places instead of one. The same
+		// reasoning is why this one stops the event rather than only
+		// preventing the default -- Obsidian's keymap sits on the document,
+		// so a hotkey a user has bound to the same combination would
+		// otherwise fire on top of this.
+		case "move-up":
+			if (!id) return;
+			ev.preventDefault();
+			ev.stopPropagation();
+			controller.moveUp(id);
+			return;
+		case "move-down":
+			if (!id) return;
+			ev.preventDefault();
+			ev.stopPropagation();
+			controller.moveDown(id);
+			return;
+		case "add-child":
+			if (!id) return;
+			ev.preventDefault();
+			controller.addChildTo(id);
+			return;
+		case "add-sibling":
+			if (!id) return;
+			ev.preventDefault();
+			controller.addSiblingTo(id);
+			return;
+		case "edit-annotation":
+			if (!id) return;
+			ev.preventDefault();
+			controller.editAnnotation(id);
+			return;
+		case "insert-block":
+			if (!id) return;
+			ev.preventDefault();
+			controller.addBlock(id);
+			return;
+		case "delete-node":
+			if (!id) return;
+			ev.preventDefault();
+			controller.removeNode(id);
+			return;
+		case "toggle-check":
+			if (!id) return;
+			ev.preventDefault();
+			controller.toggleCheck(id);
+			return;
+		// On the way down this is reached only by a key the fold has been
+		// moved to: on its default, the pan key, it waits for the release --
+		// see the branch above the dispatch.
+		case "toggle-fold":
+			if (!id) return;
+			ev.preventDefault();
+			controller.toggleFold(id);
+			return;
+		case "indent":
+			if (!id) return;
+			// Stops the event rather than only preventing the default: the
+			// binding sits on Ctrl/Cmd+Shift+Tab, which is Obsidian's
+			// previous-tab switcher at the document, and a move that also
+			// flipped tabs would look like the key did nothing at all.
+			ev.preventDefault();
+			ev.stopPropagation();
+			controller.indent(id);
+			return;
+		case "outdent":
+			if (!id) return;
+			ev.preventDefault();
+			controller.outdent(id);
+			return;
+		case "expand-body":
+			if (!id) return;
+			ev.preventDefault();
+			controller.expandBody(id);
+			return;
+		default:
+			// An action with no case here is a compile error, which is the
+			// point: the table cannot grow a row nothing performs.
+			assertHandled(action);
+			return;
+	}
 }

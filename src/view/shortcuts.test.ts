@@ -8,6 +8,7 @@ import {
 	findConflicts,
 	isDefaultBinding,
 	isModifierOnly,
+	needsScope,
 	parseCombo,
 	recordKey,
 	resolveAction,
@@ -37,6 +38,32 @@ const combo = (key: string, mods: Partial<Omit<KeyCombo, "key">> = {}): KeyCombo
 	mod: mods.mod === true,
 	shift: mods.shift === true,
 	alt: mods.alt === true,
+});
+
+test("a press Obsidian may answer first is claimed at the scope", () => {
+	// These are the three the table shipped blind to: Obsidian answers each of
+	// them itself, and a press it answers never reaches a DOM listener -- so a
+	// row bound to one of them did nothing at all.
+	assert.equal(needsScope(combo("F2")), true); // rename a file
+	assert.equal(needsScope(combo("h", { mod: true })), true); // replace
+	assert.equal(needsScope(combo("Tab", { mod: true, shift: true })), true); // previous tab
+	assert.equal(needsScope(combo("ArrowUp", { mod: true })), true);
+	assert.equal(needsScope(combo("=", { mod: true })), true);
+	assert.equal(needsScope(combo("Enter", { alt: true })), true);
+});
+
+test("a press whose meaning depends on the focus is left to the viewport", () => {
+	// Not one of these is bound by Obsidian globally, and every one of them
+	// means something to whatever is in front of it -- a button, a field, the
+	// map -- so the map only ever answers one once it has the focus itself.
+	assert.equal(needsScope(combo("Enter")), false);
+	assert.equal(needsScope(combo("Enter", { shift: true })), false);
+	assert.equal(needsScope(combo("Tab")), false);
+	assert.equal(needsScope(combo("Tab", { shift: true })), false);
+	assert.equal(needsScope(combo("Space")), false);
+	assert.equal(needsScope(combo("Delete")), false);
+	assert.equal(needsScope(combo("Escape")), false);
+	assert.equal(needsScope(combo("ArrowLeft")), false);
 });
 
 // --- normalising a press ------------------------------------------------------
@@ -156,7 +183,8 @@ test("the defaults answer the keys the map has always answered", () => {
 		[press("Tab", { shift: true }), "outdent"],
 		[press("Enter"), "add-sibling"],
 		[press("Enter", { shift: true }), "insert-block"],
-		[press("F2"), "edit-title"],
+		// `F2` used to be the map's edit-the-title. It is Obsidian's own rename again,
+		// which is why it is asserted here and nowhere else in the table.
 		[press("Enter", { ctrl: true }), "edit-annotation"],
 		[press("Enter", { ctrl: true, shift: true }), "toggle-check"],
 		[press("Delete"), "delete-node"],
@@ -206,10 +234,10 @@ test("an empty override is what unbound looks like", () => {
 });
 
 test("an action can answer to more than one key", () => {
-	const bindings = resolveBindings({ "edit-title": ["F4", "Mod+e"] });
-	assert.equal(resolveAction(bindings, comboFromEvent(press("F4"))), "edit-title");
-	assert.equal(resolveAction(bindings, comboFromEvent(press("e", { meta: true }))), "edit-title");
-	assert.equal(resolveAction(bindings, comboFromEvent(press("F2"))), null);
+	const bindings = resolveBindings({ "add-child": ["Tab", "Mod+e"] });
+	assert.equal(resolveAction(bindings, comboFromEvent(press("Tab"))), "add-child");
+	assert.equal(resolveAction(bindings, comboFromEvent(press("e", { meta: true }))), "add-child");
+	assert.equal(resolveAction(bindings, comboFromEvent(press("Enter"))), "add-sibling");
 });
 
 test("a stored binding the table no longer knows is dropped", () => {
@@ -256,7 +284,6 @@ test("every action has an entry, and the entry is findable", () => {
 	const covered: Record<ShortcutAction, true> = {
 		"add-child": true,
 		"add-sibling": true,
-		"edit-title": true,
 		"edit-annotation": true,
 		"insert-block": true,
 		"delete-node": true,

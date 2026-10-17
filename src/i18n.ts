@@ -32,8 +32,6 @@ const EN = {
 	"shortcut.add-sibling.name": "Add a sibling",
 	"shortcut.add-sibling.description":
 		"Add an empty node below the selected one, at the same level.",
-	"shortcut.edit-title.name": "Edit the title",
-	"shortcut.edit-title.description": "Edit the selected node's text in place.",
 	"shortcut.edit-annotation.name": "Add or edit the annotation",
 	"shortcut.edit-annotation.description":
 		"Open the note under the selected node for editing, or start one where there is none. The same as double-clicking an annotation.",
@@ -318,11 +316,16 @@ const EN = {
 	"view.shortcuts.mouse.reparent.what": "Reparent it",
 	"view.shortcuts.mouse.reorder.keys": "Drag onto a card's top / bottom edge",
 	"view.shortcuts.mouse.reorder.what": "Reorder it beside that card",
-	"view.shortcuts.mouse.zoom.keys": "Wheel / pinch",
+	"view.shortcuts.mouse.wheel.keys": "Wheel",
+	"view.shortcuts.mouse.pinch.keys": "Pinch",
+	"view.shortcuts.mouse.pan.wheelKeys": "Shift and the wheel",
+	"view.shortcuts.mouse.zoom.wheelKeys": "Ctrl and the wheel",
 	"view.shortcuts.mouse.zoom.what": "Zoom",
 	"view.shortcuts.mouse.pan.keys": "Space + drag",
 	"view.shortcuts.mouse.pan.plainKeys": "Drag blank space",
-	"view.shortcuts.mouse.pan.what": "Move the map",
+	"view.shortcuts.mouse.pan.middleKeys": "Middle-button drag",
+	"view.shortcuts.mouse.pan.wheel.what": "Pan up and down",
+	"view.shortcuts.mouse.pan.drag.what": "Drag the canvas freely",
 	"view.shortcuts.mouse.band.keys": "Drag blank space",
 	"view.shortcuts.mouse.band.shiftKeys": "Shift + drag blank space",
 	"view.shortcuts.mouse.band.what": "Draw a box; every card it covers joins the selection",
@@ -333,7 +336,6 @@ const EN = {
 		"Move all of them, keeping the order they are written in",
 
 	// --- a node's context menu ----------------------------------------------
-	"view.menu.showBlock": "Show the whole block",
 	"view.menu.editBlock": "Edit the block source",
 	"view.menu.addChild": "Add child",
 	"view.menu.editAnnotation": "Edit annotation",
@@ -355,7 +357,10 @@ const EN = {
 	"view.menu.openSource": "Open the source note",
 
 	// --- what the map says when it will not do something --------------------
-	"view.notice.rootRename": "This node is the file name. Rename the note to change it.",
+	"view.notice.rootRename":
+		"That card has no line of its own to edit: it is the note itself, or a card projected from another note.",
+	"view.notice.renameFailed":
+		"Could not rename the note to that -- a file with that name may already exist.",
 	"view.notice.rootDelete": "The root node cannot be deleted from the map.",
 	"view.notice.blockRefused":
 		"This node is not one the note holds, so there is nowhere to write a block under it.",
@@ -438,8 +443,6 @@ const ZH: Record<I18nKey, string> = {
 	"shortcut.add-child.description": "在选中节点下添加一个空子节点，并立即进入编辑。",
 	"shortcut.add-sibling.name": "添加同级节点",
 	"shortcut.add-sibling.description": "在选中节点下方、同一层级添加一个空节点。",
-	"shortcut.edit-title.name": "编辑标题",
-	"shortcut.edit-title.description": "就地编辑选中节点的文字。",
 	"shortcut.edit-annotation.name": "添加或编辑注解",
 	"shortcut.edit-annotation.description":
 		"编辑选中节点下方的注解，没有则新建。等同于双击注解。",
@@ -717,11 +720,16 @@ const ZH: Record<I18nKey, string> = {
 	"view.shortcuts.mouse.reparent.what": "改变它的父节点",
 	"view.shortcuts.mouse.reorder.keys": "拖拽到卡片的上下边缘",
 	"view.shortcuts.mouse.reorder.what": "在该卡片旁重新排序",
-	"view.shortcuts.mouse.zoom.keys": "滚轮 / 双指捏合",
+	"view.shortcuts.mouse.wheel.keys": "滚轮",
+	"view.shortcuts.mouse.pinch.keys": "双指捏合",
+	"view.shortcuts.mouse.pan.wheelKeys": "Shift + 滚轮",
+	"view.shortcuts.mouse.zoom.wheelKeys": "Ctrl + 滚轮",
 	"view.shortcuts.mouse.zoom.what": "缩放",
 	"view.shortcuts.mouse.pan.keys": "Space + 拖动",
 	"view.shortcuts.mouse.pan.plainKeys": "拖动空白处",
-	"view.shortcuts.mouse.pan.what": "平移画布",
+	"view.shortcuts.mouse.pan.middleKeys": "中键拖动",
+	"view.shortcuts.mouse.pan.wheel.what": "上下平移画布",
+	"view.shortcuts.mouse.pan.drag.what": "自由拖动画布",
 	"view.shortcuts.mouse.band.keys": "拖动空白处",
 	"view.shortcuts.mouse.band.shiftKeys": "Shift + 拖动空白处",
 	"view.shortcuts.mouse.band.what": "拉出一个选框，框到的卡片都进入选中",
@@ -731,7 +739,6 @@ const ZH: Record<I18nKey, string> = {
 	"view.shortcuts.mouse.dragGroup.what": "整组一起搬走，保持它们在笔记里的顺序",
 
 	// --- 节点右键菜单 --------------------------------------------------------
-	"view.menu.showBlock": "查看整块内容",
 	"view.menu.editBlock": "编辑块源码",
 	"view.menu.addChild": "添加子节点",
 	"view.menu.editAnnotation": "编辑注解",
@@ -753,7 +760,9 @@ const ZH: Record<I18nKey, string> = {
 	"view.menu.openSource": "打开来源笔记",
 
 	// --- 导图拒绝执行某件事时的提示 ------------------------------------------
-	"view.notice.rootRename": "该节点就是文件名。要改名请重命名这篇笔记。",
+	"view.notice.rootRename":
+		"这张卡片没有可编辑的、属于自己的那一行：它就是笔记本身，或是从别的笔记投影过来的卡片。",
+	"view.notice.renameFailed": "没法改成这个名字：可能已经有同名文件了。",
 	"view.notice.rootDelete": "根节点无法从导图中删除。",
 	"view.notice.blockRefused": "这个节点不在笔记中，没有地方可以在它下面写入文字块。",
 	"view.notice.nothingToUndo": "导图上没有可撤销的操作。",

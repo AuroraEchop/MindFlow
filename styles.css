@@ -1005,20 +1005,6 @@ mark.mm-hit.keeps-ink {
 
 .mm-annotation .mm-link[data-href] { cursor: pointer; }
 
-.mm-annotation-input {
-	box-sizing: border-box;
-	width: 100%;
-	min-height: 140px;
-	resize: vertical;
-	white-space: pre-wrap;
-}
-
-.mm-annotation-hint {
-	margin: 6px 0 0;
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
-}
-
 /* --- the card of a node that points at another note ---------------------- */
 
 /*
@@ -2387,13 +2373,6 @@ mark.mm-hit.keeps-ink {
 	margin: 0 0 10px;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-}
-
-.mm-popover-actions {
-	display: flex;
-	justify-content: flex-end;
-	gap: 8px;
-	margin-top: 4px;
 }
 
 /* --- the body card's own furniture ---------------------------------------- */

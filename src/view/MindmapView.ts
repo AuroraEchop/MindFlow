@@ -112,16 +112,18 @@ import { Lightbox } from "./lightbox.ts";
 import { inlineExportMedia } from "../export/media.ts";
 import { ToastStack } from "./toast.ts";
 import { nodeMaxWidth } from "./nodeWidth.ts";
-import { attachInteractions } from "./interactions.ts";
+import { attachInteractions, performAction } from "./interactions.ts";
+import { inTextField } from "./textField.ts";
 import {
 	SHORTCUTS,
 	comboFromEvent,
 	comboToString,
 	resolveAction,
+	needsScope,
 	resolveBindings,
 	survivesEditing,
 } from "./shortcuts.ts";
-import type { KeyCombo, ShortcutBindings } from "./shortcuts.ts";
+import type { KeyCombo, ShortcutAction, ShortcutBindings } from "./shortcuts.ts";
 import { SearchBar } from "./searchBar.ts";
 import type { ReplaceScope } from "./searchBar.ts";
 import { clearHits, markHits } from "./hits.ts";
@@ -150,6 +152,23 @@ export const MINDMAP_VIEW_TYPE = "mindflow-view";
  * header is not part of the view and survives a swap. See `addHeaderAction`.
  */
 const MAP_ACTION_CLASS = "mindflow-map-action";
+
+/**
+ * The actions `bindScope` registers one at a time, because each has its own
+ * answer to "is this press the map's": the find bar's three, which have to
+ * work while the bar itself holds the focus, and the annotation editor, which
+ * has to know whether a card is already being written in.
+ *
+ * Everything else the table binds to a modifier or a function key is claimed
+ * by the loop below, which is where the keys Obsidian answers first are won
+ * back -- see `needsScope`.
+ */
+const SCOPED_BY_HAND: ReadonlySet<ShortcutAction> = new Set<ShortcutAction>([
+	"search",
+	"replace",
+	"close-search",
+	"edit-annotation",
+]);
 
 /** How far a press has to travel before it is a drag rather than a click. */
 const TOOLBAR_DRAG_THRESHOLD = 5;
@@ -338,16 +357,6 @@ function firstLineOf(text: string): string {
 		if (line.trim() !== "") return line;
 	}
 	return "";
-}
-
-/** Somewhere a keystroke means a character rather than a command. */
-function inTextField(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) return false;
-	return (
-		target.isContentEditable ||
-		target.tagName === "INPUT" ||
-		target.tagName === "TEXTAREA"
-	);
 }
 
 /**
@@ -787,6 +796,41 @@ export class MindmapView extends TextFileView implements MapController {
 				this.editAnnotation(id);
 				return false;
 			});
+		}
+		// Replace is the find key's pair -- the same bar with its second row out
+		// -- so it belongs on the same terms: answered wherever the focus is,
+		// the bar's own field included, which is exactly where a reader presses
+		// it.
+		for (const combo of bindings.replace) {
+			this.registerScoped(scope, combo, (evt) => {
+				evt.preventDefault();
+				this.openReplace();
+				return false;
+			});
+		}
+		// And everything else a modifier or a function key carries. Obsidian's
+		// keymap answers a press like that before any DOM listener sees it --
+		// `F2` is its rename, `Mod+Shift+Tab` its previous-tab switch -- which is
+		// why the map's own bindings on those keys looked dead however the table
+		// was written. This is the path they survive on, and `performAction` is
+		// the very switch the viewport runs, so the two cannot come to different
+		// conclusions about one press.
+		//
+		// The text-field guard is what keeps a key from being taken out of a
+		// field somebody is typing in: a press inside one is handed straight back
+		// to the field, which is why the bar's own keys above are registered
+		// without it.
+		for (const entry of SHORTCUTS) {
+			if (SCOPED_BY_HAND.has(entry.action)) continue;
+			for (const combo of bindings[entry.action]) {
+				if (!needsScope(combo)) continue;
+				this.registerScoped(scope, combo, (evt) => {
+					if (this.isEditing() || inTextField(evt.target)) return true;
+					evt.preventDefault();
+					performAction(this, entry.action, evt);
+					return false;
+				});
+			}
 		}
 	}
 
@@ -1567,19 +1611,51 @@ export class MindmapView extends TextFileView implements MapController {
 			["view.shortcuts.mouse.reparent.keys", "view.shortcuts.mouse.reparent.what"],
 			["view.shortcuts.mouse.reorder.keys", "view.shortcuts.mouse.reorder.what"],
 			["view.shortcuts.mouse.dragGroup.keys", "view.shortcuts.mouse.dragGroup.what"],
-			["view.shortcuts.mouse.zoom.keys", "view.shortcuts.mouse.zoom.what"],
-			["view.shortcuts.mouse.pan.keys", "view.shortcuts.mouse.pan.what"],
 		];
-		// The two rows the drag mode swaps, because the setting *is* this pair of
-		// questions: which press a plain drag on blank canvas is, and which press
-		// draws the box. The pan key's row is above both because it moves the map
-		// either way -- that is what makes the setting safe to try.
-		if (this.plugin.settings.dragToPan) {
-			mouse.push(["view.shortcuts.mouse.pan.plainKeys", "view.shortcuts.mouse.pan.what"]);
-			mouse.push(["view.shortcuts.mouse.band.shiftKeys", "view.shortcuts.mouse.band.what"]);
+		const rows: Array<[string, string]> = mouse.map(([keys, what]) => [t(keys), t(what)]);
+
+		// The pointer rows are the two settings that decide what the pointer
+		// does, read as they stand now: the wheel's own setting, and the drag
+		// mode. Written out by hand they went on saying "zoom" after the wheel
+		// had been swapped to panning -- a panel describing a map nobody has.
+		const wheel = this.plugin.settings.wheel;
+		const drag = this.plugin.settings.dragToPan;
+
+		// The wheel pans, and a drag pans, and they are two different things: a
+		// notch at a time up and down the note, versus the map following the
+		// hand wherever it goes. One row called "move the map" listing both made
+		// a reader pick through gestures that do not feel alike to find the one
+		// they meant, so each row here is one of the two. It is the same wheel
+		// in the zoom row either way: what the setting changes is which of the
+		// two its plain turn is written in, and someone asking "how do I zoom"
+		// wants both ways of zooming in the same place.
+		const zoom = [t("view.shortcuts.mouse.pinch.keys")];
+		const wheelPan = [];
+		if (wheel === "zoom") {
+			zoom.unshift(t("view.shortcuts.mouse.wheel.keys"));
+			wheelPan.push(t("view.shortcuts.mouse.pan.wheelKeys"));
 		} else {
-			mouse.push(["view.shortcuts.mouse.band.keys", "view.shortcuts.mouse.band.what"]);
+			zoom.push(t("view.shortcuts.mouse.zoom.wheelKeys"));
+			wheelPan.push(t("view.shortcuts.mouse.wheel.keys"));
 		}
+		// A plain drag moves the map when the drag mode says so; the pan key and
+		// the middle button do it either way, and neither is affected by the
+		// setting -- which is why this row loses only one of its three
+		// gestures when the drag mode is turned off.
+		const dragPan = [t("view.shortcuts.mouse.pan.keys")];
+		if (drag) dragPan.push(t("view.shortcuts.mouse.pan.plainKeys"));
+		dragPan.push(t("view.shortcuts.mouse.pan.middleKeys"));
+		rows.push([zoom.join("  /  "), t("view.shortcuts.mouse.zoom.what")]);
+		rows.push([wheelPan.join("  /  "), t("view.shortcuts.mouse.pan.wheel.what")]);
+		rows.push([dragPan.join("  /  "), t("view.shortcuts.mouse.pan.drag.what")]);
+
+		// And the box, which is the press the drag mode moves: a plain drag while
+		// the pan key is the only way to move the map, Shift and a drag once a
+		// plain drag moves it.
+		rows.push([
+			t(drag ? "view.shortcuts.mouse.band.shiftKeys" : "view.shortcuts.mouse.band.keys"),
+			t("view.shortcuts.mouse.band.what"),
+		]);
 
 		const panel = this.openPopover();
 		panel.addClass("mm-shortcuts");
@@ -1598,7 +1674,7 @@ export class MindmapView extends TextFileView implements MapController {
 			if (combos.length === 0) continue;
 			row(combos.map((combo) => comboToString(combo, isMac)).join("  /  "), t(entry.nameKey));
 		}
-		for (const [keys, what] of mouse) row(t(keys), t(what));
+		for (const [keys, what] of rows) row(keys, what);
 
 		panel.createDiv({
 			cls: "mm-popover-hint mm-shortcuts-footer",
@@ -3565,7 +3641,12 @@ export class MindmapView extends TextFileView implements MapController {
 		const element = this.elements.get(id);
 		const node = this.parsed?.byId.get(id);
 		if (!element || !node) return;
-		if (!canRename(node)) {
+		// The note's own card, on a note with no heading to be named after: its
+		// text *is* the file name, so editing it is renaming the file. That is
+		// the answer `F2` gets here and in the editor both -- one name, kept in
+		// one place, with every link to this note following it.
+		const namesTheFile = node.parent === null && node.virtual && this.file !== null;
+		if (!canRename(node) && !namesTheFile) {
 			new Notice(t("view.notice.rootRename"));
 			return;
 		}
@@ -3612,7 +3693,9 @@ export class MindmapView extends TextFileView implements MapController {
 					this.editTextEl = null;
 					this.editStartText = null;
 					this.endEdit = null;
-					if (save) {
+					if (save && namesTheFile) {
+						this.renameFile(value);
+					} else if (save) {
 						this.withNode(id, (parsed, current) => {
 							this.applyEdit(renameNode(parsed, current, value), value.trim() === "");
 						});
@@ -5041,6 +5124,27 @@ export class MindmapView extends TextFileView implements MapController {
 		this.applyFades();
 	}
 
+	/**
+	 * The key a card's fade is decided by.
+	 *
+	 * A note-content card is the one card the parsed tree does not hold: it is
+	 * synthesised for the paint and hangs off its owner by `parent` alone, so
+	 * the walks that build the two sets below -- which go down `children` --
+	 * never reach it. Asking its owner is the answer, and the one the rest of
+	 * the map already gives: a block of the note's own prose is kept exactly
+	 * where the card that owns that prose is kept.
+	 *
+	 * Without this, a code sample dimmed under a filter or a solo while the
+	 * branch it belonged to stayed bright -- the one card on the map that
+	 * answered a question asked of the tree by not being in it.
+	 */
+	private fadeKeyFor(id: string): string | null {
+		const node = this.layoutById.get(id)?.node;
+		if (node === undefined) return null;
+		if (node.kind === "body" && node.parent !== null) return node.parent.key;
+		return node.key;
+	}
+
 	/** What a node's own note-content cards say, for the tag filter to read. */
 	private bodyTextOf(node: MindNode): string {
 		const doc = this.parsed?.doc;
@@ -5062,9 +5166,9 @@ export class MindmapView extends TextFileView implements MapController {
 		const kept = this.tagKeys;
 		const solo = this.soloKeys();
 		for (const [id, element] of this.elements) {
-			const node = this.layoutById.get(id)?.node;
-			let on = kept === null || (node !== undefined && kept.has(node.key));
-			if (on && solo !== null) on = node !== undefined && solo.has(node.key);
+			const key = this.fadeKeyFor(id);
+			let on = kept === null || (key !== null && kept.has(key));
+			if (on && solo !== null) on = key !== null && solo.has(key);
 			element.el.toggleClass("mm-faded", !on);
 		}
 		if (kept === null) {
@@ -5187,6 +5291,40 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	// --- editing in place -----------------------------------------------------
+
+	/**
+	 * Rename the note this map is showing, from the card that carries its name.
+	 *
+	 * Through the vault rather than by writing a line, because a note's name is
+	 * its file's name: Obsidian's own file manager is what moves the file and
+	 * what rewrites the links pointing at it, and the map follows the rename the
+	 * way it follows any other change to the note.
+	 *
+	 * Characters a file name cannot hold are dropped rather than escaped -- they
+	 * are what the note may not be called, not something to write down -- and an
+	 * edit that ends on nothing is the same as no edit at all.
+	 */
+	private renameFile(text: string): void {
+		const file = this.file;
+		if (!file) return;
+		const name = text.replace(/[\\/:*?"<>|#[\]^]/g, " ").replace(/\s+/g, " ").trim();
+		if (name === "" || name === file.basename) {
+			this.render("edit");
+			return;
+		}
+		const folder = file.parent?.path ?? "";
+		const path =
+			folder === "" || folder === "/"
+				? `${name}.${file.extension}`
+				: `${folder}/${name}.${file.extension}`;
+		void this.app.fileManager.renameFile(file, path).catch(() => {
+			// A name already taken is the ordinary failure, and the file has not
+			// moved: drawing the card again puts the note's real name back under
+			// a draft that never became anything.
+			this.render("edit");
+			new Notice(t("view.notice.renameFailed"));
+		});
+	}
 
 	/** Open the block for in-place editing, the same as double-clicking it. */
 	expandBody(id: string): void {

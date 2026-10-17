@@ -209,7 +209,6 @@ function mustParse(text: string): KeyCombo {
 const TABLE = [
 	{ action: "add-child", defaults: ["Tab"] },
 	{ action: "add-sibling", defaults: ["Enter"] },
-	{ action: "edit-title", defaults: ["F2"] },
 	{ action: "edit-annotation", defaults: ["Mod+Enter"] },
 	{ action: "insert-block", defaults: ["Shift+Enter"] },
 	{ action: "delete-node", defaults: ["Delete", "Backspace"] },
@@ -360,6 +359,26 @@ export function resolveAction(
 export function survivesEditing(action: ShortcutAction, typed: boolean): boolean {
 	if (typed) return false;
 	return action === "undo" || action === "redo";
+}
+
+/**
+ * Whether a combo has to be claimed at the workspace scope rather than from the
+ * viewport's own keydown listener.
+ *
+ * A press carrying a modifier, or landing on a function key, is one Obsidian's
+ * own keymap is free to answer first: `F2` renames a file, `Mod+h` is the
+ * editor's replace, `Mod+Shift+Tab` is the previous-tab switcher. A press the
+ * keymap answers never arrives at a DOM listener at all -- so those three did
+ * nothing, whatever the table said. Registering on the view's scope goes into
+ * the keymap pipeline itself, which is the one path such a press survives on.
+ *
+ * Everything else -- `Enter`, `Tab`, `Delete`, `Space`, the arrows -- is a key
+ * whose meaning depends on what holds the focus, and Obsidian binds none of
+ * them globally. Those stay on the viewport listener, where a press is the
+ * map's only once the map itself is the thing being typed at.
+ */
+export function needsScope(combo: KeyCombo): boolean {
+	return combo.mod || combo.alt || /^F\d{1,2}$/.test(combo.key);
 }
 
 /** Every combo more than one action answers to, in table order. */
