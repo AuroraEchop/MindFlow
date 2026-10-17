@@ -29,7 +29,26 @@ should be capped at the wider note-content width:
 - ![[Link Fixture.pdf]] — a PDF that is really there, and stays a chip
 - ![[Nowhere.png]] — a file that is not in the vault at all
 - ![[a song.mp3]] — audio is not a picture either
-- ![](https://example.com/remote.png) — a remote address is never fetched
+- ![](https://example.com/remote.png) — a remote address is never fetched to be
+  drawn; pasting one onto a card is the other thing, below
+
+## Pasting
+
+The one gesture here that has to be done by hand. Select a card above (or
+double-click one open), copy a picture — a screenshot, or Copy Image in a
+browser — and press `Ctrl`/`Cmd`+`V`:
+
+- the picture should appear on that card, filed in the vault's attachment
+  folder under `Pasted image <stamp>.<ext>`;
+- a card that already says something should keep saying it, with the picture
+  after the words;
+- with **no card selected**, the paste should add nothing and say so;
+- copying a picture's **address** instead (`https://…/a.png`) should fetch it
+  once, file it, and draw it — the note keeps a local file, not the address;
+- copying **two** pictures at once should be declined, not crammed onto the card.
+
+The root card and a projected card (a `[[Note]]` card with its outline open)
+should refuse the paste: neither has a line of its own to write on.
 
 ## Videos
 

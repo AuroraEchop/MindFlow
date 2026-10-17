@@ -103,9 +103,16 @@ import { buildNodeElement } from "./nodes.ts";
 import type { LinkCardOptions, NodeElement, NodeElementOptions } from "./nodes.ts";
 import { cardShape } from "./cardShape.ts";
 import { renderInline } from "./inline.ts";
-import { openInlineEditor } from "./inlineEditor.ts";
+import { insertTextAtCaret, openInlineEditor } from "./inlineEditor.ts";
 import type { InlineEditorHost } from "./inlineEditor.ts";
 import { NotePickerModal, createNoteBeside, linkTextFor } from "./noteLink.ts";
+import {
+	attachImagePaste,
+	extensionForType,
+	pastedImageName,
+} from "./pasteImage.ts";
+import type { PastedPicture } from "./pasteImage.ts";
+import { pictureFromUrl, savePicture } from "./vaultImage.ts";
 import { activateMedia, mediaLoading, whenMediaReady } from "./media.ts";
 import type { MediaContext, MediaSize } from "./media.ts";
 import { Lightbox } from "./lightbox.ts";
@@ -379,6 +386,21 @@ function looksPreformatted(text: string): boolean {
  */
 function looksCode(text: string): boolean {
 	return /^\s*(```|~~~)/.test(text);
+}
+
+/**
+ * Where a pasted picture is to be written, as it stood when the paste arrived.
+ *
+ * The card is named rather than held, and the field is held rather than named,
+ * because the two are looked up at different moments: a card is looked up again
+ * where the picture is finally written, and a field is the one element the map
+ * itself put there and only it can still be.
+ */
+interface PasteTarget {
+	/** The field a card is open for editing in, or null. */
+	field: HTMLElement | null;
+	/** The card the map is holding. */
+	id: string;
 }
 
 interface PendingFocus {
@@ -667,6 +689,8 @@ export class MindmapView extends TextFileView implements MapController {
 	private detachInteractions: (() => void) | null = null;
 	/** Detaches the note drop listeners; see `dropNote.ts`. */
 	private detachDrop: (() => void) | null = null;
+	/** Detaches the picture paste listener; see `pasteImage.ts`. */
+	private detachPaste: (() => void) | null = null;
 	/** The view action added to the tab header, so it can be taken away again. */
 	private headerAction: HTMLElement | null = null;
 	/** The corner, kept so its visibility can follow the selection. */
@@ -1004,6 +1028,7 @@ export class MindmapView extends TextFileView implements MapController {
 		void ensureMath();
 		this.detachInteractions = attachInteractions(this);
 		this.detachDrop = attachNoteDrop(this);
+		this.detachPaste = attachImagePaste(this);
 		this.applyToolbarVisibility();
 		this.addHeaderAction();
 		// The keyboard, on the next tick rather than here. The swap that opened
@@ -1171,6 +1196,171 @@ export class MindmapView extends TextFileView implements MapController {
 		if (node !== null && link !== null && !link.external) this.toggleEmbed(node.id);
 	}
 
+	// --- a pasted picture; see `pasteImage.ts` --------------------------------
+
+	/**
+	 * The field a card is open for editing in, or null.
+	 *
+	 * What the paste listener asks before it decides anything: a paste that
+	 * arrived inside the field belongs to the field, and one that arrived
+	 * anywhere else on the map belongs to the card the map is holding.
+	 */
+	editingField(): HTMLElement | null {
+		return this.editTextEl;
+	}
+
+	/** The clipboard carried more than one picture, which one card cannot hold. */
+	pasteMany(): void {
+		new Notice(t("view.notice.pasteMany"));
+	}
+
+	/**
+	 * Put one pasted picture on whichever card is holding.
+	 *
+	 * The card is asked for first and the picture is read second, in that order
+	 * and not the other way round: an attachment is a file written into the
+	 * user's vault, and a paste no card can hold must not leave one behind.
+	 * Everything past that is the two halves the codebase already has --
+	 * `savePicture` files the bytes, and what lands on the card is an `![[...]]`
+	 * like any other, which is why the map draws it without knowing it began as
+	 * a paste.
+	 */
+	pastePicture(picture: PastedPicture): void {
+		const target = this.pasteTarget();
+		if (target === null) return;
+		void this.writePicture(picture, target);
+	}
+
+	/**
+	 * Where a paste would land, or null when the map has already said why not.
+	 *
+	 * Asked when the paste arrives, and asked *before* anything is read off the
+	 * clipboard or the network: an attachment is a file written into the user's
+	 * vault, and a paste no card can hold must not leave one behind. A card that
+	 * is not one of this note's own lines is refused rather than written to --
+	 * the root is the note's name and has no line, and a card projected out of
+	 * another note is that note's line, so writing on it would write into a file
+	 * the map is not showing.
+	 *
+	 * What comes back names both places rather than choosing one, because the
+	 * choice is only worth making where the picture is finally written: a field
+	 * can be closed, and a card can be replaced, while an address is being read.
+	 */
+	private pasteTarget(): PasteTarget | null {
+		const id = this.selectedId();
+		if (id === null) {
+			new Notice(t("view.notice.pasteNoCard"));
+			return null;
+		}
+		const field = this.editTextEl;
+		// The card is asked about whether or not a field is open. An open field
+		// only says *where* in the card the picture would go; it says nothing
+		// about whether the card has a line to write on, and the one card the
+		// map lets you type in but cannot write to is the note's own -- its
+		// field holds the file name, so a picture written there would end up in
+		// the note's name rather than in the note.
+		if (!this.bodyNodes.has(id)) {
+			const node = this.parsed?.byId.get(id);
+			if (!node || !canRename(node)) {
+				new Notice(t("view.notice.pasteReadOnly"));
+				return null;
+			}
+		}
+		return { field, id };
+	}
+
+	/**
+	 * File the picture away, then write the link to it on the card.
+	 *
+	 * Asynchronous, because a picture read off an address is -- and the two
+	 * halves are one action: nothing is written to the note until the vault
+	 * holds the file, so a read that failed leaves the map exactly as it was.
+	 * The view is asked whether it is still here afterwards, because a paste
+	 * that takes a second is a paste the user can close the tab during.
+	 */
+	private async writePicture(picture: PastedPicture, target: PasteTarget): Promise<void> {
+		const source = this.file;
+		if (source === null) return;
+		const at = new Date();
+
+		let name: string;
+		let data: ArrayBuffer;
+		if (picture.kind === "file") {
+			name = pastedImageName(extensionForType(picture.file.type) ?? "png", at);
+			data = await picture.file.arrayBuffer();
+		} else {
+			const grabbed = await pictureFromUrl(picture.url, at);
+			if (grabbed === null) {
+				new Notice(t("view.notice.pasteFailed"));
+				return;
+			}
+			name = grabbed.name;
+			data = grabbed.data;
+		}
+		// Nothing is written into the vault for a paste that has no map left to
+		// land on: a read off a slow server is long enough for the tab to be
+		// closed under it.
+		if (this.closed) return;
+
+		const saved = await savePicture(this.app, name, data, source.path);
+		if (this.closed) return;
+		if (saved === null) {
+			new Notice(t("view.notice.pasteFailed"));
+			return;
+		}
+		this.putPicture(`![[${linkTextFor(this.app, saved, source.path)}]]`, target);
+	}
+
+	/**
+	 * Write the picture's link where the paste was aimed.
+	 *
+	 * The card is looked up again rather than held from before the read, and
+	 * whether it is still being edited is asked again too: an address takes a
+	 * moment to come back, and an editor closed during that moment leaves a
+	 * field nothing can be written into. So the picture goes on the card
+	 * instead, which is where a paste with no field open would have gone.
+	 */
+	private putPicture(embed: string, target: PasteTarget): void {
+		const field = target.field;
+		if (field !== null && field === this.editTextEl && field.isConnected) {
+			// At the caret, which is what the user is looking at. A field whose
+			// caret has wandered -- a selection in Obsidian's own interface --
+			// gets it at the end of the draft instead, which is at least in the
+			// text being edited rather than nowhere.
+			if (!insertTextAtCaret(field, embed)) field.appendText(embed);
+			return;
+		}
+		if (this.bodyNodes.has(target.id)) {
+			this.putOnBody(target.id, embed);
+			return;
+		}
+		this.withNode(target.id, (parsed, node) => {
+			// Beside what the card already says, and after it. The picture was
+			// pasted *onto* this card, so the card keeps the words it had.
+			const text = node.text.trim() === "" ? embed : `${node.text} ${embed}`;
+			this.apply(renameNode(parsed, node, text));
+		});
+	}
+
+	/** Add the picture as another line of a note-content card's own block. */
+	private putOnBody(id: string, embed: string): void {
+		const ref = this.bodyNodes.get(id);
+		const parsed = this.parsed;
+		if (!ref || !parsed) return;
+		const owner = parsed.byKey.get(ref.ownerKey);
+		const range = owner?.bodyRanges[ref.index];
+		if (!owner || !range) return;
+		// Indented the way the block's own lines are: a list item's prose is
+		// indented to its content column, and a line written without that would
+		// step out of the block it was pasted into.
+		const indent =
+			owner.kind === "listitem"
+				? owner.indent + " ".repeat(owner.marker.length) + owner.spacing
+				: "";
+		const next = `${bodyRangeText(parsed, range)}\n${indent}${embed}`;
+		this.apply(replaceBodyRange(parsed, owner, ref.index, next));
+	}
+
 	focusMap(): void {
 		if (this.app.workspace.getActiveViewOfType(MindmapView) !== this) return;
 		if (this.isEditing()) return;
@@ -1203,11 +1393,16 @@ export class MindmapView extends TextFileView implements MapController {
 		this.detachInteractions = null;
 		this.detachDrop?.();
 		this.detachDrop = null;
+		this.detachPaste?.();
+		this.detachPaste = null;
 		// The header is not this view's to keep, so the action is taken out of it
 		// by name rather than left for the next view to find. See
 		// `addHeaderAction` for what it costs to leave one behind.
 		this.headerAction?.detach();
 		this.headerAction = null;
+		// The path row is in the same row, and goes the same way: the header
+		// outlives the view inside it, and a row left behind is a row the next
+		// view is showing without having asked for it.
 		this.closePopover();
 		this.canvas.destroy();
 	}

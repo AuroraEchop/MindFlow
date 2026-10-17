@@ -370,6 +370,12 @@ const EN = {
 	"view.notice.cannotLink": "Only a node the note owns can hold a link.",
 	"view.notice.noteCreated": "Created {name}",
 	"view.notice.noteCreateFailed": "Could not create that note. See the console for the reason.",
+	"view.notice.pasteNoCard":
+		"Pick a card first -- a pasted picture has to land on one. A paste with nothing picked adds nothing to the map.",
+	"view.notice.pasteReadOnly":
+		"That card has no line of its own to write in: it is the note itself, or a card projected from another note. Pick another card.",
+	"view.notice.pasteMany": "One picture at a time: a card holds the one it is.",
+	"view.notice.pasteFailed": "Could not save that picture. See the console for the reason.",
 
 	// --- linking a node to another note -------------------------------------
 	"view.link.pick": "Link this node to which note?",
@@ -771,6 +777,11 @@ const ZH: Record<I18nKey, string> = {
 	"view.notice.cannotLink": "只有笔记自身拥有的节点才能挂链接。",
 	"view.notice.noteCreated": "已新建 {name}",
 	"view.notice.noteCreateFailed": "无法新建该笔记，原因见控制台。",
+	"view.notice.pasteNoCard": "请先选中一张卡片，粘贴的图片要有地方放。没有选中卡片时，粘贴不会往导图里加东西。",
+	"view.notice.pasteReadOnly":
+		"这张卡片没有自己的一行可写：它就是笔记本身，或是从别的笔记投影过来的卡片。换一张卡片再试。",
+	"view.notice.pasteMany": "一次只能粘贴一张图片：一张卡片就是一张图。",
+	"view.notice.pasteFailed": "无法保存这张图片，原因见控制台。",
 
 	// --- 把节点链接到另一篇笔记 ----------------------------------------------
 	"view.link.pick": "把这个节点链接到哪篇笔记？",

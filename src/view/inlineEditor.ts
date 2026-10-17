@@ -96,30 +96,47 @@ export function inlineIntent(
 }
 
 /**
- * Write a line break into `field` at the caret.
+ * Write `text` into `field` at the caret, and say whether it landed there.
  *
- * The browser's own `Enter` is not left to do it. `plaintext-only` does write
- * the newline a block needs, but the fallback spelling -- `true`, for engines
+ * False is the answer when the caret belongs to something else -- a selection
+ * in Obsidian's own interface, or in another field. A caller that writes
+ * something it cannot put back is a caller that has to ask first, which is why
+ * this answers rather than assumes.
+ *
+ * The browser's own `insertText` is deliberately not used. `plaintext-only`
+ * writes what a block needs, but the fallback spelling -- `true`, for engines
  * that do not have it -- writes a `<div>` or a `<br>` instead, and neither of
- * those survives `textContent`, which is what the save reads back. A real `\n`
- * in a text node does survive it, and `white-space: pre-wrap` draws it as the
- * break that was asked for.
+ * those survives `textContent`, which is what the save reads back. A real text
+ * node does survive it, and `white-space: pre-wrap` draws the newline in it as
+ * the break that was asked for.
  */
-export function insertLineBreak(field: HTMLElement): void {
+export function insertTextAtCaret(field: HTMLElement, text: string): boolean {
 	const selection = window.getSelection();
-	if (!selection || selection.rangeCount === 0) return;
+	if (!selection || selection.rangeCount === 0) return false;
 	const range = selection.getRangeAt(0);
 	// The caret belongs to the field being edited. A range anywhere else is a
 	// selection in Obsidian's own interface, and a line break written into that
 	// is a line break in the wrong document.
-	if (!field.contains(range.startContainer)) return;
+	if (!field.contains(range.startContainer)) return false;
 	range.deleteContents();
-	const node = document.createTextNode("\n");
+	const node = document.createTextNode(text);
 	range.insertNode(node);
 	range.setStartAfter(node);
 	range.collapse(true);
 	selection.removeAllRanges();
 	selection.addRange(range);
+	return true;
+}
+
+/**
+ * Write a line break into `field` at the caret.
+ *
+ * `Shift`+Enter's half of the editor, and the same write as everything else
+ * that lands at a caret -- see `insertTextAtCaret` for why the browser's own
+ * `Enter` is not left to do it.
+ */
+export function insertLineBreak(field: HTMLElement): void {
+	insertTextAtCaret(field, "\n");
 }
 
 /** What the field needs from the view it is open inside. */
