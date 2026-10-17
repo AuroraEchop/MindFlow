@@ -32,8 +32,10 @@ as a minimal line edit. Toggle back and your note is still your note.
   that node's card in muted text instead of becoming a card of its own.
 - **Pictures and videos drawn on the card.** `![[hero.png]]` is the picture itself,
   and a video is a still frame with two buttons on it — one plays it in place, the
-  other hands it to Obsidian's own player. In an exported SVG, PNG or HTML the
-  pictures are inlined, so the file shows them anywhere.
+  other hands it to Obsidian's own player. Paste a picture onto a card and it is
+  filed in your vault and drawn there; paste an image's **address** and it is read
+  once and kept. In an exported SVG, PNG or HTML the pictures are inlined, so the
+  file shows them anywhere.
 - **A card that points at another note opens where it stands.** Its title carries
   two buttons: one shows what that note **says** — rendered as markdown, samples
   and tables and pictures included — and one brings its **outline** in as a
@@ -94,7 +96,6 @@ hotkey to make it feel like switching reading mode.
 | Key | Action |
 | --- | --- |
 | `Enter` / `Tab` | New sibling / new child |
-| `F2` | Edit the node |
 | `Ctrl`/`Cmd`+`Enter` | Add or edit the annotation |
 | `Shift`+`Enter` | Add a text block |
 | `Delete` | Delete the node and its children |

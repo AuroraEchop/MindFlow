@@ -171,14 +171,20 @@ The toolbar's behaviour is configurable:
 **Dragging the toolbar itself** moves it anywhere; on release the dock switches to
 "wherever I dragged it" and the coordinates are remembered.
 
-With a card selected, the **top of the canvas** writes out the chain of titles from
-the root down to it (`Root › Chapter one › Cross-origin calls`), and clicking any
-one of them goes to that card. Zoomed far enough out that a card's words no longer
-read, that line is the thing still legible; with nothing selected it takes no room.
+With a card selected, the **header row** — the top of the pane, just before its own
+group of buttons — writes out the chain of titles from the root down to it (`Root ›
+Chapter one › Cross-origin calls`), and clicking any one of them goes to that card.
+Zoomed far enough out that a card's words no longer read, that line is the thing
+still legible. It lives in the header rather than on the canvas, which is the one
+surface in a pane with no room to spare and the last place a band of text belongs;
+with nothing selected it takes no room, and leaves no gap in the row either.
 
 The card's **context menu** also carries **only this branch**: everything else fades
 and the branch stays with the chain above it. Picking the same item again, or
 pressing `Esc`, puts the whole map back.
+
+A note-content card -- a paragraph, a code sample, a table, a quote -- is an ordinary
+card in this: it stays or fades **with the card that owns it**, never on its own.
 
 ---
 
@@ -203,7 +209,9 @@ pressing `Esc`, puts the whole map back.
 | Drag one of several selected cards | Move the whole selection, keeping the order it is written in |
 | Drag blank space | Sweep the selection box — or move the map, with [Drag mode](#drag-mode) on |
 | Hold `Space` and drag | Pan the canvas — **over a card too**, without selecting its text |
-| Wheel / pinch | Zoom |
+| Middle-button drag | Pan the canvas — over a card too |
+| Wheel | Zoom (with **Wheel** set to pan, it moves the map up and down instead, and Ctrl and the wheel zooms) |
+| Pinch | Zoom |
 
 **Editing happens in place — no dialogs.** The card's text becomes an editable
 field with an opaque background, lifted above the other cards so nothing bleeds
@@ -380,7 +388,8 @@ tell the page that it refused — so an embedded window would be a box that show
 nothing on most of the web and no way to say why. Obsidian's own canvas does the
 same thing this does: it names the link. Fetching the page's title or favicon
 would mean going to the network on your behalf, which this plugin does not do —
-the same promise it already makes about pictures.
+and neither does it read a picture in order to draw one. The one read it ever
+makes is one you asked for by pasting a picture's address onto a card (see §9).
 
 `Ctrl`/`Cmd`+click a link inside a note's prose and it still opens the address in
 your browser, as it always did.
@@ -474,7 +483,6 @@ Every key below is a **default**. Each one can be changed in the settings.
 | `Tab` | New child |
 | `Shift`+`Tab` | Outdent |
 | `Ctrl`/`Cmd`+`Shift`+`Tab` | Indent under the previous sibling |
-| `F2` | Edit the node title |
 | `Ctrl`/`Cmd`+`Enter` | Add / edit the annotation |
 | `Shift`+`Enter` | Add a text block |
 | `Delete` / `Backspace` | Delete the node and its children — every selected card, when more than one is selected |
@@ -502,6 +510,17 @@ Every key below is a **default**. Each one can be changed in the settings.
 | `Ctrl`/`Cmd`+`H` | Find and replace in the map |
 | `Esc` | Close the find bar (only the map's while one is open); with no find bar open it clears the tag filter or the branch focus |
 
+> **While the map is open, a key with a modifier on it is the map's.** Obsidian binds a few
+> of them itself — `Ctrl`/`Cmd`+`H` is its replace, `Ctrl`+`Shift`+`Tab` its previous tab —
+> and in the map they answer to the map first, and to Obsidian again the moment the map is
+> closed. (`F2` is not one of them: the map no longer edits titles with it, so it is
+> Obsidian's rename again.)
+>
+> Editing a card's title is a **double-click**. On the card that *is* the note (one with no
+> heading of its own, whose card shows the file name) the edit renames the **file**: one
+> rename through the vault, so every `[[link]]` to the note follows and the editor shows the
+> new name too — no second edit on the other side.
+
 > **`Ctrl`/`Cmd`+`Enter` vs `Shift`+`Enter`:** the first is the annotation (a
 > `: text` line hanging under the card), the second is a text block (a separate
 > indented block under the card). If you prefer them the other way round, swap
@@ -513,6 +532,16 @@ Every key below is a **default**. Each one can be changed in the settings.
 
 *Settings → MindFlow → Shortcuts* (or the toolbar's gear button → Shortcuts) lists
 every action the map answers to, one row each, with the keys it is on now.
+
+The panel behind the toolbar's **?** button is generated from that table: the keys you
+have changed, the ones you have left unbound (no row at all), and the rows the **Wheel**
+and **Drag mode** settings decide.
+
+The wheel and a drag get **a row each**. The wheel walks the map up and down a notch at a
+time; a drag carries it wherever the hand goes. Those are not the same gesture, and a row
+listing both made a reader sort through them to find the one they meant. Turning the drag
+mode off takes one gesture off the drag row only -- a plain drag on blank canvas -- because
+`Space` and the middle button move the map either way.
 
 ![The shortcuts page](../assets/shortcuts-settings.png)
 
@@ -740,6 +769,47 @@ than shown as an italic chip carrying the file name.
 - A picture written inside a sentence stays inside it — it does not take a line
   of its own.
 
+### Pasting a picture
+
+Pick a card — or have one open for editing — and press `Ctrl`/`Cmd`+`V`: the
+picture lands on it, exactly as pasting into the editor looks.
+
+- When the clipboard carries the **picture itself** (a system screenshot, Copy
+  Image in a browser, a picture copied out of a chat app), it is written into
+  the vault's attachment folder and then drawn on the card.
+- When the clipboard carries **nothing but a picture's address**
+  (`https://…/a.png`, or `![a caption](https://…/a.png)`), the plugin reads it
+  once, files it in the vault, and draws it on the card. A server that says it
+  is not serving a picture is refused. That is the **one** time this plugin goes
+  to the network, and only because you pasted an address yourself.
+- An address that does not end in a picture's extension (`https://…/photo`) is
+  not taken as one. That decision has to be made *before* the platform's own
+  paste is cancelled, and a wrong guess eats the paste. Such an address is
+  pasted as the text it is.
+
+Names follow Obsidian's own: a clipboard picture becomes
+`Pasted image 20261006004512.png`, and one taken from an address keeps the name
+the address gave it (`v2-abcd_1440w.jpg`), falling back to the former when there
+is no usable name in it. **Which folder it lands in is Obsidian's attachment
+folder setting** — the same call the editor's paste goes through. A name already
+taken grows a ` 1`, ` 2`, and no file is ever overwritten.
+
+The picture is appended **after** what the card already says; a card that was
+empty becomes a card that is the picture. Where it is written depends on the
+card:
+
+- a card open for editing — at the **caret**, as in the editor;
+- a picked card — on its own line;
+- a picked **content card** — as another line of the block it draws.
+
+Two cards are not written to: the **root card**, whose text is the file name and
+which has no line of its own, and a card **projected from another note**, since
+writing on it would write into that note. **With no card picked, a paste adds
+nothing to the map** — it says so instead. And only **one picture at a time** is
+taken: a clipboard carrying several is declined rather than crammed onto the
+card, because a card is one line of the note and three pictures on one line is a
+line that note keeps.
+
 ### Videos
 
 A video card is a **still frame** with two circles, shown while the pointer is
@@ -775,8 +845,9 @@ italic chip it always was:
 
 - PDFs, notes, audio files and every other kind of embed;
 - a file the vault cannot find;
-- a remote address such as `![](https://…)` — the map never goes to the network on
-  your behalf.
+- a remote address such as `![](https://…)` — the map will not go to the network
+  to draw it. To turn one into a local file, **paste** it onto a card (see the
+  previous section): that read is one you asked for by hand.
 
 ### Export
 
@@ -1055,8 +1126,10 @@ let go: not a column of them, and not so few that one goes unnoticed.
   content, not nodes. They are preserved untouched; ATX (`#`) headings are what the
   map reads.
 - The root node is the note's single top-level heading when it has one, and
-  otherwise the file name. A file-name root **cannot be renamed from the map**,
-  since that would mean renaming the file.
+  otherwise the file name. What a file-name root shows *is* the file's name, so
+  double-clicking it renames the **file** — through the vault, with every
+  `[[link]]` following — and characters a file name cannot hold (`[ ] # ^ |`)
+  are replaced with spaces.
 - A node is found again by its heading path, so **renaming one forgets where it was
   folded**; the branches around it are unaffected.
 - Inline math uses a stricter `$…$` rule than Obsidian's reader — the body may not
@@ -1068,7 +1141,12 @@ let go: not a column of them, and not so few that one goes unnoticed.
   what narrows it to card titles.
 - **Only pictures and videos in the vault are drawn.** A remote address such as
   `![](https://…)`, a PDF, an audio file, an embedded note, or a file the vault
-  cannot find all stay the italic chip they were.
+  cannot find all stay the italic chip they were. To see a remote picture on the
+  map, **paste** it onto a card first so it becomes a local file (see §9).
+- **A paste takes one picture at a time.** A clipboard carrying several is
+  declined with a word rather than crammed in — a card is one line of the note,
+  and three pictures on one line is a line that note keeps. Which card it may
+  land on counts too: the root card and a projected card take none (see §9).
 - **A video is a text chip in an exported file**, not an inlined one — a video is
   far too large to put inside an HTML file.
 - A picture that has never been on screen waits for its load, so the card is laid
@@ -1097,7 +1175,9 @@ let go: not a column of them, and not so few that one goes unnoticed.
   it does not frame the page, and it does not fetch the page's title or favicon.
   Most sites refuse to be framed and a refusal is invisible from the page doing
   the framing, so a window would be blank across most of the web and silent about
-  why. Nothing this plugin does goes to the network on your behalf.
+  why. **The only time this plugin goes to the network is one you ask for**: you
+  paste a picture's address onto a card (see §9), and that read is what turns it
+  into a local file. Nothing else here goes to the network on your behalf.
 - A link inside a note's prose shows its note **on the card it was written on**,
   which means a card can be showing one thing about one of its links. It cannot
   be given an outline: an outline hangs under a card that *is* one link, and a

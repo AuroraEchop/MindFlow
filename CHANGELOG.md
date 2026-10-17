@@ -11,56 +11,49 @@ line. The `<br>` is deliberate — a plain newline renders as a line break in
 release notes but collapses to a space when this file is viewed on GitHub, and
 the entry has to read correctly in both.
 
-## [Unreleased]
+## [2.0.3] - 2026-10-17
 
-本版主线：**链接卡片就地展开**，以及**查找把命中的字标出来**。<br>This release is about two things: **link cards that open where they stand**, and **finds that mark the words they matched**.
+本版主线：**链接卡片就地展开**、**查找把命中的字标出来**，以及**把图片直接贴到卡片上**。<br>Three things lead this release: **link cards that open where they stand**, **finds that mark the words they matched**, and **pictures pasted straight onto a card**.
 
 ### 链接卡片 / Link cards
 
-- **就地打开。** 点标题行看那篇笔记的头几行，行右端的 `›` 把它的**大纲**拉成子树；两者都不写另一篇笔记。<br>**Opens where it stands.** A link card's title line shows the first lines of the note it names, and the `›` at its right end pulls that note's **outline** in as a subtree. Neither writes a byte to the other note.
-- **投影卡片是只读的。** 不能改名、拖动、删除或加子节点；`Ctrl`/`Cmd`+点击或卡片菜单在新标签页打开来源笔记并跳到那一行，那篇笔记被改动时会自己刷新。<br>**A projected card is read-only**: no renaming, dragging, deleting or adding children. `Ctrl`/`Cmd`+click, or the card's menu, opens the source note in a new tab at that line, and edits to it refresh the tree by themselves.
-- **单击只选中。** 开合只认标题行、行右端的箭头，以及正文里写着的那条链接。<br>**A plain press now only picks the card.** Opening and closing belong to the title line, the arrow beside it, and a link written in prose.
-- **预览按 markdown 画。** 代码块、表格、`> [!类型]`、图片视频都照常画出来；显示多少由新设置**链接卡预览行数**（默认 6）决定。<br>**A preview is drawn as markdown** -- samples, tables, callouts, pictures and videos included -- and the new **Link card preview lines** setting (6 by default) decides how much of it shows.
-- **判定放宽。** `() [[笔记]]`、`[[笔记]]。`、`[标签](笔记)` 现在都算链接卡片。<br>**What counts as a link card is wider**: `() [[Note]]`, `[[Note]]。` and `[label](Note)` all qualify now.
-- **站外链接有自己的卡片。** 显示站点名和地址，再给一个在浏览器中打开；**不做 iframe 内嵌**。<br>**A link that leaves the vault gets a card of its own**: the site's name, the rest of the address, and an open-in-browser button. No embedded frame.
-- **写在正文里的链接就地预览**，`Ctrl`/`Cmd`+点击才是真的跳过去。<br>**A link written in a note's prose previews where it stands**, and `Ctrl`/`Cmd`+click is what actually goes there.
+- **就地打开。** 点标题行看那篇笔记的头几行，行右端的 `›` 把它的大纲拉成子树，两者都不写另一篇笔记；投影出来的卡片只读，`Ctrl`/`Cmd`+点击才在新标签页打开来源笔记并跳到那一行，来源被改动时自己刷新。<br>**Opens where it stands.** A title line shows the first lines of the note it names, and the `›` beside it pulls that note's outline in as a subtree -- neither writes to the other note. A projected card is read-only: `Ctrl`/`Cmd`+click opens the source in a new tab at that line, and edits to it refresh the tree by themselves.
+- **预览照 markdown 画。** 代码块、表格、`> [!类型]`、图片视频都照常画出来，显示多少由新设置**链接卡预览行数**（默认 6）决定；写在正文里的链接也就地预览，`Ctrl`/`Cmd`+点击才是真的跳过去。单击只选中卡片，开合只认标题行、行右端的箭头，以及正文里写着的那条链接。<br>**The preview is drawn as markdown** -- samples, tables, callouts, pictures and videos included -- and the new **Link card preview lines** setting (6 by default) decides how much shows. A link written in prose previews where it stands too, and `Ctrl`/`Cmd`+click is what goes there. A plain press only picks a card now: opening and closing belong to the title line, the arrow beside it, and a link written in prose.
+- **判定放宽，站外另有卡片。** `() [[笔记]]`、`[[笔记]]。`、`[标签](笔记)` 现在都算链接卡片；指向库外的链接给一张自己的卡片（站点名、地址、在浏览器中打开），不做 iframe 内嵌。<br>**What counts is wider, and the outside gets a card of its own**: `() [[Note]]`, `[[Note]]。` and `[label](Note)` all qualify, and a link that leaves the vault shows the site's name, the rest of the address and a button that opens it in the browser -- no embedded frame.
 
 ### 查找与筛选 / Finding and filtering
 
-- **搜索读整篇笔记**（含正文卡片）；`¶` 收窄成只搜卡片标题，`Aa` 让大小写算数。<br>**The search reads the whole note**, content cards included; `¶` narrows it to card titles and `Aa` makes case matter.
-- **命中的字被标出来**，像荧光笔划过一样。荧光笔按钮把其余命中也一起标出来，颜色完全一样。<br>**The matched words are marked**, the way a highlighter goes over them. The highlighter button marks every other match as well, in exactly the same colour.
-- **点标签就是筛选。** 不带该标签的分支淡下去；`Ctrl`/`Cmd`+点击取并集，再点一次拿下，`Esc` 清空，嵌套算数。<br>**Pressing a tag filters the map.** Branches that do not carry it fade back; `Ctrl`/`Cmd`+click adds another, the same one again takes it off, `Esc` clears, and nesting counts.
+- **搜索读整篇笔记**（含正文卡片），`¶` 收窄成只搜卡片标题，`Aa` 让大小写算数；命中的字像荧光笔一样被标出来，荧光笔按钮把其余命中也一起标上。<br>**The search reads the whole note**, content cards included; `¶` narrows it to card titles and `Aa` makes case matter. **The matched words are marked** the way a highlighter goes over them, and the highlighter button marks every other match as well.
+- **点标签就是筛选。** 不带该标签的分支淡下去，`Ctrl`/`Cmd`+点击取并集、再点一次拿下，`Esc` 清空，嵌套算数；正文卡片跟着所属的卡片一起留、一起淡。<br>**Pressing a tag filters the map**: branches without it fade back, `Ctrl`/`Cmd`+click adds another and the same one again takes it off, `Esc` clears, and nesting counts. A note-content card stays or fades with the card that owns it.
 
 ### 折叠与导航 / Folding and navigation
 
-- **展开到第 N 层。** 右键工具栏的折叠按钮：全部展开 / 1–4 层 / 全部折叠。<br>**The map can open to a depth**: right-click the toolbar's fold button for expand-all, levels 1-4, or collapse-all.
-- **只看一支分支**（卡片右键菜单）：其余淡出、保留它上面那条链，再点一次或 `Esc` 复原。<br>**One branch at a time**, from a card's menu: everything else fades, the chain above it stays, and the same entry or `Esc` brings the map back.
-- **顶部路径条。** 选中卡片时写出从根到它的那串标题，每一段都能点；没有选中时不占地方。<br>**A path bar across the top** writes the chain of titles down to the selected card, each of them pressable. With nothing selected it takes no room.
+- **展开到第 N 层**（右键工具栏的折叠按钮：全部展开 / 1–4 层 / 全部折叠），以及**只看一支分支**（卡片右键菜单，其余淡出、它上面那条链留着，再点一次或 `Esc` 复原）。<br>**The map opens to a depth** -- right-click the toolbar's fold button for expand-all, levels 1-4 or collapse-all -- and **one branch can be looked at alone** from a card's menu: the rest fades, the chain above it stays, and the same entry or `Esc` brings the map back.
+- **路径条住进标题栏。** 选中卡片时写出从根到它的标题，每一段都能点，没有选中时不占位。它不再压在画布上，而是紧挨着右侧那组按钮；面板变窄时它先交出宽度，上面几段截成省略号，你正看着的那段保持完整。<br>**The path bar lives in the pane's header**: the chain of titles down to the selected card, each step pressable, taking no room with nothing selected. It sits beside the pane's own buttons rather than across the canvas, and gives its width up first as the pane narrows -- the steps above truncate, the one you are on stays whole.
 
 ### 卡片与块 / Cards and blocks
 
-- **列表、分隔线、引用块按原样画了**（标记照笔记写的留着，缩进一层就是嵌套一层），不再被读成一段普通文字。<br>**Lists, thematic breaks and quotes are drawn as themselves**, markers kept as the note wrote them and indentation as nesting, where they used to fall through to a paragraph.
-- **正文卡片按住半秒可以搬走**：原位留虚线占位，卡片上的链接和按钮不参与这个手势。<br>**A prose card can be picked up by holding it for half a second**, with a dashed slot left behind; links and buttons on it are left out of the gesture.
+- **列表、分隔线、引用块按原样画了**，标记留在笔记写的位置，缩进一层就是嵌套一层，不再被读成一段普通文字。<br>**Lists, thematic breaks and quotes are drawn as themselves**, markers kept where the note wrote them and indentation as nesting, where they used to fall through to a paragraph.
+- **正文卡片按住半秒可以搬走**，原位留虚线占位；卡片上的链接和按钮不参与这个手势。<br>**A prose card can be picked up by holding it for half a second**, with a dashed slot left behind; links and buttons on it are left out of the gesture.
 
 ### 大纲与笔记 / Outline and notes
 
-- **大纲里点标题：导图模式下选中那张卡片**（挡着的折叠分支顺路展开），编辑器模式照旧跳到那一行。<br>**Pressing a heading in the outline pane selects that card while the note is a map**, opening whatever hid it; in editor mode it still scrolls to the line.
-- **可以把 `.md` 拖进导图**：落点那张卡片下面多一张 `[[笔记名]]`，整次拖动算一次撤销，并顺手把那篇笔记的大纲展开。<br>**A `.md` can be dragged onto the map**: a `[[Note]]` card appears under the card it landed on, the whole drag counting as one undo step, with that note's outline already open.
+- **大纲里点标题：导图模式下选中那张卡片**（挡着的分支顺路展开，卡片移到正中），编辑器模式照旧跳到那一行 —— 不再闪一下，也不再被换回 Markdown。<br>**Pressing a heading in the outline selects that card while the note is a map** -- opening whatever hid it and centring it -- and still scrolls to the line in editor mode. No flicker, and no being swapped back to markdown.
+- **可以把 `.md` 拖进导图**：落点那张卡片下面多一张 `[[笔记名]]`，整次拖动算一步撤销，并顺手把那篇笔记的大纲展开。<br>**A `.md` can be dragged onto the map**: a `[[Note]]` card appears under the card it landed on, the whole drag counting as one undo step, with that note's outline already open.
+
+### 粘贴图片 / Pasted pictures
+
+- **图片可以直接贴到卡片上。** 选中一张卡片（或把它打开成编辑中）按 `Ctrl`/`Cmd`+`V`：图片存进 Obsidian 的附件目录，命名与编辑器一致、重名加编号而不覆盖，卡片上直接画出这张图。根卡片和投影卡片不接，**没有选中卡片时粘贴不会加任何东西**，一次也只收一张。<br>**A picture can be pasted straight onto a card**: pick one -- or have it open for editing -- and press `Ctrl`/`Cmd`+`V`. The picture goes into Obsidian's attachment folder under the editor's own naming, a number rather than an overwrite, and the map draws it on the card. The note's own card and projected cards are refused, **a paste with no card picked adds nothing**, and one picture at a time is all a card takes.
+- **复制的图片网址会被抓下来存成本地文件**（服务器说不是图片就不收）。这是本插件**唯一**一次替你联网，只因为你亲手粘贴了一个网址 —— 导图自己画图时从不联网。<br>**A copied image address is fetched once and kept**, and a server that says it is not serving a picture is refused. That is the **one** time this plugin goes to the network, and only because you pasted an address; the map itself never reads anything in order to draw a note.
 
 ### 修复 / Fixed
 
-- **点大纲标题不再闪一下。** 以前是「先被换成编辑器，紧接着再把地图放回来」，那一进一出肉眼可见。现在这个请求在 Obsidian 解析视图类型**之前**就被接住，由已经开着这篇笔记的地图自己作答 —— 选中那一行的卡片并居中，视图从头到尾没被换过。<br>**Pressing a heading in the outline pane no longer flickers.** It used to be "replaced by the editor, then the map put straight back", which is a switch the reader can see. The request is now caught **before** the view type is resolved, and the map that is already open answers it: the line's card is selected and centred, and the view is never replaced.
-- **标题栏不再堆出两个「以 Markdown 编辑」。** 那个按钮属于视图，而它所在的标题栏不属于视图 —— 视图每打开一次就往里加一个，来回切换几次就攒几个。现在打开时先清掉上一个视图留下的，关闭时再撤掉自己的。<br>**The header no longer collects two "edit as markdown" buttons.** The action belongs to the view, but the row it goes into does not: every open added another, so a note toggled a few times ended up with one button per toggle. Anything a previous view left behind is cleared before the new one is added, and the action is taken away when the view closes.
-- **拖进来的笔记现在真的是一张链接卡片。** 以前写进笔记的是那篇笔记的**文件名本身**，不是 `[[链接]]` —— 卡片只抄了个标题，点不开、没有预览、也展不出大纲，看起来就像拖动只复制了名字。现在落进笔记的是 `[[笔记名]]`（文件名里的 `[ ] # ^ |` 会被拒绝，那些字符本来也不允许出现在笔记名里），拖进来的卡片会照常展开那篇笔记的大纲；拖动经过哪张卡片哪张就高亮。<br>**A note dragged onto the map becomes a link card now.** What was written into the note was the file's **name as plain text** rather than a `[[link]]`, so the card said the note's name and was nothing: nothing to open, no preview, no outline to fold out -- the drop looked like it had only copied the title. What lands in the note is `[[Note]]` (a name carrying `[ ] # ^ |` is refused; those are illegal in a note name anyway), the card opens that note's outline as before, and the card under the pointer is highlighted while you drag.
-- **点大纲里的标题不再把你踢出导图。** 大纲面板发出的请求只是「显示第 N 行」，Obsidian 按文件类型解析视图时会把 `.md` 判给编辑器，于是地图被当场换掉。插件现在盯着这件事：发现自己放进标签页的地图不在了，就把地图**放回来**，并选中那一行的卡片、**把它移到屏幕正中**（以前在导图里点大纲基本等于被丢回 md）。判断按视图实例而不是按视图类型，所以不受事件顺序影响；每次只用掉一次，你之后自己切回编辑器看笔记，插件不会再来抢。<br>**Pressing a heading in the outline pane no longer throws you out of the map.** The pane asks for "line N", and resolving a view for a `.md` file means the editor, so the map was replaced on the way. The plugin watches for that: a map of its own that is no longer in the leaf is put **back**, with that line's card selected and **moved to the middle of the screen** -- pressing the outline used to be a one-way trip to markdown. Detection is by view instance rather than by view type, so it does not depend on which event arrives first, and each recovery is spent once: a note you have since chosen to read in the editor is yours.
-- **卡片不会挤成一团了**：读不到尺寸的卡片不再按 0 尺寸排版，一次平移里露出的卡片一定会被测量。<br>Cards no longer pile up: a size that cannot be read is not written into the layout, and every card a pan reveals is measured.
-- **「卡片长什么样」和「卡片多大」永远属于同一次绘制**，另外一篇笔记的卡片不会再把展开前的旧尺寸带回来。<br>"What a card looks like" and "how big it is" now always come from the same paint, so a card that opened its preview off screen no longer comes back at its old height.
-- **改**媒体最大高度**一类的设置，视野外的图片卡片会跟着重算。**<br>Changing a setting a card is shaped by -- **Maximum media height** among them -- re-measures the picture cards off screen too.
-- **卡片状态按位置记，位置换人之后不会再跟过去**：块被搬走后，住进那个位置的卡片不会继承「已展开」。<br>Card state is recorded per slot and is no longer handed to whatever moves into it: a block dragged away takes its opened state with it.
-- **投影卡片的折叠加号能按了。**<br>The fold button on a projected card works now.
-- **不再同时弹两个提示**（`aria-label` 和 `title` 都写了的那一处）。<br>No more duplicate tooltips where `aria-label` and `title` were both set.
-- **点标题行就能开合预览**，正文卡片上写着的那条链接也一样。<br>Pressing a title line opens and closes its preview, on prose cards as well.
-- **箭头退回字形时不再是实心三角**，换成一个认得出的方向字符。<br>The arrow's text fallback is no longer a solid triangle.
+- **有些快捷键根本按不动，现在真的能用了。** `F2`、`Ctrl`/`Cmd`+`H`、`Ctrl`+`Shift`+`Tab` 这些键 Obsidian 自己也绑着，被它的键盘管线先一步吃掉；现在带修饰键和功能键的改由视图的快捷键作用域认领，导图开着时先归导图。**`F2` 不再是导图的快捷键**（改标题用双击），它连同几处死代码一起还给了 Obsidian。<br>**Some shortcuts did nothing at all; now they work.** `F2`, `Ctrl`/`Cmd`+`H` and `Ctrl`+`Shift`+`Tab` are keys Obsidian binds itself, and its keymap answered them first; every combo carrying a modifier or a function key is now claimed on the view's own scope, so the map answers while it is open. **`F2` is no longer a map shortcut** -- a title is edited by double-clicking -- and it goes back to Obsidian, with a few dead exports and rules swept out alongside.
+- **双击笔记自己那张卡片改的是文件名**：走笔记库重命名，`[[链接]]` 跟着改，md 模式同步，不再弹一句「请自己重命名这篇笔记」。<br>**A double-click on the card that *is* the note renames the file**: through the vault, with links and the editor following, instead of a notice telling you to go and do it yourself.
+- **快捷键一览按此刻生效的设置生成**：改过的键按你改的显示，没绑的那行不出现，`鼠标滚轮` 与 `拖动模式` 决定的那几行跟着变。滚轮平移（上下、一格一格）和拖动平移（跟着手走）分成两行，不再让人自己拼。<br>**The shortcut panel is generated from the settings in force**: a rebound key shows as you bound it, an unbound action gets no row, and the rows the **Wheel** and **Drag mode** settings decide change with them. The wheel's pan (up and down, a notch at a time) and a drag's pan (wherever the hand goes) are two rows now, not one the reader has to add up.
+- **标题栏和标签页菜单不再各多出一份「以 Markdown 编辑」**，切换按钮也固定在两边同一个位置（右上角右边数第二个），来回切不必再找图标。<br>**Neither the header nor a tab's menu offers "edit as markdown" twice any more**, and the map/editor toggle sits in the same slot on both rows -- second from the right -- so switching no longer means hunting for the icon that moved.
+- **卡片不再挤成一团，也不再带回旧尺寸。** 读不到尺寸的卡片不再按 0 尺寸排版，平移露出的卡片一定会被测量；「长什么样」和「多大」来自同一次绘制，改**媒体最大高度**一类的设置时视野外的图片卡片也跟着重算。<br>**Cards no longer pile up, and no longer come back at an old size.** A size that cannot be read is not written into the layout and every card a pan reveals is measured; what a card looks like and how big it is come from the same paint, so changing a setting a card is shaped by -- **Maximum media height** among them -- re-measures the off-screen picture cards too.
+- **几处小毛病**：卡片状态按位置记，块搬走后不会传给住进那个位置的卡片；投影卡片的折叠加号能按了；不再同时弹两个提示；箭头退回字形时不再是实心三角；点标题行就能开合预览，正文卡片上那条链接也一样。<br>**A handful of small ones**: card state is recorded per slot and no longer handed to whatever moves into it, the fold button on a projected card works, duplicate tooltips are gone, the arrow's text fallback is no longer a solid triangle, and pressing a title line opens and closes its preview -- on prose cards as well.
 
 ## [2.0.2] - 2026-09-20
 
