@@ -3,6 +3,7 @@ import type { OpenViewState, View, ViewState, WorkspaceLeaf } from "obsidian";
 
 import { MINDMAP_VIEW_TYPE, MindmapView } from "./view/MindmapView.ts";
 import { lineOfState } from "./view/dropNote.ts";
+import { paneActions, placeHeaderSlot } from "./view/headerSlot.ts";
 import { SettingsModal } from "./view/settingsModal.ts";
 import { EXPORT_COMMANDS } from "./export/run.ts";
 import { resolveLanguage, setLanguage, t } from "./i18n.ts";
@@ -525,11 +526,18 @@ export default class MindmapPlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file, _source, leaf) => {
 				if (!(file instanceof TFile) || file.extension !== "md") return;
-				const isMap = leaf?.view.getViewType() === MINDMAP_VIEW_TYPE;
+				// A note that *is* a map is left to the map. Obsidian opens this
+				// event and the view's own pane menu for one right-click on a
+				// tab, and the map answers the second of them with this same
+				// entry -- so answering here as well put two identical "edit as
+				// markdown" items in one menu. What is left for this handler is
+				// the file explorer's press, where there is no view of ours to
+				// ask: see `openFileAsMindmap` for what that does.
+				if (leaf?.view.getViewType() === MINDMAP_VIEW_TYPE) return;
 				menu.addItem((item) =>
 					item
-						.setTitle(isMap ? t("view.action.editMarkdown") : t("view.action.openMap"))
-						.setIcon(isMap ? "file-text" : "git-fork")
+						.setTitle(t("view.action.openMap"))
+						.setIcon("git-fork")
 						.onClick(() => {
 							if (leaf) void this.toggleLeaf(leaf);
 							else void this.openFileAsMindmap(file);
@@ -1281,9 +1289,17 @@ export default class MindmapPlugin extends Plugin {
 	 * all still work if Obsidian's header markup ever changes.
 	 */
 	private injectHeaderButton(leaf: WorkspaceLeaf): void {
-		const actions = leaf.view.containerEl.querySelector(".view-actions");
+		const actions = paneActions(leaf.view.containerEl);
 		if (!actions) return;
-		if (actions.querySelector(`.${HEADER_BUTTON_CLASS}`)) return;
+		const existing = actions.querySelector(`.${HEADER_BUTTON_CLASS}`);
+		if (existing instanceof HTMLElement) {
+			// Already there, but not necessarily still in the right place: the
+			// row is rebuilt as the view changes mode, and a row rebuilt around
+			// our button can leave it wherever it happened to fall. Cheap to
+			// line up again, and this runs on every layout change anyway.
+			placeHeaderSlot(actions, existing);
+			return;
+		}
 
 		const button = createDiv({
 			cls: `clickable-icon view-action ${HEADER_BUTTON_CLASS}`,
@@ -1294,7 +1310,10 @@ export default class MindmapPlugin extends Plugin {
 			ev.preventDefault();
 			void this.toggleLeaf(leaf);
 		});
-		actions.prepend(button);
+		// The slot, not the front of the row: the map's own button is put in the
+		// same place, so going back and forth is one press in one spot rather
+		// than a hunt for where the icon went. See `placeHeaderSlot`.
+		placeHeaderSlot(actions, button);
 	}
 
 	private removeHeaderButtons(): void {

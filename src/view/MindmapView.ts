@@ -25,7 +25,7 @@ import { annotationText, bodyCardCount } from "../model/annotations.ts";
 import { needsBlocks, parseBlocks } from "../model/blocks.ts";
 import type { Block } from "../model/blocks.ts";
 import { normaliseTag, tagFilterKeys } from "../model/tags.ts";
-import { Breadcrumb, crumbTrail, isPath } from "./breadcrumb.ts";
+import { Breadcrumb, BREADCRUMB_CLASS, crumbTrail, isPath } from "./breadcrumb.ts";
 import type { MindNode, ParsedDoc } from "../model/types.ts";
 import { BODY_ID_MARK } from "../model/types.ts";
 import {
@@ -65,6 +65,7 @@ import { cardLink, linkMarkup, noteNameFrom, soleLink, unlinkedText } from "../m
 import { isEmbedId } from "../model/embedTree.ts";
 import { LinkCards } from "./linkCards.ts";
 import { attachNoteDrop, lineOfState, linkForName } from "./dropNote.ts";
+import { paneActions, placeHeaderSlot } from "./headerSlot.ts";
 import type { Projection } from "./linkCards.ts";
 
 import {
@@ -403,6 +404,26 @@ interface PasteTarget {
 	id: string;
 }
 
+/** Where in the pane's header the path row goes. */
+interface CrumbHome {
+	/** The header row itself. */
+	row: HTMLElement;
+	/** The pane's own group of buttons, which the path goes in front of. */
+	before: HTMLElement | null;
+}
+
+/**
+ * Whether the header a path row was put in is still the document's.
+ *
+ * A rebuild of the header shows up here as one of these two elements no longer
+ * being connected, and nothing else has to be watched for: the row this view
+ * inserted is inside the row it was handed, so a header that went away took it
+ * with it.
+ */
+function stillInDocument(home: CrumbHome): boolean {
+	return home.row.isConnected && (home.before === null || home.before.isConnected);
+}
+
 interface PendingFocus {
 	line: number;
 	edit: boolean;
@@ -699,6 +720,8 @@ export class MindmapView extends TextFileView implements MapController {
 	private foldButton: HTMLElement | null = null;
 	/** The path to the selected card, kept so the selection can rewrite it. */
 	private breadcrumb: Breadcrumb | null = null;
+	/** Where that row lives in the pane's header, re-found when the header is. */
+	private crumbHome: CrumbHome | null = null;
 	private popover: HTMLElement | null = null;
 	private needsFit = true;
 	private paintedEmpty = false;
@@ -742,10 +765,9 @@ export class MindmapView extends TextFileView implements MapController {
 		// A sibling of the viewport, not a child of it: the preview must not
 		// pan or zoom with the map underneath it.
 		this.lightbox = new Lightbox(this.app, this.contentEl);
-		// Another sibling of the viewport, for the same reason the toolbar is
-		// one: the path sits over the map rather than in it, and must not pan
-		// or zoom with the cards it is describing.
-		this.breadcrumb = new Breadcrumb(this.contentEl);
+		// The path row is not built here: it goes in the pane's header, which
+		// is Obsidian's own row and is not this view's to write into until it
+		// is open. See `addBreadcrumb`.
 		this.linkCards = new LinkCards({
 			app: this.app,
 			currentFile: () => this.file,
@@ -1030,6 +1052,7 @@ export class MindmapView extends TextFileView implements MapController {
 		this.detachDrop = attachNoteDrop(this);
 		this.detachPaste = attachImagePaste(this);
 		this.applyToolbarVisibility();
+		this.breadcrumb = this.addBreadcrumb();
 		this.addHeaderAction();
 		// The keyboard, on the next tick rather than here. The swap that opened
 		// this view is still running, and its `{ focus: true }` lands on the pane
@@ -1050,6 +1073,11 @@ export class MindmapView extends TextFileView implements MapController {
 	 * instance left behind is cleared first, so the row holds this view's action
 	 * and nothing else -- and `onClose` removes it even when the instance that
 	 * added it is the last one.
+	 *
+	 * Where in the row it lands is not left to `addAction`: this button and the
+	 * editor's own toggle are the two halves of one gesture, and they have to be
+	 * put in the same place or the second press has nothing under it. See
+	 * `placeHeaderSlot`.
 	 */
 	private addHeaderAction(): void {
 		this.removeStaleHeaderActions();
@@ -1057,6 +1085,7 @@ export class MindmapView extends TextFileView implements MapController {
 			void this.plugin.toggleLeaf(this.leaf);
 		});
 		action.addClass(MAP_ACTION_CLASS);
+		if (action.parentElement !== null) placeHeaderSlot(action.parentElement, action);
 		this.headerAction = action;
 	}
 
@@ -1403,6 +1432,9 @@ export class MindmapView extends TextFileView implements MapController {
 		// The path row is in the same row, and goes the same way: the header
 		// outlives the view inside it, and a row left behind is a row the next
 		// view is showing without having asked for it.
+		this.breadcrumb?.destroy();
+		this.breadcrumb = null;
+		this.crumbHome = null;
 		this.closePopover();
 		this.canvas.destroy();
 	}
@@ -5206,16 +5238,28 @@ export class MindmapView extends TextFileView implements MapController {
 	}
 
 	/**
-	 * Where the selected card sits, written out at the top of the map.
+	 * Where the selected card sits, written out in the pane's header.
 	 *
 	 * A map zoomed out far enough to see all of it is a map whose cards are too
 	 * small to read, and the one thing that is still worth knowing is which
 	 * heading the card you are on belongs to. The row, and the path it is drawn
-	 * from, are `breadcrumb.ts`; all this does is hand it the card.
+	 * from, are `breadcrumb.ts`; all this does is hand it the card -- and put
+	 * the row back where it belongs, since the header it lives in is Obsidian's
+	 * to rebuild and this is the one place that notices.
 	 */
 	private applyBreadcrumb(): void {
 		const trail = this.breadcrumb;
-		if (!trail) return;
+		if (trail === null) return;
+		const home = this.findCrumbHome();
+		if (home === null) {
+			// No row in the pane to write into, and nothing else to try: a
+			// reader who has hidden the pane's header has no room for this any
+			// more than they have for the button back to the editor.
+			trail.hide();
+			return;
+		}
+		trail.place(home.row, home.before);
+
 		const steps = crumbTrail(this.selectedNode(), t("view.node.placeholder"));
 		if (!isPath(steps)) {
 			trail.hide();
@@ -5227,6 +5271,54 @@ export class MindmapView extends TextFileView implements MapController {
 			this.select(there.id);
 			this.revealSelection();
 		});
+	}
+
+	/**
+	 * The path row, put into the pane's header beside its own buttons.
+	 *
+	 * In the header rather than over the canvas: the row used to be drawn
+	 * across the top of the map, over the very cards it describes, on the one
+	 * surface in a pane that has no room to spare. The header already says
+	 * which note this is, is already there when the map opens, and already
+	 * gives up its width as the pane narrows -- which is exactly the room a
+	 * path wants.
+	 *
+	 * Null when the pane has no header row to write into; `applyBreadcrumb`
+	 * answers for that on every draw, and is also where a header that went away
+	 * afterwards is noticed.
+	 */
+	private addBreadcrumb(): Breadcrumb | null {
+		// Whatever a view that used to be in this leaf left in the row. The
+		// header outlives the view inside it, and the class is this plugin's
+		// own, so anything in this leaf wearing it belongs to a view that is
+		// gone. The same sweep the header button gets, for the same reason.
+		const leaf = this.containerEl.closest(".workspace-leaf") ?? this.containerEl;
+		for (const stale of Array.from(leaf.querySelectorAll(`.${BREADCRUMB_CLASS}`))) {
+			stale.detach();
+		}
+
+		const home = this.findCrumbHome();
+		if (home === null) return null;
+		const row = new Breadcrumb(home.row);
+		row.place(home.row, home.before);
+		return row;
+	}
+
+	/**
+	 * Where in the pane's header the path row goes, looked up when it has moved.
+	 *
+	 * Held rather than looked up on every draw, and looked up again when what
+	 * was held is no longer in the document -- which is what a rebuild of the
+	 * header looks like from here. Nothing else has to be watched for: the row
+	 * this view inserted is inside the row it was handed.
+	 */
+	private findCrumbHome(): CrumbHome | null {
+		const kept = this.crumbHome;
+		if (kept !== null && stillInDocument(kept)) return kept;
+		const actions = paneActions(this.containerEl);
+		const row = actions?.parentElement ?? null;
+		this.crumbHome = actions !== null && row !== null ? { row, before: actions } : null;
+		return this.crumbHome;
 	}
 
 	// --- the tag filter, and the branch looked at alone -----------------------

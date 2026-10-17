@@ -1974,27 +1974,34 @@ mark.mm-hit.keeps-ink {
 	pointer-events: none;
 }
 
-/* The path to the selected card, across the top of the map. Pinned to the top
-   left rather than centred: a map is panned and zoomed, and a row that moved
-   with the cards would be a row the reader has to look for. It is a sibling of
-   the viewport for the same reason the toolbar is, and it never takes a press
-   that is not meant for it -- the map's own handlers live inside the viewport.
+/* The path to the selected card, in the pane's header rather than over the map.
+   It used to be pinned across the top of the canvas -- a band the reader had to
+   look past, drawn over the very cards it describes, on the one surface in the
+   pane with no room to spare. A header is a row that is already there, already
+   says which note this is, and already gives its width up as the pane narrows.
+   The view puts it in front of the pane's own buttons; see `Breadcrumb.place`.
+
+   `flex: 0 1 auto` over a floor under `min-width` is what keeps a narrow pane
+   from squeezing the path out of existence: the row gives its width up down to
+   the floor and no further, and inside it every step truncates but the one the
+   reader is on, which is the step worth keeping whole.
 
    Muted, and small: it is an answer to "where am I", not a heading. */
 .mm-breadcrumb {
-	position: absolute;
-	z-index: 10;
-	left: 12px;
-	top: 10px;
-	right: 12px;
+	flex: 0 1 auto;
 	display: flex;
-	flex-wrap: wrap;
-	align-items: baseline;
+	align-items: center;
+	justify-content: flex-end;
+	min-width: 5em;
+	overflow: hidden;
 	gap: 4px;
+	/* Never glued to the pane's buttons, whatever gap the header row has. */
+	margin-inline-end: 8px;
 	font-size: var(--font-ui-smaller, 12px);
 	color: var(--text-muted);
+	white-space: nowrap;
 	/* A press has to reach the crumbs and nothing else: the row is wide, and
-	   the blank either side of them is blank canvas. */
+	   the blank either side of them is the header's own background. */
 	pointer-events: none;
 	transition: opacity 160ms ease;
 }
@@ -2017,8 +2024,10 @@ mark.mm-hit.keeps-ink {
 	color: var(--text-normal);
 }
 
-/* Where the reader is, as opposed to the way there. */
+/* Where the reader is, as opposed to the way there -- and the one step that
+   does not give up any of its width when the row is tight. */
 .mm-breadcrumb .mm-crumb.is-here {
+	flex: 0 0 auto;
 	color: var(--text-normal);
 }
 
