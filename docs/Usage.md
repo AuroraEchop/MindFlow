@@ -36,9 +36,12 @@ note as a minimal line edit. Toggle back and your note is still your note.
 
 ## 1. Install
 
-Not in the community plugin browser yet, so install manually.
+**From the community plugin browser (recommended).** In Obsidian, open *Settings →
+Community plugins → Browse*, search for **MindFlow**, press **Install**, then
+**Enable** — that is the whole of it, and Obsidian offers you each new version
+from then on.
 
-**Manual install (recommended):**
+**By hand**, if you would rather have the files yourself:
 
 1. Download `main.js`, `manifest.json` and `styles.css`;
 2. Copy them into your vault:
@@ -49,8 +52,8 @@ Not in the community plugin browser yet, so install manually.
 
 3. Enable **MindFlow** in *Settings → Community plugins*.
 
-If the release page offers `mindflow.zip`, download that and unzip it into
-`.obsidian/plugins/` instead — one download instead of three.
+The release page also offers `mindflow.zip` — download that and unzip it into
+`.obsidian/plugins/` instead, one download instead of three.
 
 **Build from source:**
 
