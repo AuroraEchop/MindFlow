@@ -18,6 +18,23 @@ filenames must match the table below, or the images will not render on GitHub.
 | `search.png`             | 查找栏           | 画布上的查找栏与高亮的匹配卡片          |
 | `export.png`             | 导出            | 导出按钮展开的二级菜单              |
 | `edge-styles.png`        | 连线样式          | 曲线与直角两种连线对比              |
+| `screenshots.png`        | README 截图拼图（英） | 下面六张单图合成的整版，宽 2400px      |
+| `screenshots-zh.png`     | README 截图拼图（中） | 同上，快捷键页换成中文版             |
+
+## 拼图的排法 / The sheet
+
+`screenshots.png` 与 `screenshots-zh.png` 就是把上面六张单图排成一张，README 里只引用这张
+拼图（表格里的图太小，看不清）。顺序：
+
+1. `inline-edit.png` —— 通栏
+2. `annotation.png` + `drag-ghost.png` —— 左右两栏，等高
+3. `search.png` + `shortcuts-settings.png`（中文版用 `shortcuts-settings-zh.png`）—— 左右两栏，等高
+4. `card-styles.png` —— 通栏
+
+画布底色 `#121419`，每张图圆角 16px、1px 描边，下方一行灰色说明文字。
+
+The two sheets are the same six screenshots laid out in one image; the README only
+references the sheet. Edit a single screenshot and the sheet has to be rebuilt.
 
 ## 添加方式 / How to add
 

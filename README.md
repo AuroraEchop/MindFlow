@@ -57,13 +57,7 @@ as a minimal line edit. Toggle back and your note is still your note.
 
 ## Screenshots
 
-| Editing in place | Annotations | Card styles |
-| --- | --- | --- |
-| ![Editing](assets/inline-edit.png) | ![Annotations](assets/annotation.png) | ![Card styles](assets/card-styles.png) |
-
-| Dragging | Shortcuts settings | Find |
-| --- | --- | --- |
-| ![Dragging](assets/drag-ghost.png) | ![Shortcuts](assets/shortcuts-settings.png) | ![Find](assets/search.png) |
+![Editing in place, annotations, card styles, dragging, the shortcuts settings page and the find bar](assets/screenshots.png)
 
 ## Install
 
@@ -146,6 +140,9 @@ npm run lint:obsidian                      # see docs/Development.md §9
 
 **See [docs/Development.md](docs/Development.md) for the architecture, the core
 invariant, and how to add a shortcut, a setting or an export format.**
+
+> **Derived from** [obsidian-mindmap-mode](https://github.com/PHANTOM-Nw/obsidian-mindmap-mode)
+> by PHANTOM-Nw — v1.1.1, MIT licensed.
 
 ## License
 

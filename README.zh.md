@@ -47,13 +47,7 @@
 
 ## 截图
 
-| 就地编辑                            | 注解                           | 卡片样式                            |
-| ------------------------------- | ---------------------------- | ------------------------------- |
-| ![就地编辑](assets/inline-edit.png) | ![注解](assets/annotation.png) | ![卡片样式](assets/card-styles.png) |
-
-| 拖拽预览                           | 快捷键设置                                   | 查找                       |
-| ------------------------------ | --------------------------------------- | ------------------------ |
-| ![拖拽预览](assets/drag-ghost.png) | ![快捷键设置](assets/shortcuts-settings-zh.png) | ![查找](assets/search.png) |
+![就地编辑、注解、卡片样式、拖拽、快捷键设置与查找](assets/screenshots-zh.png)
 
 ## 安装
 
@@ -134,6 +128,9 @@ npm run lint:obsidian                      # 见 docs/开发文档.md §9
 
 **架构、核心不变量，以及如何新增一个快捷键 / 设置项 / 导出格式，见
 [docs/开发文档.md](docs/开发文档.md)。**
+
+> **本项目派生自** [obsidian-mindmap-mode](https://github.com/PHANTOM-Nw/obsidian-mindmap-mode)
+> （作者 PHANTOM-Nw，v1.1.1，MIT 许可）。
 
 ## 许可
 
