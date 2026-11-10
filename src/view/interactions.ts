@@ -245,6 +245,11 @@ export interface MapController {
 	redo(): void;
 	fit(): void;
 	centreOnSelection(): void;
+	/**
+	 * Redraw the map with the selected card as its root, or bring the whole
+	 * map back if it is already drawn that way. The one key does both.
+	 */
+	zoomIntoSubtree(): void;
 
 	/** The keys the map answers to: the defaults with the user's changes on top. */
 	bindings(): ShortcutBindings;
@@ -1484,6 +1489,10 @@ export function performAction(
 		case "zoom-out":
 			ev.preventDefault();
 			controller.canvas.zoomBy(1 / 1.2);
+			return;
+		case "zoom-subtree":
+			ev.preventDefault();
+			controller.zoomIntoSubtree();
 			return;
 		case "centre-selection":
 			ev.preventDefault();

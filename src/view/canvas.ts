@@ -304,6 +304,14 @@ export class Canvas {
 		this.apply();
 	}
 
+	/** Put the camera back where it was, exactly. */
+	restore(scale: number, tx: number, ty: number): void {
+		this.scale = scale;
+		this.tx = tx;
+		this.ty = ty;
+		this.apply();
+	}
+
 	/** Put a point of the content at the centre of the viewport. */
 	centreOn(x: number, y: number): void {
 		const rect = this.viewportRect();

@@ -239,6 +239,10 @@ const TABLE = [
 	{ action: "fit", defaults: ["Mod+0"] },
 	{ action: "zoom-in", defaults: ["Mod+=", "Mod++"] },
 	{ action: "zoom-out", defaults: ["Mod+-"] },
+	// A bare letter rather than another Mod combo: the map has no typing state
+	// outside a card's own editor, so a plain key is free, and `Z` is the one
+	// letter that says what this does. The same key toggles back out.
+	{ action: "zoom-subtree", defaults: ["Z"] },
 	{ action: "centre-selection", defaults: ["Mod+."] },
 ] as const;
 

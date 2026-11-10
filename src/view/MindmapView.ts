@@ -296,6 +296,14 @@ const REMEASURE_ROUNDS = 3;
 const DENSE_NODE_COUNT = 300;
 
 /**
+ * The key of the path row's first step while a zoom is on: not a node, but
+ * the whole map the zoom is holding back. Parsed keys are paths of text, and
+ * text never begins with a control character, so this is a key no card of any
+ * note can hold.
+ */
+const ZOOM_EXIT_KEY = "\u0000zoom";
+
+/**
  * What asked for the work, carried into the timing log so a slow map can be
  * read as "typing is slow" rather than as a list of milliseconds.
  */
@@ -308,6 +316,7 @@ export type PaintReason =
 	| "settings"
 	| "resize"
 	| "setViewData"
+	| "zoom"
 	| "math-remeasure"
 	| "media-remeasure"
 	| "cull"
@@ -676,6 +685,19 @@ export class MindmapView extends TextFileView implements MapController {
 	private tagKeys: Set<string> | null = null;
 	/** The branch being looked at alone, or null for the whole map. */
 	private soloKey: string | null = null;
+	/**
+	 * The card a zoom is standing on, or null when the map shows the whole note.
+	 *
+	 * Kept as both key and id for the same reason a remembered focus is: the key
+	 * survives edits to the card's siblings and the id survives edits to the
+	 * card's own text, and a zoom should survive either.
+	 */
+	private zoomRoot: { key: string; id: string } | null = null;
+	/**
+	 * Where the camera was when the zoom went in, so coming back out is coming
+	 * back to the view the reader left, not to a re-framed map.
+	 */
+	private savedCamera: { scale: number; tx: number; ty: number } | null = null;
 	/** The replace field's contents, remembered on the same terms. */
 	private searchReplacement = "";
 	/** The current match list, in document order. */
@@ -1216,13 +1238,21 @@ export class MindmapView extends TextFileView implements MapController {
 		if (added === 0 || text === this.data) return;
 		this.apply({ text, focusLine, ok: true });
 
-		// The outline comes with it. A reader who dragged a note here asked to
-		// read it, and a card that says nothing but `[[Note]]` hands that back
-		// as one more thing to press. Only a link into the vault has an outline
-		// to pull in, which is the same question `cardLink` answers.
+		// What came with it comes with it. A reader who dragged a note here
+		// asked to read it, and a card that says nothing but `[[Note]]` hands
+		// that back as one more thing to press -- so the outline is pulled in.
+		//
+		// An address has no outline. What it has is the site card: the site's
+		// name, the address, and the button that hands it to the browser, which
+		// is the whole of what a reader who dragged a link asked to see. It is
+		// opened rather than left shut, and it is the same switch the card's own
+		// title line turns.
 		const node = this.findByLine(focusLine);
 		const link = node === null ? null : cardLink(node.text);
-		if (node !== null && link !== null && !link.external) this.toggleEmbed(node.id);
+		if (node !== null && link !== null) {
+			if (link.external) this.toggleCardPreview(node.id);
+			else this.toggleEmbed(node.id);
+		}
 	}
 
 	// --- a pasted picture; see `pasteImage.ts` --------------------------------
@@ -2546,7 +2576,11 @@ export class MindmapView extends TextFileView implements MapController {
 		this.bodyNodes.clear();
 
 		// Build the tree of visible nodes; a collapsed node contributes no children.
-		const rootLayout = createLayoutNode(parsed.root, null, 0);
+		// A zoom redraws the same note from the card it is standing on: the tree is
+		// the one the parser left, so only the starting point changes, and every
+		// fold, edit and gesture below it keeps working on the same lines.
+		const start = this.zoomRootNode(parsed) ?? parsed.root;
+		const rootLayout = createLayoutNode(start, null, 0);
 		const visible: LayoutNode[] = [];
 		const build = (node: MindNode, layout: LayoutNode): void => {
 			visible.push(layout);
@@ -2557,7 +2591,7 @@ export class MindmapView extends TextFileView implements MapController {
 				build(child, childLayout);
 			}
 		};
-		build(parsed.root, rootLayout);
+		build(start, rootLayout);
 
 		// Fixed by the note, not by what happens to be unfolded, so the balanced
 		// layout keeps every branch on the side it started on.
@@ -4936,6 +4970,74 @@ export class MindmapView extends TextFileView implements MapController {
 		this.canvas.fit(width, height);
 	}
 
+	/**
+	 * Stand on the selected card and lay the map out from it, or step back off.
+	 *
+	 * The one key does both, which is why this is a toggle and not a pair: a
+	 * reader already holding a card in their hand does not want to learn a
+	 * second key to put the map back. Nothing below the chosen card changes --
+	 * the note is the note, the folds are the folds -- and nothing about the
+	 * zoom reaches the file, the undo stack, or the remembered state; it is a
+	 * camera move with a layout under it, nothing more.
+	 */
+	zoomIntoSubtree(): void {
+		if (this.zoomRoot !== null) {
+			this.zoomExit();
+			return;
+		}
+		const parsed = this.parsed;
+		const node = this.selectedNode();
+		// Nothing held, or the root itself: the whole map is already the view
+		// that would be drawn, so there is nothing to stand on.
+		if (!parsed || !node || node === parsed.root) return;
+		this.zoomRoot = { key: node.key, id: node.id };
+		const m = this.canvas.metrics();
+		this.savedCamera = { scale: m.scale, tx: m.tx, ty: m.ty };
+		// The zoom's first paint owes the camera the subtree, not a restored
+		// focus -- a centre-on-card here would fight the fit the reader asked for.
+		this.restoreFocusKey = null;
+		this.needsFit = true;
+		this.paint("zoom");
+	}
+
+	/** Take the zoom off and put the camera back where the reader left it. */
+	private zoomExit(): void {
+		const camera = this.savedCamera;
+		this.zoomRoot = null;
+		this.savedCamera = null;
+		// No anchor is set for a zoom, so this paint leaves the camera alone and
+		// the camera below is the one that was saved going in.
+		this.paint("zoom");
+		if (camera !== null) this.canvas.restore(camera.scale, camera.tx, camera.ty);
+	}
+
+	/**
+	 * The node a zoom is standing on, or null when the whole note is showing.
+	 *
+	 * Asked on every paint, and self-healing: a card whose own text was
+	 * rewritten is found again by id, a card whose siblings were rewritten is
+	 * found again by key, and a card deleted while the zoom was on ends the
+	 * zoom rather than leaving the map drawn from a node that is not there.
+	 */
+	private zoomRootNode(parsed: ParsedDoc): MindNode | null {
+		const zoom = this.zoomRoot;
+		if (zoom === null) return null;
+		const node =
+			this.nodeForKey(zoom.key) ?? parsed.byId.get(zoom.id) ?? null;
+		if (node === null) this.zoomRoot = null;
+		return node;
+	}
+
+	/** Whether a node of the parsed tree is drawn by the zoom that is on. */
+	private inZoomSubtree(node: MindNode, parsed: ParsedDoc): boolean {
+		const zoom = this.zoomRootNode(parsed);
+		if (zoom === null) return true;
+		for (let at: MindNode | null = node; at; at = at.parent) {
+			if (at === zoom) return true;
+		}
+		return false;
+	}
+
 	centreOnSelection(): void {
 		const id = this.selectedId();
 		const layout = id ? this.layoutFor(id) : null;
@@ -5260,14 +5362,29 @@ export class MindmapView extends TextFileView implements MapController {
 		}
 		trail.place(home.row, home.before);
 
+		const parsed = this.parsed;
 		const steps = crumbTrail(this.selectedNode(), t("view.node.placeholder"));
+		// While a zoom is on, the path starts one step before the root: the
+		// whole map is where the row began, and the first step is the way back
+		// to it. Its key is one no parsed node can have.
+		const zoomed = this.zoomRoot !== null && parsed !== null;
+		if (zoomed) steps.unshift({ key: ZOOM_EXIT_KEY, text: t("view.zoom.exit") });
 		if (!isPath(steps)) {
 			trail.hide();
 			return;
 		}
 		trail.show(steps, (key) => {
+			if (key === ZOOM_EXIT_KEY) {
+				this.zoomExit();
+				return;
+			}
 			const there = this.nodeForKey(key);
 			if (!there) return;
+			// A step above the zoomed branch names a card this map is not
+			// drawing; taking the zoom off is what puts it back on.
+			if (zoomed && parsed !== null && !this.inZoomSubtree(there, parsed)) {
+				this.zoomExit();
+			}
 			this.select(there.id);
 			this.revealSelection();
 		});

@@ -957,6 +957,20 @@ test("Shift+Enter reaches the text block action", () => {
 	assert.deepEqual(h.calls, ["addBlock(n1)"]);
 });
 
+test("Z on its own zooms into the selected branch, Mod+Z still undoes", () => {
+	const h = harness();
+	h.press(keyEvent("z"));
+	assert.deepEqual(h.calls, ["zoomIntoSubtree()"]);
+});
+
+test("a plain z with a modifier is not the zoom's", () => {
+	const h = harness();
+	// Mod+Z is undo's, and the zoom must not answer a chord it was never bound
+	// to -- the resolver gives the press to whichever action owns the combo.
+	h.press({ ...keyEvent("z"), ctrlKey: true });
+	assert.equal(h.calls.includes("zoomIntoSubtree()"), false);
+});
+
 /** A key event as `comboFromEvent` reads one: the key, and the four flags. */
 function keyEvent(key: string): Record<string, unknown> {
 	return {

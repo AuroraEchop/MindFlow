@@ -306,6 +306,7 @@ test("every action has an entry, and the entry is findable", () => {
 		fit: true,
 		"zoom-in": true,
 		"zoom-out": true,
+		"zoom-subtree": true,
 		"centre-selection": true,
 	};
 	const actions = Object.keys(covered) as ShortcutAction[];

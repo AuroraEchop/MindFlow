@@ -89,6 +89,9 @@ const EN = {
 	"shortcut.zoom-in.description": "Zoom the canvas in one step.",
 	"shortcut.zoom-out.name": "Zoom out",
 	"shortcut.zoom-out.description": "Zoom the canvas out one step.",
+	"shortcut.zoom-subtree.name": "Zoom into the branch",
+	"shortcut.zoom-subtree.description":
+		"Lay the map out from the selected card as if it were the root, with the rest of the map put away. The same key, or the first step of the path row, brings the whole map back.",
 	"shortcut.centre-selection.name": "Centre on the selection",
 	"shortcut.centre-selection.description":
 		"Bring the selected node to the middle of the viewport.",
@@ -249,6 +252,7 @@ const EN = {
 	"view.tool.collapseAll": "Collapse all",
 	"view.tool.foldLevel": "Open to level {level}",
 	"view.breadcrumb": "Path to this card",
+	"view.zoom.exit": "Whole map",
 	"view.tool.shortcuts": "Keyboard shortcuts",
 	"view.tool.export": "Export",
 	"view.tool.settings": "Settings",
@@ -502,6 +506,9 @@ const ZH: Record<I18nKey, string> = {
 	"shortcut.zoom-in.description": "把画布放大一档。",
 	"shortcut.zoom-out.name": "缩小",
 	"shortcut.zoom-out.description": "把画布缩小一档。",
+	"shortcut.zoom-subtree.name": "聚焦分支",
+	"shortcut.zoom-subtree.description":
+		"以选中的卡片为根重新排布导图，其余分支暂时收起。再按一次，或点路径行的第一步，即可恢复整张导图。",
 	"shortcut.centre-selection.name": "居中显示选中节点",
 	"shortcut.centre-selection.description": "把选中节点移到视口正中央。",
 
@@ -659,6 +666,7 @@ const ZH: Record<I18nKey, string> = {
 	"view.tool.collapseAll": "全部折叠",
 	"view.tool.foldLevel": "展开到第 {level} 层",
 	"view.breadcrumb": "这张卡片的路径",
+	"view.zoom.exit": "整张导图",
 	"view.tool.shortcuts": "快捷键",
 	"view.tool.export": "导出",
 	"view.tool.settings": "设置",

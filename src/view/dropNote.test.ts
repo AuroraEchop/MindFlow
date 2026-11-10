@@ -22,15 +22,15 @@ test("a path or a file name becomes the wikilink the note would have written", (
 });
 
 test("what is not a note is refused rather than turned into a dead link", () => {
-	// A picture, a document and a web address are all things a link card cannot
-	// open, so none of them may become one.
+	// A picture, a document and an address the map cannot open are all things
+	// a link card has nothing to show for, so none of them may become one.
 	assert.equal(linkTextFromDrop("hero.png"), null);
 	assert.equal(linkTextFromDrop("assets/图 1.jpeg"), null);
 	assert.equal(linkTextFromDrop("paper.pdf"), null);
-	assert.equal(linkTextFromDrop("https://obsidian.md"), null);
-	assert.equal(linkTextFromDrop("https://example.com/notes/a.md"), null);
 	assert.equal(linkTextFromDrop("obsidian://open?vault=v&file=note"), null);
 	assert.equal(linkTextFromDrop("mailto:someone@example.com"), null);
+	assert.equal(linkTextFromDrop("javascript:alert(1)"), null);
+	assert.equal(linkTextFromDrop("file:///C:/notes/a.md"), null);
 	// A drive letter is not a scheme, and the path behind it is still a path.
 	assert.equal(linkTextFromDrop("D:/notes/9.24 Day9.md"), "[[9.24 Day9]]");
 	assert.equal(linkTextFromDrop("record.mp3"), null);
@@ -41,13 +41,68 @@ test("what is not a note is refused rather than turned into a dead link", () => 
 	assert.equal(linkTextFromDrop(""), null);
 	assert.equal(linkTextFromDrop("   "), null);
 	assert.equal(linkTextFromDrop(".md"), null);
+	// A sentence that mentions an address is a sentence, not a link.
+	assert.equal(linkTextFromDrop("看看这个 https://vuejs.org/guide 挺好"), null);
 });
 
-test("a payload is one note per line, without repeats", () => {
+test("a web address becomes a link card named after its site", () => {
+	assert.equal(linkTextFromDrop("https://obsidian.md"), "[obsidian.md](https://obsidian.md)");
+	// An address ending in `.md` is a page, not a note: `[[obsidian]]` here
+	// would be a link to a note that does not exist.
+	assert.equal(
+		linkTextFromDrop("https://example.com/notes/a.md"),
+		"[example.com](https://example.com/notes/a.md)",
+	);
+	// The `www.` is the site's address rather than its name.
+	assert.equal(
+		linkTextFromDrop("http://www.example.com/a?b=1"),
+		"[example.com](http://www.example.com/a?b=1)",
+	);
+	// An address the card's own syntax cannot hold is refused, not written
+	// wrong: `[label](https://a.dev/x_(y))` stops at the first bracket.
+	assert.equal(linkTextFromDrop("https://a.dev/x_(y)"), null);
+	assert.equal(linkTextFromDrop("https://a.dev/a b"), null);
+});
+
+test("a dragged link keeps the words the drag called it by", () => {
+	// Dragging a word in a page hands over that word as the plain text, and it
+	// is a better name for the card than the host is.
+	assert.equal(
+		linkTextFromDrop("https://vuejs.org/guide/introduction.html", "Vue 官方文档"),
+		"[Vue 官方文档](https://vuejs.org/guide/introduction.html)",
+	);
+	// Line breaks and stray brackets in a label would break the link.
+	assert.equal(
+		linkTextFromDrop("https://a.dev", "a\nb [c]"),
+		"[a b c](https://a.dev)",
+	);
+	// A label that is the address itself says nothing: the site is used.
+	assert.equal(
+		linkTextFromDrop("https://a.dev/x", "https://a.dev/x"),
+		"[a.dev](https://a.dev/x)",
+	);
+});
+
+test("a payload is one item per line, without repeats", () => {
 	assert.deepEqual(linksFromDrop("a.md\nb.md\n"), ["[[a]]", "[[b]]"]);
 	assert.deepEqual(linksFromDrop("daily/a.md\r\ndaily/a.md"), ["[[a]]"]);
 	assert.deepEqual(linksFromDrop("[[a]]\na.md\n\nhero.png\n"), ["[[a]]"]);
-	assert.deepEqual(linksFromDrop("hero.png\nhttps://x.dev"), []);
+	assert.deepEqual(linksFromDrop("hero.png\nhttps://x.dev"), ["[x.dev](https://x.dev)"]);
+});
+
+test("a link drag's addresses and labels are paired line for line", () => {
+	// What a browser writes: `text/uri-list` for the addresses, `text/plain`
+	// for the words they were called by.
+	assert.deepEqual(
+		linksFromDrop("https://a.dev/1\nhttps://b.dev/2", "A 站点\nB 站点"),
+		["[A 站点](https://a.dev/1)", "[B 站点](https://b.dev/2)"],
+	);
+	// Not aligned is not paired: an address dragged out of the address bar has
+	// no label, and whatever else the payload held is not its name.
+	assert.deepEqual(linksFromDrop("https://a.dev/1\nhttps://b.dev/2", "只有一个标题"), [
+		"[a.dev](https://a.dev/1)",
+		"[b.dev](https://b.dev/2)",
+	]);
 });
 
 test("a dragged note's name is written as a link, never as itself", () => {
