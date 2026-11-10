@@ -94,6 +94,7 @@ hotkey to make it feel like switching reading mode.
 | `Shift`+`Enter` | Add a text block |
 | `Delete` | Delete the node and its children |
 | `Space` | Fold / unfold |
+| `Z` | Zoom into the selected branch, and back out |
 | `Ctrl`/`Cmd`+`Z` | Undo |
 | `Ctrl`/`Cmd`+`F` | Find in the map |
 

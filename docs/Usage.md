@@ -397,7 +397,7 @@ makes is one you asked for by pasting a picture's address onto a card (see §9).
 `Ctrl`/`Cmd`+click a link inside a note's prose and it still opens the address in
 your browser, as it always did.
 
-### Dropping a note onto the map
+### Dropping a note or a link onto the map
 
 Drag a `.md` out of the file list and drop it over the map: a `[[Note]]` card appears
 **under the card it landed on**, the whole drag counting as **one undo step** (on empty
@@ -409,8 +409,16 @@ text, which is what makes the rest work: pressing the title line shows the previ
 folds the outline out, and `Ctrl`/`Cmd`+click goes there. The card the pointer is over
 is highlighted while you drag — that is where the note will land.
 
-Several notes make several lines. **Only `.md`** — a picture, a PDF or a web address does
-not become a link card. A note that does not exist yet is fine: the card says so.
+**A link dragged out of a browser becomes a link card too.** Drag a link from a page, or
+the address out of the address bar, and a `[what it was called](https://…)` card appears
+where it landed — named by the link's own words, or by the site (`www.` dropped) when the
+drag carried none. It arrives with its **site card already open**: the site's name, the
+full address and a button that hands it to the browser. It is a link like any other card,
+so rewriting it, dragging it, deleting it and undoing that all work as usual.
+
+Several notes make several lines. **Only `.md`** is read as a note — a picture or a PDF
+does not become a link card — and only `http`/`https` is read as an address (`obsidian://`
+and `mailto:` are refused). A note that does not exist yet is fine: the card says so.
 
 ### Dragging
 
@@ -472,6 +480,27 @@ blank space moves the map as well.
 mouse and it is the fold it has always been; press the left button at any point
 during the hold and that press is a pan, so nothing folds.
 
+### Zooming into a branch
+
+**Select a card and press `Z`.** The map lays itself out from that card as if it
+were the root, and every branch that is not under it is put away — a few hundred
+cards become one branch you can actually read. Press `Z` again and the whole map
+comes back exactly as it was, camera included.
+
+It is a view, not a change:
+
+- **The note is not touched.** Editing, adding, folding, dragging and undo all
+  work the way they always did, on the same lines — whatever you do under the
+  zoomed root is written to the note the moment you do it;
+- **The header's path row** starts with a **Whole map** step while a zoom is on.
+  Clicking it steps back out; clicking any step above the zoomed branch does the
+  same, and lands on that card;
+- **If the zoomed card is deleted or rewritten past finding, the zoom quietly
+  ends** rather than leaving the map drawn from a card that is not there.
+
+Nothing about a zoom is written to the file or remembered between sessions — it
+is a way of standing, not a state of the note.
+
 ---
 
 ## 5. Shortcuts reference
@@ -508,6 +537,7 @@ Every key below is a **default**. Each one can be changed in the settings.
 | `Ctrl`/`Cmd`+`0` | Fit the map to the window |
 | `Ctrl`/`Cmd`+`=` or `Ctrl`/`Cmd`+`+` | Zoom in |
 | `Ctrl`/`Cmd`+`-` | Zoom out |
+| `Z` | Zoom into the branch — lay the map out from the selected card as its root, and put the rest of the map away. The same key, or the first step of the path row in the header, brings the whole map back |
 | `Ctrl`/`Cmd`+`.` | Centre on the selection |
 | `Ctrl`/`Cmd`+`F` | Find in the map |
 | `Ctrl`/`Cmd`+`H` | Find and replace in the map |
@@ -1188,7 +1218,9 @@ let go: not a column of them, and not so few that one goes unnoticed.
 - **A dropped note has to be a `.md` inside the vault.** Dropping a file from
   outside the vault does not import it — the plugin writes a link rather than
   moving your files around. The link takes the file's name, without the `.md` and
-  without its folders.
+  without its folders. A dropped web link is not covered by this: the address is
+  written into the card and the card opens in your browser, so **dropping a link
+  does not go to the network either** — the plugin only keeps the address you gave it.
 - **A preview can stop in the middle of a block.** The line budget is spent on
   content lines, and a sample or a table longer than what is left is drawn as far
   as the budget reached rather than being left out whole. The count underneath
