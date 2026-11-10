@@ -11,6 +11,16 @@ line. The `<br>` is deliberate — a plain newline renders as a line break in
 release notes but collapses to a space when this file is viewed on GitHub, and
 the entry has to read correctly in both.
 
+## [2.0.4] - 2026-11-10
+
+### 折叠与导航 / Folding and navigation
+
+- **`Z` 聚焦一支分支。** 选中卡片按 `Z`，导图以它为根重新排布、其余分支收起，几百张卡的图变成读得过来的一支；再按一次 `Z`，或点路径行开头新多出的「整张导图」一步，整张图连同原来的视角一起回来。它只是看的方式：笔记、折叠、撤销栈一个字都不动，也不跨会话记住；聚焦的卡片被删掉或改得认不出来时，聚焦自己结束。<br>**`Z` zooms into a branch.** With a card held, the map lays itself out from that card as its root and puts every other branch away -- a few hundred cards become one branch you can actually read. The same key again, or the **Whole map** step the path row now starts with, brings the map back with its camera. It is a way of standing, nothing more: the note, the folds and the undo stack are untouched, nothing is remembered between sessions, and a zoomed card that is deleted or rewritten past finding ends the zoom by itself.
+
+### 卡片与块 / Cards and blocks
+
+- **网页链接可以直接拖进导图。** 从浏览器拖一个链接、或者把地址栏里的网址拖到卡片上，落点下面就多一张外部链接卡片：名字用你拖的那个链接的文字，地址栏拖来的用站名（`www.` 去掉），卡片直接把站点卡片展开 —— 站名、完整地址、在浏览器打开的按钮。和笔记卡片一样是链接，改名、拖动、删除、撤销都照常；一次拖动算一步撤销，落空白处挂到根节点下。只认 `http`/`https`，`obsidian://`、`mailto:` 仍不收。<br>**A web link can be dragged straight onto the map.** Drag a link out of a page, or the address out of the address bar, and a link card appears where it landed: named by the link's own words, or by the site (`www.` dropped) when the drag carried none, with its **site card already open** -- the site's name, the full address and a button that hands it to the browser. It is a link like any other card, so rewriting it, dragging it, deleting it and undoing that all work as usual; the whole drag is one undo step, and empty canvas puts it under the root. Only `http`/`https` are taken -- `obsidian://` and `mailto:` are still refused.
+
 ## [2.0.3] - 2026-10-17
 
 本版主线：**链接卡片就地展开**、**查找把命中的字标出来**，以及**把图片直接贴到卡片上**。<br>Three things lead this release: **link cards that open where they stand**, **finds that mark the words they matched**, and **pictures pasted straight onto a card**.
